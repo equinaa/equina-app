@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Equina",
+    "slug": "equina",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "equina",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.equina.mobile",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "com.equina.mobile",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#161512"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

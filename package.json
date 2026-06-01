@@ -1,0 +1,35 @@
+{
+  "name": "equina-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "build": "expo export --platform web",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx tests/core-flows.test.ts",
+    "seed:print": "tsx src/seed/seed-data.ts"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "^55.0.11",
+    "expo": "~55.0.26",
+    "expo-dev-client": "~55.0.35",
+    "lucide-react-native": "^1.14.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-svg": "15.15.3",
+    "react-native-web": "^0.21.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.14",
+    "playwright": "^1.59.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

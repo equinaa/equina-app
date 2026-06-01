@@ -1,0 +1,4 @@
+.vercel
+.expo/
+dist/
+node_modules/
