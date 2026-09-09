@@ -8,6 +8,7 @@ import { EdgeClient } from "./edge-client";
 import { MarketplaceRepository } from "./marketplace-repository";
 import { NotificationRepository } from "./notification-repository";
 import { RecordsRepository } from "./records-repository";
+import { RideRepository } from "./ride-repository";
 import { getSupabaseClient } from "./supabase-client";
 
 export class EquinaBackend {
@@ -15,6 +16,7 @@ export class EquinaBackend {
   readonly auth: AuthRepository;
   readonly coach: CoachRepository;
   readonly records: RecordsRepository;
+  readonly rides: RideRepository;
   readonly club: ClubRepository;
   readonly marketplace: MarketplaceRepository;
   readonly notifications: NotificationRepository;
@@ -26,6 +28,7 @@ export class EquinaBackend {
     this.auth = new AuthRepository(client);
     this.coach = new CoachRepository(client);
     this.records = new RecordsRepository(client);
+    this.rides = new RideRepository(client);
     this.club = new ClubRepository(client);
     this.marketplace = new MarketplaceRepository(client);
     this.notifications = new NotificationRepository(client);
