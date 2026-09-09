@@ -8,7 +8,7 @@ native device registration, redacted push delivery, export, and scheduled accoun
 deletion. It also preserves the earlier Horse Records, Club, listings, checkout,
 orders, disputes, refunds, moderation, payout, and storage-cleanup foundation.
 
-The repository is linked to Supabase project `vdcrllzyzbdjonotrujb` in Frankfurt.
+The repository is linked to Supabase project `mvdxohyayriywbcknulg` in Frankfurt.
 All 34 migrations are applied and remotely lint clean. Six functions are deployed:
 capabilities, the four Horse/Records upload/delete boundaries, and Storage cleanup.
 Storage cleanup runs every five minutes. One named internal user receives Horse and

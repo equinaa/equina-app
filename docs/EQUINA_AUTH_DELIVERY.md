@@ -32,7 +32,7 @@
 
 1. Create and verify Equina's OAuth consent brand in Google Auth Platform.
 2. Create a Web OAuth client and use
-   `https://vdcrllzyzbdjonotrujb.supabase.co/auth/v1/callback` as its authorized redirect URI.
+   `https://mvdxohyayriywbcknulg.supabase.co/auth/v1/callback` as its authorized redirect URI.
 3. Add the production web origin and `http://localhost:8081` while developing.
 4. Configure and enable the Google provider in Supabase Auth.
 5. Keep `equina://auth/callback`, localhost, and the production URL in Supabase redirect URLs.

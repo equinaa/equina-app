@@ -41,7 +41,7 @@ multi-user hosted isolation, and monitoring/alerts.
   boundaries, and Storage cleanup.
 - Storage cleanup runs every five minutes with its own Vault/Edge secret.
 - One internal user has Horse and Records overrides for 30 days.
-- The current client is deployed to `https://equina-five.vercel.app` with only
+- The current client is deployed to `https://equina-ten.vercel.app` with only
   publishable Supabase configuration; its production bundle has no server-secret
   marker.
 - Club, messaging, listing creation, Ralf, push, account operations, and checkout

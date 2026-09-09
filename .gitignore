@@ -6,4 +6,5 @@
 dist/
 node_modules/
 supabase/functions/node_modules/
+supabase/.temp/
 .DS_Store

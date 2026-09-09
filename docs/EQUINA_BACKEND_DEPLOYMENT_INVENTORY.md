@@ -2,7 +2,16 @@
 
 Inventory date: 2026-07-29
 
-Linked environment: `vdcrllzyzbdjonotrujb` (Frankfurt). This is currently the
+> **Re-provisioning note (2026-09-09).** The original environment
+> (`vdcrllzyzbdjonotrujb`) was deleted and rebuilt as `mvdxohyayriywbcknulg`
+> (Frankfurt) from the same 34 migrations; the web client moved from
+> `equina-five.vercel.app` to `equina-ten.vercel.app`. The database, the six
+> Edge Functions, and the all-flags-off posture below were reproduced and
+> verified on the new project. Two items are **not** yet true of it: the
+> `equina-storage-cleanup` cron job has not been scheduled, and the named
+> internal user override has not been re-applied.
+
+Linked environment: `mvdxohyayriywbcknulg` (Frankfurt). This is currently the
 only hosted environment and must not be treated as both staging and production.
 
 ## Database
@@ -72,7 +81,7 @@ internal client build also enables the two compile-time switches.
 
 | Item | State |
 | --- | --- |
-| Production alias | `https://equina-five.vercel.app` |
+| Production alias | `https://equina-ten.vercel.app` |
 | Deployment | `dpl_HkDJ3uWi5J3E3JqHPDLx5GDkVxHa`, Ready |
 | Supabase client config | URL and publishable key only |
 | Horse/Records compile switches | true; server named-user gate still required |
