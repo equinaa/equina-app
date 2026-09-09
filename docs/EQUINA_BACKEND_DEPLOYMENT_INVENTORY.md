@@ -7,9 +7,11 @@ Inventory date: 2026-07-29
 > (Frankfurt) from the same 34 migrations; the web client moved from
 > `equina-five.vercel.app` to `equina-ten.vercel.app`. The database, the six
 > Edge Functions, and the all-flags-off posture below were reproduced and
-> verified on the new project. Two items are **not** yet true of it: the
-> `equina-storage-cleanup` cron job has not been scheduled, and the named
-> internal user override has not been re-applied.
+> verified on the new project, and `equina-storage-cleanup` is scheduled again
+> — now from a migration rather than by hand, so the next rebuild keeps it.
+> One item is **not** yet true of it: the named internal user override has not
+> been re-applied. The capability response below also gained `rideLogging`,
+> which did not exist on the original environment.
 
 Linked environment: `mvdxohyayriywbcknulg` (Frankfurt). This is currently the
 only hosted environment and must not be treated as both staging and production.
@@ -57,7 +59,7 @@ The unauthenticated remote response is:
 
 ```json
 {
-  "version": "2026-07-29",
+  "version": "2026-09-09",
   "capabilities": {
     "auth": true,
     "accountSettings": false,
@@ -65,6 +67,7 @@ The unauthenticated remote response is:
     "pushNotifications": false,
     "records": false,
     "horseManagement": false,
+    "rideLogging": false,
     "clubPublishing": false,
     "clubInteractions": false,
     "listingCreation": false,

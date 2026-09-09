@@ -95,9 +95,9 @@ This layer is an emergency off switch. It exists so a bad database rollout canno
 | `clubPublishing` | `club_publishing` | moderation URL + token + automation secret |
 | `listingCreation` | `shop_listing_creation` | moderation URL + token + automation secret |
 | `checkout` | `shop_transactions` | Stripe key + webhook secret + terms version + Connect return/refresh URLs |
-| `records` / `horseManagement` / `clubInteractions` / `messaging` | flag only | — |
+| `records` / `horseManagement` / `rideLogging` / `clubInteractions` / `messaging` | flag only | — |
 
-The consequence: turning on a database flag for a capability whose provider is unconfigured changes nothing. This is why the current remote response returns `auth: true` and ten `false` values despite substantial deployed code.
+The consequence: turning on a database flag for a capability whose provider is unconfigured changes nothing. This is why the current remote response returns `auth: true` and eleven `false` values despite substantial deployed code.
 
 The dev fallback for `coachChat` is deliberately constrained to `SUPABASE_URL` containing `127.0.0.1` or `localhost`, so it cannot activate against a hosted project.
 
