@@ -7,6 +7,7 @@ export type BackendCapabilities = {
   pushNotifications: boolean;
   records: boolean;
   horseManagement: boolean;
+  rideLogging: boolean;
   clubPublishing: boolean;
   clubInteractions: boolean;
   listingCreation: boolean;

@@ -120,6 +120,7 @@ import {
   type RideRecommendation,
   type RideSession
 } from "./features/ride/RideExperience";
+import { useRideJournal } from "./features/ride/useRideJournal";
 import { createSeededEquinaApi } from "./seed/seed-data";
 import { getFitScreening, type HorseFitContext } from "./product/product-truth";
 import { MotionPressable } from "./ui/motion/MotionPressable";
@@ -940,7 +941,9 @@ function EquinaApp() {
   const [sharedRide, setSharedRide] = useState(false);
   const [lastRideRecapVisible, setLastRideRecapVisible] = useState(false);
   const [dailyMood, setDailyMood] = useState<MoodOption>("Focused");
-  const [lastRide, setLastRide] = useState<RideSession | null>(null);
+  // Kept as the fallback for demo mode and for accounts where ride_logging is
+  // still off. When the capability is on, the journal below is the source.
+  const [localLastRide, setLocalLastRide] = useState<RideSession | null>(null);
   const [focusStarted, setFocusStarted] = useState(false);
   const [focusProgress, setFocusProgress] = useState(64);
   const [coachDiscipline, setCoachDiscipline] = useState<CoachDiscipline>(defaultCoachDiscipline);
@@ -1003,7 +1006,7 @@ function EquinaApp() {
       await clearOnboardingDraft();
       await equinaSession.signOut();
       setCoachMessages([]);
-      setLastRide(null);
+      setLocalLastRide(null);
       setAccountCreated(false);
       setOtpVisible(false);
       setAuthError("");
@@ -1037,6 +1040,17 @@ function EquinaApp() {
       equinaSession.capabilities.records,
     onPersist: equinaSession.refreshAccount
   });
+  const ridePersistence =
+    accountMode === "connected" &&
+    equinaSession.phase === "authenticated" &&
+    equinaSession.capabilities.rideLogging;
+  const rideJournal = useRideJournal({
+    backend: equinaSession.backend,
+    enabled: ridePersistence
+  });
+  // While ride_logging is off the recap still works, it just does not outlive
+  // the session. That difference is stated in the copy rather than hidden.
+  const lastRide = ridePersistence ? rideJournal.lastRide : localLastRide;
   const connectedCatalog = useConnectedShopCatalog({
     backend: equinaSession.backend,
     enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
@@ -1286,17 +1300,42 @@ function EquinaApp() {
 
   const finishRide = (session: RideCompletion) => {
     setRideActive(false);
-    setLastRide({ ...session, mood: dailyMood });
+    setLocalLastRide({ ...session, mood: dailyMood });
     setCareLogged(false);
     setSharedRide(false);
     setSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 10));
     setLastRideRecapVisible(true);
-    refresh(
-      onboardingHasHorse
-        ? `Ride captured for this preview. Add how ${primaryHorseName} felt, then choose the next useful step.`
-        : "Ride captured for this preview. Add how it felt, then choose the next useful step."
-    );
+
+    if (!ridePersistence) {
+      refresh(
+        onboardingHasHorse
+          ? `Ride captured for this preview. Add how ${primaryHorseName} felt, then choose the next useful step.`
+          : "Ride captured for this preview. Add how it felt, then choose the next useful step."
+      );
+      return;
+    }
+
+    // The recap is shown immediately from local state and reconciled once the
+    // write lands, so a slow network never blocks the rider's own summary.
+    void rideJournal
+      .logRide({
+        session,
+        mood: dailyMood,
+        horseId: horseRecords.selectedHorseId || undefined
+      })
+      .then(() => {
+        refresh(
+          onboardingHasHorse
+            ? `Ride saved. Add how ${primaryHorseName} felt, then choose the next useful step.`
+            : "Ride saved. Add how it felt, then choose the next useful step."
+        );
+      })
+      .catch((saveError: unknown) => {
+        refresh(saveError instanceof Error
+          ? saveError.message
+          : "The ride could not be saved. It is still shown here for this session.");
+      });
   };
 
   const cancelRide = () => {
@@ -1373,7 +1412,16 @@ function EquinaApp() {
 
   const updateDailyMood = (mood: MoodOption) => {
     setDailyMood(mood);
-    setLastRide((current) => current ? { ...current, mood } : current);
+    setLocalLastRide((current) => current ? { ...current, mood } : current);
+    // The check-in is an edit to the stored ride, not a separate record. Without
+    // this the recap would show one value and the journal another.
+    if (ridePersistence && rideJournal.latestEntry) {
+      void rideJournal
+        .updateRide(rideJournal.latestEntry.id, { mood })
+        .catch((saveError: unknown) => {
+          refresh(saveError instanceof Error ? saveError.message : "The check-in could not be saved.");
+        });
+    }
     refresh(
       onboardingHasHorse
         ? `${primaryHorseName} check-in saved: ${mood.toLowerCase()}.`
@@ -1572,7 +1620,7 @@ function EquinaApp() {
     const starterLesson = recommendedLessonFor(riderContext, starterFocus);
     setAccountCreated(true);
     setTab("home");
-    setLastRide(null);
+    setLocalLastRide(null);
     setSharedRide(false);
     setCareLogged(false);
     setCoachDiscipline(onboardingDiscipline);
@@ -1835,7 +1883,7 @@ function EquinaApp() {
         text: "I have Ilinca's intermediate jumping profile and Ralfy's recent ride notes. We can plan the next useful session."
       }
     ]);
-    setLastRide(null);
+    setLocalLastRide(null);
     setSharedRide(false);
     setCareLogged(false);
     setLastRideRecapVisible(false);
