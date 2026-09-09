@@ -6,15 +6,40 @@
     "orientation": "portrait",
     "scheme": "equina",
     "userInterfaceStyle": "dark",
-    "assetBundlePatterns": ["**/*"],
+    "extra": {
+      "eas": {
+        "projectId": "e42e13a7-0029-41ca-9d7e-3bb6af63a8a1"
+      }
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a photo for your horse profile in Equina.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "expo-video",
+      "expo-asset",
+      "expo-secure-store",
+      "expo-notifications",
+      "expo-web-browser",
+      "expo-apple-authentication"
+    ],
     "ios": {
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.equina.mobile",
       "buildNumber": "1"
     },
     "android": {
       "package": "com.equina.mobile",
       "versionCode": 1,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#161512"
       }

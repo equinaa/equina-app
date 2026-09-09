@@ -2,8 +2,8 @@ import { createEquinaApi } from "../api/equina-api";
 
 const horseHero = "https://images.pexels.com/photos/1996333/pexels-photo-1996333.jpeg?auto=compress&cs=tinysrgb&w=1200";
 const tackDetail = "https://images.pexels.com/photos/5087997/pexels-photo-5087997.jpeg?auto=compress&cs=tinysrgb&w=1200";
-const saddleOnHorse = "https://images.pexels.com/photos/10263545/pexels-photo-10263545.jpeg?auto=compress&cs=tinysrgb&w=1200";
-const saddleDetail = "https://images.pexels.com/photos/12408406/pexels-photo-12408406.jpeg?auto=compress&cs=tinysrgb&w=1200";
+const saddleOnHorse = "https://images.pexels.com/photos/7882504/pexels-photo-7882504.jpeg?auto=compress&cs=tinysrgb&w=1200";
+const saddleDetail = "https://images.pexels.com/photos/7883342/pexels-photo-7883342.jpeg?auto=compress&cs=tinysrgb&w=1200";
 const saddleFence = "https://images.pexels.com/photos/7883480/pexels-photo-7883480.jpeg?auto=compress&cs=tinysrgb&w=1200";
 const bridleDetail = "https://images.pexels.com/photos/8665354/pexels-photo-8665354.jpeg?auto=compress&cs=tinysrgb&w=1200";
 const bridlePortrait = "https://images.pexels.com/photos/30010796/pexels-photo-30010796.jpeg?auto=compress&cs=tinysrgb&w=1200";
@@ -11,7 +11,7 @@ const whiteBridle = "https://images.pexels.com/photos/27669462/pexels-photo-2766
 const showBridle = "https://images.pexels.com/photos/27110989/pexels-photo-27110989.jpeg?auto=compress&cs=tinysrgb&w=1200";
 const darkBridle = "https://images.pexels.com/photos/35105157/pexels-photo-35105157.jpeg?auto=compress&cs=tinysrgb&w=1200";
 const ridingDetail = "https://images.pexels.com/photos/162240/horse-brown-horse-stable-animal-162240.jpeg?auto=compress&cs=tinysrgb&w=1200";
-const stableDetail = "https://images.pexels.com/photos/162240/horse-brown-horse-stable-animal-162240.jpeg?auto=compress&cs=tinysrgb&w=1200";
+const stableDetail = "https://images.pexels.com/photos/7883418/pexels-photo-7883418.jpeg?auto=compress&cs=tinysrgb&w=1200";
 
 export const createSeededEquinaApi = () => {
   const api = createEquinaApi();
@@ -321,6 +321,9 @@ export const createSeededEquinaApi = () => {
     title: "How do you make canter transitions cleaner?",
     body: "Start with rhythm, keep the outside rein honest, and reward the first soft try."
   });
+
+  const inspectionOrder = api.orders.createOrder(bridle.id, buyerSession.userId);
+  api.orders.startInspection(inspectionOrder.id);
 
   return { api, buyerSession, sellerSession, coachSession, horse, saddle, dressageSaddle, bridle };
 };

@@ -1,21 +1,23 @@
 # Equina iOS Release Audit
 
-Date: 2026-06-01
+Date: 2026-07-21
 
 ## Verdict
 
-Equina is suitable for product demos and browser QA. It is not ready for a public App Store release yet.
+Equina is suitable for product demos and browser QA. The production backend is now
+implemented in the repository, but it is not deployed or connected to the current
+screen state. Equina is not ready for a public App Store release yet.
 
 A signed iOS TestFlight showcase build is realistic within one week if EAS and Apple credentials are configured. A public production release with live accounts, horse records, Club posts, and Shop transactions is not realistic until the client-side mock services are replaced with a secured backend.
 
 ## Release Blockers
 
 1. The app is wired to seeded in-memory data in `src/App.tsx`. Reloading loses user changes.
-2. Authentication is a local email-only mock with locally generated session tokens.
-3. Shop payment, escrow, inspection, and dispute behavior is simulated locally. No payment provider or webhook exists.
-4. Club user-generated content has no report flow, user blocking, published support contact, or production moderation pipeline.
-5. Account creation exists, but there is no in-app account deletion flow.
-6. Horse passports, vet checks, and lab reports do not upload or persist real files.
+2. Supabase Auth, RLS, and client repositories exist, but onboarding has not been migrated from local state to email OTP.
+3. Stripe Connect functions, signed webhooks, inspection, disputes, refunds, and delayed seller transfers exist, but Stripe credentials, tax adapter, legal approval, shipping coverage, and PaymentSheet UI are absent.
+4. Club persistence, report, block, moderation, and Realtime contracts exist, but the existing Club UI has not been migrated or release-tested.
+5. Account deletion requests exist, but the in-app account center and scheduled deletion/anonymization operation are incomplete.
+6. Secure record persistence and upload tickets exist, but the existing Passport/Vet/Labs UI still uses local preview state.
 7. EAS is not authenticated and the local machine does not have a complete Xcode installation selected.
 8. Store assets and metadata are incomplete: app icon, adaptive icon foreground image, privacy policy URL, store screenshots, support URL, and privacy answers.
 9. The repository has no initial commit yet, so there is no stable rollback baseline for release work.
