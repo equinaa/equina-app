@@ -935,7 +935,8 @@ function EquinaApp() {
   const [shopOpenedListingId, setShopOpenedListingId] = useState(api.store.listings[0]?.id ?? "");
   const [pendingShopConversationId, setPendingShopConversationId] = useState("");
   const [rideActive, setRideActive] = useState(false);
-  const [sessionCount, setSessionCount] = useState(4);
+  // Seeded for demo mode only. A connected account counts its real journal.
+  const [localSessionCount, setLocalSessionCount] = useState(4);
   const [careLogged, setCareLogged] = useState(false);
   const [communityLikes, setCommunityLikes] = useState(18);
   const [sharedRide, setSharedRide] = useState(false);
@@ -1051,6 +1052,9 @@ function EquinaApp() {
   // While ride_logging is off the recap still works, it just does not outlive
   // the session. That difference is stated in the copy rather than hidden.
   const lastRide = ridePersistence ? rideJournal.lastRide : localLastRide;
+  // The app states this number back to the rider as fact ("N rides are now in
+  // your journal"), so it has to come from the journal, never from a seed.
+  const sessionCount = ridePersistence ? rideJournal.entries.length : localSessionCount;
   const connectedCatalog = useConnectedShopCatalog({
     backend: equinaSession.backend,
     enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
@@ -1303,7 +1307,7 @@ function EquinaApp() {
     setLocalLastRide({ ...session, mood: dailyMood });
     setCareLogged(false);
     setSharedRide(false);
-    setSessionCount((count) => count + 1);
+    setLocalSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 10));
     setLastRideRecapVisible(true);
 
@@ -1437,7 +1441,7 @@ function EquinaApp() {
 
   const finishFocusPlan = () => {
     setFocusStarted(false);
-    setSessionCount((count) => count + 1);
+    setLocalSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 14));
     refresh(onboardingHasHorse ? `Plan saved to ${primaryHorseName}'s log.` : "Plan saved to your ride journal.");
   };
@@ -1701,8 +1705,10 @@ function EquinaApp() {
   };
 
   const completeOnboarding = async () => {
-    if (authBusy || onboardingTransitioning) return;
+    // Clear before the guard: a blocked attempt must not leave an unrelated
+    // error from a previous action sitting on screen.
     setAuthError("");
+    if (authBusy || onboardingTransitioning) return;
 
     if (equinaSession.phase === "demo") {
       animateIntoApp();
@@ -1770,9 +1776,9 @@ function EquinaApp() {
   };
 
   const signInOnboardingWithPassword = async (password: string) => {
+    setAuthError("");
     if (authBusy || onboardingTransitioning || !equinaSession.configured) return;
     setAuthBusy(true);
-    setAuthError("");
     setPendingAuthPassword("");
     try {
       const result = await equinaSession.signInWithPassword(onboardingEmail, password);
@@ -1788,9 +1794,9 @@ function EquinaApp() {
   };
 
   const recoverOnboardingPassword = async () => {
+    setAuthError("");
     if (authBusy || !equinaSession.configured) return;
     setAuthBusy(true);
-    setAuthError("");
     try {
       await equinaSession.requestPasswordRecovery(onboardingEmail);
       setOtpVisible(true);
@@ -1832,9 +1838,9 @@ function EquinaApp() {
   };
 
   const verifyOnboardingCode = async (code: string) => {
+    setAuthError("");
     if (authBusy) return;
     setAuthBusy(true);
-    setAuthError("");
     try {
       await equinaSession.verifyCode(onboardingEmail, code);
       if (pendingAuthPassword) {
