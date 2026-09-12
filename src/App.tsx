@@ -223,9 +223,13 @@ const stableNutritionMeals: Array<{
   { id: "evening", time: "19:00", title: "Evening forage", body: "Hay + saved supplements", amount: "8 kg" }
 ];
 const stableWaterGoal = 35;
+// Nothing has been fed and nothing has been drunk until the rider says so.
+// The meal plan itself is still a sample, but "already completed" and a water
+// total are claims about care that was given — the one thing a horse-health
+// product must never assert on the rider's behalf.
 const initialNutritionState: NutritionState = {
-  completedMeals: ["morning"],
-  waterLiters: 27
+  completedMeals: [],
+  waterLiters: 0
 };
 
 function HorseshoeIcon({
@@ -1942,6 +1946,12 @@ function EquinaApp() {
     tab === "assistant" ? `${academyMode}-${coachOnboarded ? "chat" : "setup"}` : "",
     tab === "gear" ? `${shopMode}-${shopBuyerView}-${shopSellerView}-${shopOpenedListingId}` : ""
   ].join("-");
+  // A conversation fills the viewport and scrolls its own message list. The
+  // page ScrollView only offers `flexGrow`, which sets a minimum height and no
+  // maximum — so a growing conversation pushed the composer past the bottom
+  // edge, and with page scrolling disabled there was no way to reach it.
+  // Measuring the viewport gives the conversation a definite height to live in.
+  const [contentViewportHeight, setContentViewportHeight] = useState(0);
   const immersiveConversation =
     (tab === "assistant" && academyMode === "ai") ||
     (tab === "gear" && (
@@ -2074,10 +2084,15 @@ function EquinaApp() {
           <ScrollView
             key={contentKey}
             style={styles.content}
+            onLayout={(event) => {
+              const next = Math.round(event.nativeEvent.layout.height);
+              setContentViewportHeight((current) => current === next ? current : next);
+            }}
             contentContainerStyle={[
               styles.contentInner,
               focusedTask && !immersiveConversation && styles.contentInnerFocused,
-              immersiveConversation && styles.contentInnerImmersive
+              immersiveConversation && styles.contentInnerImmersive,
+              immersiveConversation && contentViewportHeight > 0 && { height: contentViewportHeight }
             ]}
             scrollEnabled={!immersiveConversation}
             keyboardShouldPersistTaps="handled"
