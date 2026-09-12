@@ -922,8 +922,10 @@ function EquinaApp() {
   const [onboardingHorseName, setOnboardingHorseName] = useState("");
   const [onboardingHorseBreed, setOnboardingHorseBreed] = useState("");
   const [onboardingHorseSex, setOnboardingHorseSex] = useState<(typeof horseSexes)[number]>("Gelding");
-  const [onboardingHorseAge, setOnboardingHorseAge] = useState("9");
-  const [onboardingHorseHeight, setOnboardingHorseHeight] = useState("166");
+  // Empty, not a sample value. Onboarding never asks for either, so any default
+  // here is shown to the rider as a fact about their own horse.
+  const [onboardingHorseAge, setOnboardingHorseAge] = useState("");
+  const [onboardingHorseHeight, setOnboardingHorseHeight] = useState("");
   const [onboardingRideFeel, setOnboardingRideFeel] = useState<(typeof horseRideFeels)[number]>("Extra energy");
   const [onboardingFrequency, setOnboardingFrequency] = useState<(typeof ridingFrequencies)[number]>("3-4 rides/week");
   const [onboardingCarePriority, setOnboardingCarePriority] = useState<(typeof carePriorities)[number]>("Training plan");
@@ -1087,8 +1089,14 @@ function EquinaApp() {
   const marketListings = filterLiveListings(effectiveListings, marketSearch, marketFilter);
   const seller = api.store.profiles.find((profile) => profile.userId === sellerSession.userId);
   const reservedListing = effectiveListings.find((listing) => listing.id === reservedListingId);
-  const buyerOrders = api.store.orders.filter((order) => order.buyerId === buyerSession.userId);
-  const sellerOrders = api.store.orders.filter((order) => order.sellerId === sellerSession.userId);
+  // Seeded orders belong to the demo only. A connected rider has none, and a
+  // statistics row is read as fact regardless of the word next to it.
+  const buyerOrders = accountMode === "demo"
+    ? api.store.orders.filter((order) => order.buyerId === buyerSession.userId)
+    : [];
+  const sellerOrders = accountMode === "demo"
+    ? api.store.orders.filter((order) => order.sellerId === sellerSession.userId)
+    : [];
   const sellerRevenueLabel = orderTotalsLabel(sellerOrders);
   const activeSellerListings = effectiveListings.filter((listing) => listing.sellerId === sellerSession.userId && listing.status === "active").length;
   const horseState: HorseState = {
@@ -1448,7 +1456,9 @@ function EquinaApp() {
     setFocusStarted(false);
     setLocalSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 14));
-    refresh(onboardingHasHorse ? `Plan saved to ${primaryHorseName}'s log.` : "Plan saved to your ride journal.");
+    // This completes a focus plan; it does not write a ride. Claiming the
+    // journal here would be the same invented fact the ride count was.
+    refresh("Focus plan complete. Log a ride to add it to your journal.");
   };
 
   const toggleNutritionMeal = (mealId: NutritionMealId) => {
@@ -2187,7 +2197,9 @@ function EquinaApp() {
             )}
             {tab === "community" && (
               <CommunityScreen
-                posts={api.community.listVisiblePosts()}
+                // Seeded posts carry invented authors. A connected rider must
+                // never be shown a community that does not exist.
+                posts={accountMode === "demo" ? api.community.listVisiblePosts() : []}
                 likes={communityLikes}
                 sharedRide={sharedRide}
                 rideShare={{
@@ -3167,8 +3179,8 @@ function GearScreen({
 
             <CompactActionList
               items={[
-                { Icon: PackageCheck, title: "Orders", body: `${sellerOrders.length} sample sold items`, onPress: () => onSellerViewChange("orders") },
-                { Icon: WalletCards, title: "Revenue", body: `${sellerRevenueLabel} sample total`, onPress: () => onSellerViewChange("revenue") },
+                { Icon: PackageCheck, title: "Orders", body: `${sellerOrders.length} sold items`, onPress: () => onSellerViewChange("orders") },
+                { Icon: WalletCards, title: "Revenue", body: `${sellerRevenueLabel} total`, onPress: () => onSellerViewChange("revenue") },
                 { Icon: MessageSquareText, title: "Messages", body: shopConversation.connected ? `${liveMessageCount} conversations` : "Secure messaging unavailable", onPress: () => onSellerViewChange("messages") }
               ]}
             />
@@ -3253,7 +3265,7 @@ function GearScreen({
 
             <View style={styles.shopAccountLinks}>
               <Pressable testID="shop-open-orders" accessibilityRole="button" accessibilityLabel={`Open ${buyerOrders.length} orders`} style={styles.shopAccountLink} onPress={() => onBuyerViewChange("orders")}>
-                <Text style={styles.shopAccountLinkText}>{buyerOrders.length} sample {buyerOrders.length === 1 ? "order" : "orders"}</Text>
+                <Text style={styles.shopAccountLinkText}>{buyerOrders.length} {buyerOrders.length === 1 ? "order" : "orders"}</Text>
               </Pressable>
               <View style={styles.shopAccountDot} />
               <Pressable testID="shop-open-saved" accessibilityRole="button" accessibilityLabel={`Open ${savedListingIds.length} saved items`} style={styles.shopAccountLink} onPress={() => onBuyerViewChange("saved")}>
@@ -5999,6 +6011,9 @@ function CommunityScreen({
         </View>
       )}
 
+      {/* The story rail shows the same invented riders as the feed, so it is
+          bound to the same signal: no posts means no community to preview. */}
+      {posts.length > 0 && (
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.communityStoryRail}>
         {communityStories.map((story) => (
           <View
@@ -6018,6 +6033,7 @@ function CommunityScreen({
           </View>
         ))}
       </ScrollView>
+      )}
 
       {sharedRide && (
         <CommunityFeedCard
@@ -6038,6 +6054,15 @@ function CommunityScreen({
       <View style={styles.communityFeedHeader}>
         <Text style={styles.communityFeedTitle}>From your circle</Text>
       </View>
+
+      {posts.length === 0 && !sharedRide && (
+        <View style={styles.communityEmpty}>
+          <Text style={styles.communityEmptyTitle}>Nothing here yet.</Text>
+          <Text style={styles.communityEmptyBody}>
+            Club opens once moderation is in place. Your rides and records stay private until then.
+          </Text>
+        </View>
+      )}
 
       {posts.slice(0, 1).map((post, index) => (
         <CommunityFeedCard
@@ -6229,7 +6254,11 @@ function ProfileScreen({
           <View>
             <Text numberOfLines={1} adjustsFontSizeToFit style={styles.profileHorseFeatureTitle}>{horseName}</Text>
             <Text style={styles.profileHorseFeatureMeta}>{discipline} · {horseBreed || "Breed"} · {horseSex}</Text>
-            <Text style={styles.profileHorseFeatureDetail}>{level} · {frequency} · {horseAge || "?"} years · {horseHeight || "?"} cm</Text>
+            <Text style={styles.profileHorseFeatureDetail}>
+              {[level, frequency, horseAge ? `${horseAge} years` : "", horseHeight ? `${horseHeight} cm` : ""]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
           </View>
         </View>
       </View>
@@ -15433,6 +15462,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 22,
     fontWeight: "600"
+  },
+  communityEmpty: {
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    gap: 8
+  },
+  communityEmptyTitle: {
+    color: nightTheme.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600"
+  },
+  communityEmptyBody: {
+    color: nightTheme.muted,
+    fontSize: 15,
+    lineHeight: 21
   },
   communityFeedMeta: {
     color: nightTheme.faint,

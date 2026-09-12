@@ -539,23 +539,26 @@ export function RideRecapScreen({
             <ChevronRight size={19} color={equinaTheme.colors.ink} />
           </MotionPressable>
 
-          <View style={styles.recapSecondaryActions}>
-            <MotionPressable
-              testID="ride-recap-share"
-              accessibilityRole="button"
-              accessibilityLabel={sharingEnabled ? (shared ? "Ride already shared" : "Share ride to Club") : "View Club"}
-              disabled={sharingEnabled && shared}
-              onPress={onShare}
-              style={styles.recapSecondaryButton}
-            >
-              {sharingEnabled ? (
-                shared ? <Check size={17} color={equinaTheme.colors.brass} /> : <SendHorizontal size={17} color={equinaTheme.colors.brass} />
-              ) : (
-                <MessageCircle size={17} color={equinaTheme.colors.brass} />
-              )}
-              <Text style={styles.recapSecondaryText}>{sharingEnabled ? (shared ? "Shared" : "Share to Club") : "View Club"}</Text>
-            </MotionPressable>
-          </View>
+          {/* With sharing off this used to offer "View Club", sending the rider
+              into a frozen area at their most rewarding moment. No button is
+              better than one that leads nowhere. */}
+          {sharingEnabled && (
+            <View style={styles.recapSecondaryActions}>
+              <MotionPressable
+                testID="ride-recap-share"
+                accessibilityRole="button"
+                accessibilityLabel={shared ? "Ride already shared" : "Share ride to Club"}
+                disabled={shared}
+                onPress={onShare}
+                style={styles.recapSecondaryButton}
+              >
+                {shared
+                  ? <Check size={17} color={equinaTheme.colors.brass} />
+                  : <SendHorizontal size={17} color={equinaTheme.colors.brass} />}
+                <Text style={styles.recapSecondaryText}>{shared ? "Shared" : "Share to Club"}</Text>
+              </MotionPressable>
+            </View>
+          )}
         </View>
       </Animated.View>
     </View>
