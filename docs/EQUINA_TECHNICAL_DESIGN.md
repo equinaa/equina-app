@@ -1,7 +1,7 @@
 # Equina Technical Design
 
 Design date: 2026-08-25
-Applies to: `Equina 2.0 - copie` working tree, Supabase project `vdcrllzyzbdjonotrujb` (Frankfurt)
+Applies to: `Equina 2.0 - copie` working tree, Supabase project `mvdxohyayriywbcknulg` (Frankfurt)
 Verified on 2026-08-25: `npm test` and `npm run typecheck` both pass.
 
 This document describes the system as it is actually built, names the two structural problems in it, and defines the target architecture. It is a design record, not a tutorial — it assumes the reader has `docs/EQUINA_BACKEND_AUDIT_2026-07-29.md` and `docs/EQUINA_BACKEND_DEPLOYMENT_INVENTORY.md` available.
@@ -95,9 +95,9 @@ This layer is an emergency off switch. It exists so a bad database rollout canno
 | `clubPublishing` | `club_publishing` | moderation URL + token + automation secret |
 | `listingCreation` | `shop_listing_creation` | moderation URL + token + automation secret |
 | `checkout` | `shop_transactions` | Stripe key + webhook secret + terms version + Connect return/refresh URLs |
-| `records` / `horseManagement` / `clubInteractions` / `messaging` | flag only | — |
+| `records` / `horseManagement` / `rideLogging` / `clubInteractions` / `messaging` | flag only | — |
 
-The consequence: turning on a database flag for a capability whose provider is unconfigured changes nothing. This is why the current remote response returns `auth: true` and ten `false` values despite substantial deployed code.
+The consequence: turning on a database flag for a capability whose provider is unconfigured changes nothing. This is why the current remote response returns `auth: true` and eleven `false` values despite substantial deployed code.
 
 The dev fallback for `coachChat` is deliberately constrained to `SUPABASE_URL` containing `127.0.0.1` or `localhost`, so it cannot activate against a hosted project.
 
@@ -292,7 +292,7 @@ Every remaining component in `App.tsx` moves next to the feature it serves, with
 
 Promotion must be migration-by-migration and function-by-function. Database passwords, service keys, automation secrets, provider secrets, and private Storage objects are never copied between environments.
 
-Web client: `https://equina-five.vercel.app`, deployment `dpl_HkDJ3uWi5J3E3JqHPDLx5GDkVxHa`, publishable configuration only, Horse/Records compile switches on, all other privileged switches off, demo fallback off.
+Web client: `https://equina-ten.vercel.app`, deployment `dpl_HkDJ3uWi5J3E3JqHPDLx5GDkVxHa`, publishable configuration only, Horse/Records compile switches on, all other privileged switches off, demo fallback off.
 
 Native: EAS remote environment **could not be inspected** — the local CLI has no authenticated Expo account. Local `eas.json` and `app.json` contain no credential values, but remote EAS variables remain an explicit audit blocker.
 

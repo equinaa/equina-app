@@ -2,6 +2,13 @@
 
 Audit date: 2026-07-29
 
+> **Re-provisioning note (2026-09-09).** The environment this audit was run
+> against (`vdcrllzyzbdjonotrujb`) was deleted. The backend was rebuilt on
+> project `mvdxohyayriywbcknulg` (Frankfurt) from the same 34 migrations, and
+> the web client moved from `equina-five.vercel.app` to
+> `equina-ten.vercel.app`. Identifiers below were updated to the current
+> environment; the findings and dates remain those of the original audit.
+
 ## Verdict
 
 Equina now has an internally activated Horse/Records backend, but it is not yet a
@@ -25,7 +32,7 @@ No capability should be described as live until all four conditions are true.
 
 | Boundary | Verified state |
 | --- | --- |
-| Supabase project | Linked to `vdcrllzyzbdjonotrujb`, Frankfurt |
+| Supabase project | Linked to `mvdxohyayriywbcknulg`, Frankfurt |
 | Database | All 34 local migrations applied remotely |
 | Remote schema lint | No warnings or errors |
 | Edge Functions | Six narrowly scoped functions deployed; see deployment inventory |

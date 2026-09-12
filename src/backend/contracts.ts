@@ -7,6 +7,7 @@ export type BackendCapabilities = {
   pushNotifications: boolean;
   records: boolean;
   horseManagement: boolean;
+  rideLogging: boolean;
   clubPublishing: boolean;
   clubInteractions: boolean;
   listingCreation: boolean;
@@ -291,3 +292,25 @@ export type UploadAsset = {
 };
 
 export type UploadKind = "avatar" | "horse_photo" | "horse_record" | "club_post" | "listing_photo" | "dispute_evidence";
+
+export type RideMoodRecord = "fresh" | "focused" | "tender";
+
+export type RideEntry = {
+  id: string;
+  riderId: string;
+  horseId?: string;
+  discipline: Discipline;
+  focus: string;
+  plannedDuration?: string;
+  startedAt: string;
+  completedAt: string;
+  elapsedSeconds: number;
+  completedPhases: number;
+  totalPhases: number;
+  mood?: RideMoodRecord;
+  riderNote?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RideEntryInput = Omit<RideEntry, "id" | "riderId" | "createdAt" | "updatedAt">;

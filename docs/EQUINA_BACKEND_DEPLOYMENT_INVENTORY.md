@@ -2,7 +2,18 @@
 
 Inventory date: 2026-07-29
 
-Linked environment: `vdcrllzyzbdjonotrujb` (Frankfurt). This is currently the
+> **Re-provisioning note (2026-09-09).** The original environment
+> (`vdcrllzyzbdjonotrujb`) was deleted and rebuilt as `mvdxohyayriywbcknulg`
+> (Frankfurt) from the same 34 migrations; the web client moved from
+> `equina-five.vercel.app` to `equina-ten.vercel.app`. The database, the six
+> Edge Functions, and the all-flags-off posture below were reproduced and
+> verified on the new project, and `equina-storage-cleanup` is scheduled again
+> — now from a migration rather than by hand, so the next rebuild keeps it.
+> One item is **not** yet true of it: the named internal user override has not
+> been re-applied. The capability response below also gained `rideLogging`,
+> which did not exist on the original environment.
+
+Linked environment: `mvdxohyayriywbcknulg` (Frankfurt). This is currently the
 only hosted environment and must not be treated as both staging and production.
 
 ## Database
@@ -48,7 +59,7 @@ The unauthenticated remote response is:
 
 ```json
 {
-  "version": "2026-07-29",
+  "version": "2026-09-09",
   "capabilities": {
     "auth": true,
     "accountSettings": false,
@@ -56,6 +67,7 @@ The unauthenticated remote response is:
     "pushNotifications": false,
     "records": false,
     "horseManagement": false,
+    "rideLogging": false,
     "clubPublishing": false,
     "clubInteractions": false,
     "listingCreation": false,
@@ -72,7 +84,7 @@ internal client build also enables the two compile-time switches.
 
 | Item | State |
 | --- | --- |
-| Production alias | `https://equina-five.vercel.app` |
+| Production alias | `https://equina-ten.vercel.app` |
 | Deployment | `dpl_HkDJ3uWi5J3E3JqHPDLx5GDkVxHa`, Ready |
 | Supabase client config | URL and publishable key only |
 | Horse/Records compile switches | true; server named-user gate still required |

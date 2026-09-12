@@ -9,4 +9,5 @@ export * from "./errors";
 export * from "./marketplace-repository";
 export * from "./notification-repository";
 export * from "./records-repository";
+export * from "./ride-repository";
 export * from "./upload-repository";

@@ -43,7 +43,7 @@ Deno.serve(async (request) => {
     const pushConfigured = Boolean(Deno.env.get("NOTIFICATION_AUTOMATION_SECRET"));
 
     return json({
-      version: "2026-07-29",
+      version: "2026-09-09",
       capabilities: {
         auth: true,
         accountSettings: Boolean(flags.account_settings && accountOperationsConfigured),
@@ -51,6 +51,7 @@ Deno.serve(async (request) => {
         pushNotifications: Boolean(flags.push_notifications && pushConfigured),
         records: Boolean(flags.record_mutations),
         horseManagement: Boolean(flags.horse_management),
+        rideLogging: Boolean(flags.ride_logging),
         clubPublishing: Boolean(flags.club_publishing && moderationConfigured),
         clubInteractions: Boolean(flags.club_interactions),
         listingCreation: Boolean(flags.shop_listing_creation && moderationConfigured),

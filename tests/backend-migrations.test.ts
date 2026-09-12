@@ -85,7 +85,7 @@ const missingRls = await db.query<{ tablename: string }>(`
 assert.deepEqual(missingRls.rows, [], `All public backend tables need RLS: ${missingRls.rows.map((row) => row.tablename).join(", ")}`);
 
 const seededFlags = await db.query<{ enabled: boolean; rollout_percent: number }>("select enabled, rollout_percent from public.app_feature_flags");
-assert.equal(seededFlags.rows.length, 10);
+assert.equal(seededFlags.rows.length, 11);
 assert.ok(seededFlags.rows.every((flag) => !flag.enabled && flag.rollout_percent === 0));
 
 const riderA = "10000000-0000-4000-8000-000000000001";
@@ -697,6 +697,66 @@ const expiredExport = await db.query<{
 assert.equal(expiredExport.rows[0]?.status, "expired");
 assert.equal(expiredExport.rows[0]?.object_path, null);
 assert.equal(expiredExport.rows[0]?.cleanup_status, "completed");
+
+// Ride journal. A training journal is private to its rider: unlike horse
+// records, sharing a horse must not share the notes written while riding it.
+await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+const rideEntry = await db.query<{ id: string }>(`
+  insert into public.ride_entries(
+    rider_id, horse_id, discipline, focus, planned_duration,
+    started_at, completed_at, elapsed_seconds, completed_phases, total_phases, mood, rider_note
+  ) values (
+    $1, $2, 'dressage', 'Rhythm', '40 min',
+    now() - interval '45 minutes', now(), 2400, 3, 4, 'focused', 'Softer in the left rein.'
+  ) returning id
+`, [riderA, horseId]);
+const rideEntryId = rideEntry.rows[0]?.id;
+assert.ok(rideEntryId, "A rider must be able to log a ride.");
+
+await assert.rejects(
+  db.query(`
+    insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases)
+    values ($1, 'jumping', 'Impulsion', now(), now(), 600, 1, 2)
+  `, [riderB]),
+  /row-level security/,
+  "A rider must not write a ride entry attributed to someone else."
+);
+
+// riderB is an accepted viewer on this horse and can read it, proving the
+// journal boundary is independent of horse collaboration.
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+const collaboratorRides = await db.query("select id from public.ride_entries where id = $1", [rideEntryId]);
+assert.equal(collaboratorRides.rows.length, 0, "A horse collaborator must not read another rider's journal.");
+const collaboratorEdit = await db.query("update public.ride_entries set focus = 'Hijacked' where id = $1 returning id", [rideEntryId]);
+assert.equal(collaboratorEdit.rows.length, 0, "A horse collaborator must not edit another rider's journal.");
+
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderC}', false);`);
+const strangerRides = await db.query("select id from public.ride_entries where id = $1", [rideEntryId]);
+assert.equal(strangerRides.rows.length, 0, "An unrelated rider must not read a journal entry.");
+const strangerDelete = await db.query("delete from public.ride_entries where id = $1 returning id", [rideEntryId]);
+assert.equal(strangerDelete.rows.length, 0, "An unrelated rider must not delete a journal entry.");
+
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+const ownRides = await db.query<{ focus: string }>("select focus from public.ride_entries where id = $1", [rideEntryId]);
+assert.equal(ownRides.rows.length, 1, "The owning rider must still read the entry.");
+assert.equal(ownRides.rows[0]?.focus, "Rhythm", "No other rider may have altered the entry.");
+
+await assert.rejects(
+  db.query(`
+    insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases)
+    values ($1, 'dressage', 'Backwards', now(), now() - interval '10 minutes', 600, 1, 2)
+  `, [riderA]),
+  /ride_entries_finishes_after_start/,
+  "A ride must not finish before it started."
+);
+await assert.rejects(
+  db.query(`
+    insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases)
+    values ($1, 'dressage', 'Impossible', now(), now(), 600, 5, 3)
+  `, [riderA]),
+  /ride_entries_phases_consistent/,
+  "Completed phases must not exceed the planned total."
+);
 
 await db.close();
 console.log("Backend migrations executed successfully in isolated Postgres.");

@@ -105,7 +105,7 @@ The real cost is a promise, if one has been made externally. See section 6.
 | Domain authentication | SPF, DKIM, DMARC |
 | Templates | Replace the magic-link template in `supabase/templates/magic_link.html` with the six-digit token template; set `EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE=otp` |
 | Abuse controls | CAPTCHA/Turnstile, leaked-password protection, auth rate-limit monitoring |
-| Staging project | A second Supabase project, separate from `vdcrllzyzbdjonotrujb` |
+| Staging project | A second Supabase project, separate from `mvdxohyayriywbcknulg` |
 | CI | `typecheck`, `test`, `backend:check`, `backend:audit`, `security:bundle-scan` as required checks |
 
 Never copy a database password, service key, automation secret, provider secret, or private Storage object between environments. Promotion is migration by migration and function by function.

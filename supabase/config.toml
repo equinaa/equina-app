@@ -17,7 +17,7 @@ port = 54323
 
 [auth]
 enabled = true
-site_url = "https://equina-five.vercel.app"
+site_url = "https://equina-ten.vercel.app"
 additional_redirect_urls = [
   "equina://auth/callback",
   "equina://auth/email",
@@ -25,9 +25,9 @@ additional_redirect_urls = [
   "http://localhost:8081",
   "http://localhost:8081/auth/email",
   "http://localhost:8081/auth/recovery",
-  "https://equina-five.vercel.app",
-  "https://equina-five.vercel.app/auth/email",
-  "https://equina-five.vercel.app/auth/recovery"
+  "https://equina-ten.vercel.app",
+  "https://equina-ten.vercel.app/auth/email",
+  "https://equina-ten.vercel.app/auth/recovery"
 ]
 enable_signup = true
 enable_anonymous_sign_ins = false

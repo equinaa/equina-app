@@ -80,6 +80,7 @@ import {
   type OnboardingAuthProvider,
   type OnboardingCompletionMode,
   type OnboardingDiscipline,
+  type OnboardingPhotoAsset,
   type OnboardingStep
 } from "./features/onboarding/OnboardingScreen";
 import {
@@ -120,6 +121,7 @@ import {
   type RideRecommendation,
   type RideSession
 } from "./features/ride/RideExperience";
+import { useRideJournal } from "./features/ride/useRideJournal";
 import { createSeededEquinaApi } from "./seed/seed-data";
 import { getFitScreening, type HorseFitContext } from "./product/product-truth";
 import { MotionPressable } from "./ui/motion/MotionPressable";
@@ -913,6 +915,10 @@ function EquinaApp() {
   const [onboardingGoal, setOnboardingGoal] = useState<RiderGoal>("Daily training");
   const [onboardingHasHorse, setOnboardingHasHorse] = useState(true);
   const [onboardingHorsePhoto, setOnboardingHorsePhoto] = useState("");
+  // Only set when the rider picked a real photo. Sample photos carry a marker
+  // value and nothing to upload.
+  const [onboardingHorsePhotoAsset, setOnboardingHorsePhotoAsset] =
+    useState<OnboardingPhotoAsset | null>(null);
   const [onboardingHorseName, setOnboardingHorseName] = useState("");
   const [onboardingHorseBreed, setOnboardingHorseBreed] = useState("");
   const [onboardingHorseSex, setOnboardingHorseSex] = useState<(typeof horseSexes)[number]>("Gelding");
@@ -934,13 +940,16 @@ function EquinaApp() {
   const [shopOpenedListingId, setShopOpenedListingId] = useState(api.store.listings[0]?.id ?? "");
   const [pendingShopConversationId, setPendingShopConversationId] = useState("");
   const [rideActive, setRideActive] = useState(false);
-  const [sessionCount, setSessionCount] = useState(4);
+  // Seeded for demo mode only. A connected account counts its real journal.
+  const [localSessionCount, setLocalSessionCount] = useState(4);
   const [careLogged, setCareLogged] = useState(false);
   const [communityLikes, setCommunityLikes] = useState(18);
   const [sharedRide, setSharedRide] = useState(false);
   const [lastRideRecapVisible, setLastRideRecapVisible] = useState(false);
   const [dailyMood, setDailyMood] = useState<MoodOption>("Focused");
-  const [lastRide, setLastRide] = useState<RideSession | null>(null);
+  // Kept as the fallback for demo mode and for accounts where ride_logging is
+  // still off. When the capability is on, the journal below is the source.
+  const [localLastRide, setLocalLastRide] = useState<RideSession | null>(null);
   const [focusStarted, setFocusStarted] = useState(false);
   const [focusProgress, setFocusProgress] = useState(64);
   const [coachDiscipline, setCoachDiscipline] = useState<CoachDiscipline>(defaultCoachDiscipline);
@@ -1003,7 +1012,7 @@ function EquinaApp() {
       await clearOnboardingDraft();
       await equinaSession.signOut();
       setCoachMessages([]);
-      setLastRide(null);
+      setLocalLastRide(null);
       setAccountCreated(false);
       setOtpVisible(false);
       setAuthError("");
@@ -1037,6 +1046,20 @@ function EquinaApp() {
       equinaSession.capabilities.records,
     onPersist: equinaSession.refreshAccount
   });
+  const ridePersistence =
+    accountMode === "connected" &&
+    equinaSession.phase === "authenticated" &&
+    equinaSession.capabilities.rideLogging;
+  const rideJournal = useRideJournal({
+    backend: equinaSession.backend,
+    enabled: ridePersistence
+  });
+  // While ride_logging is off the recap still works, it just does not outlive
+  // the session. That difference is stated in the copy rather than hidden.
+  const lastRide = ridePersistence ? rideJournal.lastRide : localLastRide;
+  // The app states this number back to the rider as fact ("N rides are now in
+  // your journal"), so it has to come from the journal, never from a seed.
+  const sessionCount = ridePersistence ? rideJournal.entries.length : localSessionCount;
   const connectedCatalog = useConnectedShopCatalog({
     backend: equinaSession.backend,
     enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
@@ -1286,17 +1309,42 @@ function EquinaApp() {
 
   const finishRide = (session: RideCompletion) => {
     setRideActive(false);
-    setLastRide({ ...session, mood: dailyMood });
+    setLocalLastRide({ ...session, mood: dailyMood });
     setCareLogged(false);
     setSharedRide(false);
-    setSessionCount((count) => count + 1);
+    setLocalSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 10));
     setLastRideRecapVisible(true);
-    refresh(
-      onboardingHasHorse
-        ? `Ride captured for this preview. Add how ${primaryHorseName} felt, then choose the next useful step.`
-        : "Ride captured for this preview. Add how it felt, then choose the next useful step."
-    );
+
+    if (!ridePersistence) {
+      refresh(
+        onboardingHasHorse
+          ? `Ride captured for this preview. Add how ${primaryHorseName} felt, then choose the next useful step.`
+          : "Ride captured for this preview. Add how it felt, then choose the next useful step."
+      );
+      return;
+    }
+
+    // The recap is shown immediately from local state and reconciled once the
+    // write lands, so a slow network never blocks the rider's own summary.
+    void rideJournal
+      .logRide({
+        session,
+        mood: dailyMood,
+        horseId: horseRecords.selectedHorseId || undefined
+      })
+      .then(() => {
+        refresh(
+          onboardingHasHorse
+            ? `Ride saved. Add how ${primaryHorseName} felt, then choose the next useful step.`
+            : "Ride saved. Add how it felt, then choose the next useful step."
+        );
+      })
+      .catch((saveError: unknown) => {
+        refresh(saveError instanceof Error
+          ? saveError.message
+          : "The ride could not be saved. It is still shown here for this session.");
+      });
   };
 
   const cancelRide = () => {
@@ -1373,7 +1421,16 @@ function EquinaApp() {
 
   const updateDailyMood = (mood: MoodOption) => {
     setDailyMood(mood);
-    setLastRide((current) => current ? { ...current, mood } : current);
+    setLocalLastRide((current) => current ? { ...current, mood } : current);
+    // The check-in is an edit to the stored ride, not a separate record. Without
+    // this the recap would show one value and the journal another.
+    if (ridePersistence && rideJournal.latestEntry) {
+      void rideJournal
+        .updateRide(rideJournal.latestEntry.id, { mood })
+        .catch((saveError: unknown) => {
+          refresh(saveError instanceof Error ? saveError.message : "The check-in could not be saved.");
+        });
+    }
     refresh(
       onboardingHasHorse
         ? `${primaryHorseName} check-in saved: ${mood.toLowerCase()}.`
@@ -1389,7 +1446,7 @@ function EquinaApp() {
 
   const finishFocusPlan = () => {
     setFocusStarted(false);
-    setSessionCount((count) => count + 1);
+    setLocalSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 14));
     refresh(onboardingHasHorse ? `Plan saved to ${primaryHorseName}'s log.` : "Plan saved to your ride journal.");
   };
@@ -1572,7 +1629,7 @@ function EquinaApp() {
     const starterLesson = recommendedLessonFor(riderContext, starterFocus);
     setAccountCreated(true);
     setTab("home");
-    setLastRide(null);
+    setLocalLastRide(null);
     setSharedRide(false);
     setCareLogged(false);
     setCoachDiscipline(onboardingDiscipline);
@@ -1641,7 +1698,7 @@ function EquinaApp() {
   };
 
   const persistOnboarding = async () => {
-    await equinaSession.completeOnboarding({
+    const snapshot = await equinaSession.completeOnboarding({
       displayName: riderDisplayName,
       locale: "en",
       discipline: toDomainDiscipline(onboardingDiscipline),
@@ -1649,12 +1706,36 @@ function EquinaApp() {
       horseName: onboardingHasHorse ? primaryHorseName : undefined,
       horseBreed: onboardingHasHorse ? onboardingHorseBreed.trim() || undefined : undefined
     });
+
+    // The horse has to exist before its photo can be uploaded, so this runs
+    // after onboarding rather than as part of it. A failure here must not undo
+    // a successful sign-up: the rider keeps the account and can add the photo
+    // again from the horse profile.
+    const horseId = snapshot?.primaryHorse?.id;
+    const asset = onboardingHorsePhotoAsset;
+    if (horseId && asset && equinaSession.backend) {
+      try {
+        // Some pickers omit the size. The upload boundary compares the declared
+        // size against the bytes it receives, so measure rather than guess.
+        const byteSize = asset.byteSize > 0
+          ? asset.byteSize
+          : (await (await fetch(asset.uri)).blob()).size;
+        await equinaSession.backend.records.uploadHorsePhoto(horseId, { ...asset, byteSize });
+        await equinaSession.refreshAccount();
+      } catch {
+        refresh("Your horse was saved. The photo could not be uploaded — you can add it from the horse profile.");
+      }
+    }
+
+    setOnboardingHorsePhotoAsset(null);
     await clearOnboardingDraft();
   };
 
   const completeOnboarding = async () => {
-    if (authBusy || onboardingTransitioning) return;
+    // Clear before the guard: a blocked attempt must not leave an unrelated
+    // error from a previous action sitting on screen.
     setAuthError("");
+    if (authBusy || onboardingTransitioning) return;
 
     if (equinaSession.phase === "demo") {
       animateIntoApp();
@@ -1722,9 +1803,9 @@ function EquinaApp() {
   };
 
   const signInOnboardingWithPassword = async (password: string) => {
+    setAuthError("");
     if (authBusy || onboardingTransitioning || !equinaSession.configured) return;
     setAuthBusy(true);
-    setAuthError("");
     setPendingAuthPassword("");
     try {
       const result = await equinaSession.signInWithPassword(onboardingEmail, password);
@@ -1740,9 +1821,9 @@ function EquinaApp() {
   };
 
   const recoverOnboardingPassword = async () => {
+    setAuthError("");
     if (authBusy || !equinaSession.configured) return;
     setAuthBusy(true);
-    setAuthError("");
     try {
       await equinaSession.requestPasswordRecovery(onboardingEmail);
       setOtpVisible(true);
@@ -1784,9 +1865,9 @@ function EquinaApp() {
   };
 
   const verifyOnboardingCode = async (code: string) => {
+    setAuthError("");
     if (authBusy) return;
     setAuthBusy(true);
-    setAuthError("");
     try {
       await equinaSession.verifyCode(onboardingEmail, code);
       if (pendingAuthPassword) {
@@ -1835,7 +1916,7 @@ function EquinaApp() {
         text: "I have Ilinca's intermediate jumping profile and Ralfy's recent ride notes. We can plan the next useful session."
       }
     ]);
-    setLastRide(null);
+    setLocalLastRide(null);
     setSharedRide(false);
     setCareLogged(false);
     setLastRideRecapVisible(false);
@@ -2211,7 +2292,10 @@ function EquinaApp() {
                 onDisciplineChange={updateOnboardingDiscipline}
                 onLevelChange={setOnboardingLevel}
                 onHasHorseChange={setOnboardingHasHorse}
-                onHorsePhotoChange={setOnboardingHorsePhoto}
+                onHorsePhotoChange={(value, asset) => {
+                  setOnboardingHorsePhoto(value);
+                  setOnboardingHorsePhotoAsset(asset ?? null);
+                }}
                 onHorseNameChange={setOnboardingHorseName}
                 onHorseBreedChange={setOnboardingHorseBreed}
                 onNext={advanceOnboarding}

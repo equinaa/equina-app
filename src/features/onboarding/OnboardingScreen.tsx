@@ -46,6 +46,14 @@ import { equinaTheme } from "../../ui/theme/theme";
 
 export type OnboardingStep = "you" | "horse" | "preview";
 export type OnboardingDiscipline = "Dressage" | "Jumping" | "Eventing" | "Trail";
+
+/** A photo the rider picked from their library, ready for the upload boundary. */
+export type OnboardingPhotoAsset = {
+  uri: string;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+};
 export type RiderLevel = "Beginner" | "Intermediate" | "Advanced" | "Pro";
 export type OnboardingCompletionMode = "connected" | "preview" | "unavailable";
 export type OnboardingAuthProvider = "apple" | "google";
@@ -115,7 +123,7 @@ type OnboardingScreenProps = {
   onDisciplineChange: (value: OnboardingDiscipline) => void;
   onLevelChange: (value: RiderLevel) => void;
   onHasHorseChange: (value: boolean) => void;
-  onHorsePhotoChange: (value: string) => void;
+  onHorsePhotoChange: (value: string, asset?: OnboardingPhotoAsset) => void;
   onHorseNameChange: (value: string) => void;
   onHorseBreedChange: (value: string) => void;
   onNext: () => void;
@@ -1033,7 +1041,10 @@ function HorseProfileEditor({
   horseBreed: string;
   onInputFocus: () => void;
   onInputBlur: () => void;
-  onPhotoChange: (value: string) => void;
+  // A sample photo passes only its marker value. A real photo also passes the
+  // asset, because uploading needs the file name, type and exact byte size —
+  // the upload boundary rejects a size that does not match what it receives.
+  onPhotoChange: (value: string, asset?: OnboardingPhotoAsset) => void;
   onHorseNameChange: (value: string) => void;
   onHorseBreedChange: (value: string) => void;
 }) {
@@ -1065,10 +1076,15 @@ function HorseProfileEditor({
         quality: 0.86
       });
 
-      const selectedUri = result.canceled ? undefined : result.assets[0]?.uri;
-      if (selectedUri) {
+      const picked = result.canceled ? undefined : result.assets[0];
+      if (picked?.uri) {
         selectionHaptic();
-        onPhotoChange(selectedUri);
+        onPhotoChange(picked.uri, {
+          uri: picked.uri,
+          fileName: picked.fileName ?? `horse-${Date.now()}.jpg`,
+          mimeType: picked.mimeType ?? "image/jpeg",
+          byteSize: picked.fileSize ?? 0
+        });
         setPhotoSheetVisible(false);
       }
     } catch {

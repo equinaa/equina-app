@@ -1,7 +1,13 @@
 # Equina Impact Assessment
 
 Assessment date: 2026-08-25
-Assessed artifact: `Equina 2.0 - copie` working tree, Supabase project `vdcrllzyzbdjonotrujb` (Frankfurt), web client `https://equina-five.vercel.app`
+
+> **Re-provisioning note (2026-09-09).** The environment assessed here
+> (`vdcrllzyzbdjonotrujb`, `equina-five.vercel.app`) was deleted and rebuilt as
+> `mvdxohyayriywbcknulg` / `equina-ten.vercel.app`. Identifiers below were
+> updated to the current environment; the findings and dates remain those of
+> the original assessment.
+Assessed artifact: `Equina 2.0 - copie` working tree, Supabase project `mvdxohyayriywbcknulg` (Frankfurt), web client `https://equina-ten.vercel.app`
 Assessment basis: repository inspection, `docs/EQUINA_BACKEND_AUDIT_2026-07-29.md`, `docs/EQUINA_BACKEND_DEPLOYMENT_INVENTORY.md`, `docs/EQUINA_ACTION_REGISTRY.md`, and a re-run of the automated suite on 2026-08-25.
 
 ## 1. Purpose And Scope
