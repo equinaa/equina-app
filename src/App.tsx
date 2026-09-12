@@ -223,9 +223,13 @@ const stableNutritionMeals: Array<{
   { id: "evening", time: "19:00", title: "Evening forage", body: "Hay + saved supplements", amount: "8 kg" }
 ];
 const stableWaterGoal = 35;
+// Nothing has been fed and nothing has been drunk until the rider says so.
+// The meal plan itself is still a sample, but "already completed" and a water
+// total are claims about care that was given — the one thing a horse-health
+// product must never assert on the rider's behalf.
 const initialNutritionState: NutritionState = {
-  completedMeals: ["morning"],
-  waterLiters: 27
+  completedMeals: [],
+  waterLiters: 0
 };
 
 function HorseshoeIcon({
@@ -439,7 +443,7 @@ const academyLessons = [
     level: "Intermediate",
     topic: "Dressage",
     summary: "Create a softer hand while keeping Ralfy forward and relaxed.",
-    progress: 64,
+    progress: 0,
     image: onboardingEditorial.Dressage,
     chapters: [
       { time: "0:00", title: "Warm-up feel" },
@@ -455,7 +459,7 @@ const academyLessons = [
     level: "Intermediate",
     topic: "Jumping",
     summary: "Build rhythm through small lines without rushing the last stride.",
-    progress: 22,
+    progress: 0,
     image: equinaImages.jumping,
     chapters: [
       { time: "0:00", title: "Canter rhythm" },
@@ -551,7 +555,7 @@ const academyLessons = [
     level: "Beginner",
     topic: "Dressage",
     summary: "Make walk-trot transitions cleaner with a simple three-cue routine.",
-    progress: 48,
+    progress: 0,
     image: equinaImages.profile,
     chapters: [
       { time: "0:00", title: "Seat first" },
@@ -567,7 +571,7 @@ const academyLessons = [
     level: "Mindset",
     topic: "Mindset",
     summary: "A calm mental reset for riders who overthink the bigger fence.",
-    progress: 8,
+    progress: 0,
     image: onboardingEditorial.Eventing,
     chapters: [
       { time: "0:00", title: "Breathe before turn" },
@@ -605,9 +609,9 @@ const academyLessons = [
 }>;
 
 const academyPaths = [
-  { title: "Dressage base", body: "Contact, rhythm, transitions", progress: 38, lessons: "4 lessons", accent: "#183B32" },
-  { title: "Jumping calm", body: "Lines, rhythm, confidence", progress: 22, lessons: "3 lessons", accent: "#8C6A3E" },
-  { title: "Care basics", body: "Recovery, saddle marks, checks", progress: 12, lessons: "3 lessons", accent: "#A7813D" }
+  { title: "Dressage base", body: "Contact, rhythm, transitions", progress: 0, lessons: "4 lessons", accent: "#183B32" },
+  { title: "Jumping calm", body: "Lines, rhythm, confidence", progress: 0, lessons: "3 lessons", accent: "#8C6A3E" },
+  { title: "Care basics", body: "Recovery, saddle marks, checks", progress: 0, lessons: "3 lessons", accent: "#A7813D" }
 ];
 
 const levelGuidance: Record<
@@ -922,8 +926,10 @@ function EquinaApp() {
   const [onboardingHorseName, setOnboardingHorseName] = useState("");
   const [onboardingHorseBreed, setOnboardingHorseBreed] = useState("");
   const [onboardingHorseSex, setOnboardingHorseSex] = useState<(typeof horseSexes)[number]>("Gelding");
-  const [onboardingHorseAge, setOnboardingHorseAge] = useState("9");
-  const [onboardingHorseHeight, setOnboardingHorseHeight] = useState("166");
+  // Empty, not a sample value. Onboarding never asks for either, so any default
+  // here is shown to the rider as a fact about their own horse.
+  const [onboardingHorseAge, setOnboardingHorseAge] = useState("");
+  const [onboardingHorseHeight, setOnboardingHorseHeight] = useState("");
   const [onboardingRideFeel, setOnboardingRideFeel] = useState<(typeof horseRideFeels)[number]>("Extra energy");
   const [onboardingFrequency, setOnboardingFrequency] = useState<(typeof ridingFrequencies)[number]>("3-4 rides/week");
   const [onboardingCarePriority, setOnboardingCarePriority] = useState<(typeof carePriorities)[number]>("Training plan");
@@ -943,7 +949,9 @@ function EquinaApp() {
   // Seeded for demo mode only. A connected account counts its real journal.
   const [localSessionCount, setLocalSessionCount] = useState(4);
   const [careLogged, setCareLogged] = useState(false);
-  const [communityLikes, setCommunityLikes] = useState(18);
+  // Starts at zero. Engagement is the one number a social product must never
+  // invent — it is the whole signal a rider reads the feed for.
+  const [communityLikes, setCommunityLikes] = useState(0);
   const [sharedRide, setSharedRide] = useState(false);
   const [lastRideRecapVisible, setLastRideRecapVisible] = useState(false);
   const [dailyMood, setDailyMood] = useState<MoodOption>("Focused");
@@ -1087,8 +1095,14 @@ function EquinaApp() {
   const marketListings = filterLiveListings(effectiveListings, marketSearch, marketFilter);
   const seller = api.store.profiles.find((profile) => profile.userId === sellerSession.userId);
   const reservedListing = effectiveListings.find((listing) => listing.id === reservedListingId);
-  const buyerOrders = api.store.orders.filter((order) => order.buyerId === buyerSession.userId);
-  const sellerOrders = api.store.orders.filter((order) => order.sellerId === sellerSession.userId);
+  // Seeded orders belong to the demo only. A connected rider has none, and a
+  // statistics row is read as fact regardless of the word next to it.
+  const buyerOrders = accountMode === "demo"
+    ? api.store.orders.filter((order) => order.buyerId === buyerSession.userId)
+    : [];
+  const sellerOrders = accountMode === "demo"
+    ? api.store.orders.filter((order) => order.sellerId === sellerSession.userId)
+    : [];
   const sellerRevenueLabel = orderTotalsLabel(sellerOrders);
   const activeSellerListings = effectiveListings.filter((listing) => listing.sellerId === sellerSession.userId && listing.status === "active").length;
   const horseState: HorseState = {
@@ -1448,7 +1462,9 @@ function EquinaApp() {
     setFocusStarted(false);
     setLocalSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 14));
-    refresh(onboardingHasHorse ? `Plan saved to ${primaryHorseName}'s log.` : "Plan saved to your ride journal.");
+    // This completes a focus plan; it does not write a ride. Claiming the
+    // journal here would be the same invented fact the ride count was.
+    refresh("Focus plan complete. Log a ride to add it to your journal.");
   };
 
   const toggleNutritionMeal = (mealId: NutritionMealId) => {
@@ -1930,6 +1946,12 @@ function EquinaApp() {
     tab === "assistant" ? `${academyMode}-${coachOnboarded ? "chat" : "setup"}` : "",
     tab === "gear" ? `${shopMode}-${shopBuyerView}-${shopSellerView}-${shopOpenedListingId}` : ""
   ].join("-");
+  // A conversation fills the viewport and scrolls its own message list. The
+  // page ScrollView only offers `flexGrow`, which sets a minimum height and no
+  // maximum — so a growing conversation pushed the composer past the bottom
+  // edge, and with page scrolling disabled there was no way to reach it.
+  // Measuring the viewport gives the conversation a definite height to live in.
+  const [contentViewportHeight, setContentViewportHeight] = useState(0);
   const immersiveConversation =
     (tab === "assistant" && academyMode === "ai") ||
     (tab === "gear" && (
@@ -2062,10 +2084,15 @@ function EquinaApp() {
           <ScrollView
             key={contentKey}
             style={styles.content}
+            onLayout={(event) => {
+              const next = Math.round(event.nativeEvent.layout.height);
+              setContentViewportHeight((current) => current === next ? current : next);
+            }}
             contentContainerStyle={[
               styles.contentInner,
               focusedTask && !immersiveConversation && styles.contentInnerFocused,
-              immersiveConversation && styles.contentInnerImmersive
+              immersiveConversation && styles.contentInnerImmersive,
+              immersiveConversation && contentViewportHeight > 0 && { height: contentViewportHeight }
             ]}
             scrollEnabled={!immersiveConversation}
             keyboardShouldPersistTaps="handled"
@@ -2187,7 +2214,9 @@ function EquinaApp() {
             )}
             {tab === "community" && (
               <CommunityScreen
-                posts={api.community.listVisiblePosts()}
+                // Seeded posts carry invented authors. A connected rider must
+                // never be shown a community that does not exist.
+                posts={accountMode === "demo" ? api.community.listVisiblePosts() : []}
                 likes={communityLikes}
                 sharedRide={sharedRide}
                 rideShare={{
@@ -3167,8 +3196,8 @@ function GearScreen({
 
             <CompactActionList
               items={[
-                { Icon: PackageCheck, title: "Orders", body: `${sellerOrders.length} sample sold items`, onPress: () => onSellerViewChange("orders") },
-                { Icon: WalletCards, title: "Revenue", body: `${sellerRevenueLabel} sample total`, onPress: () => onSellerViewChange("revenue") },
+                { Icon: PackageCheck, title: "Orders", body: `${sellerOrders.length} sold items`, onPress: () => onSellerViewChange("orders") },
+                { Icon: WalletCards, title: "Revenue", body: `${sellerRevenueLabel} total`, onPress: () => onSellerViewChange("revenue") },
                 { Icon: MessageSquareText, title: "Messages", body: shopConversation.connected ? `${liveMessageCount} conversations` : "Secure messaging unavailable", onPress: () => onSellerViewChange("messages") }
               ]}
             />
@@ -3253,7 +3282,7 @@ function GearScreen({
 
             <View style={styles.shopAccountLinks}>
               <Pressable testID="shop-open-orders" accessibilityRole="button" accessibilityLabel={`Open ${buyerOrders.length} orders`} style={styles.shopAccountLink} onPress={() => onBuyerViewChange("orders")}>
-                <Text style={styles.shopAccountLinkText}>{buyerOrders.length} sample {buyerOrders.length === 1 ? "order" : "orders"}</Text>
+                <Text style={styles.shopAccountLinkText}>{buyerOrders.length} {buyerOrders.length === 1 ? "order" : "orders"}</Text>
               </Pressable>
               <View style={styles.shopAccountDot} />
               <Pressable testID="shop-open-saved" accessibilityRole="button" accessibilityLabel={`Open ${savedListingIds.length} saved items`} style={styles.shopAccountLink} onPress={() => onBuyerViewChange("saved")}>
@@ -5999,6 +6028,9 @@ function CommunityScreen({
         </View>
       )}
 
+      {/* The story rail shows the same invented riders as the feed, so it is
+          bound to the same signal: no posts means no community to preview. */}
+      {posts.length > 0 && (
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.communityStoryRail}>
         {communityStories.map((story) => (
           <View
@@ -6018,6 +6050,7 @@ function CommunityScreen({
           </View>
         ))}
       </ScrollView>
+      )}
 
       {sharedRide && (
         <CommunityFeedCard
@@ -6026,9 +6059,11 @@ function CommunityScreen({
           title={`${rideShare.horseName} finished today's ${rideShare.discipline.toLowerCase()} work`}
           body={`${rideShare.duration} · ${rideShare.focus} · rider marked ${rideShare.mood.toLowerCase()}.`}
           image={rideShare.image}
-          likes={likes + 8}
-          comments={2}
-          verified
+          // A ride the rider just shared has no likes and no comments yet, and
+          // it carries no verification. Inventing either taught them the number
+          // below every other post is invented too.
+          likes={likes}
+          comments={0}
           interactionsEnabled={equinaFeatureFlags.clubInteractions}
           onLike={onLike}
           onComment={() => onClubAction("Comments")}
@@ -6038,6 +6073,15 @@ function CommunityScreen({
       <View style={styles.communityFeedHeader}>
         <Text style={styles.communityFeedTitle}>From your circle</Text>
       </View>
+
+      {posts.length === 0 && !sharedRide && (
+        <View style={styles.communityEmpty}>
+          <Text style={styles.communityEmptyTitle}>Nothing here yet.</Text>
+          <Text style={styles.communityEmptyBody}>
+            Club opens once moderation is in place. Your rides and records stay private until then.
+          </Text>
+        </View>
+      )}
 
       {posts.slice(0, 1).map((post, index) => (
         <CommunityFeedCard
@@ -6229,7 +6273,11 @@ function ProfileScreen({
           <View>
             <Text numberOfLines={1} adjustsFontSizeToFit style={styles.profileHorseFeatureTitle}>{horseName}</Text>
             <Text style={styles.profileHorseFeatureMeta}>{discipline} · {horseBreed || "Breed"} · {horseSex}</Text>
-            <Text style={styles.profileHorseFeatureDetail}>{level} · {frequency} · {horseAge || "?"} years · {horseHeight || "?"} cm</Text>
+            <Text style={styles.profileHorseFeatureDetail}>
+              {[level, frequency, horseAge ? `${horseAge} years` : "", horseHeight ? `${horseHeight} cm` : ""]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
           </View>
         </View>
       </View>
@@ -15433,6 +15481,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 22,
     fontWeight: "600"
+  },
+  communityEmpty: {
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    gap: 8
+  },
+  communityEmptyTitle: {
+    color: nightTheme.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600"
+  },
+  communityEmptyBody: {
+    color: nightTheme.muted,
+    fontSize: 15,
+    lineHeight: 21
   },
   communityFeedMeta: {
     color: nightTheme.faint,

@@ -369,6 +369,25 @@ export function OnboardingScreen({
       <View style={styles.chrome}>
         <View style={styles.topBar}>
           <Text accessibilityRole="header" style={styles.brand}>Equina</Text>
+          {/* A returning rider should never have to walk through account
+              creation to find the way in. The sheet is already mounted at the
+              root of this screen, so signing in is reachable from step one. */}
+          {completionMode === "connected" && !signedIn && (
+            <MotionPressable
+              testID="onboarding-sign-in"
+              accessibilityRole="button"
+              accessibilityLabel="Sign in to an existing account"
+              hitSlop={6}
+              onPress={() => {
+                selectionHaptic();
+                setAccountMethod("signin");
+                setAccountSheetVisible(true);
+              }}
+              style={styles.topSignIn}
+            >
+              <Text style={styles.topSignInText}>Sign in</Text>
+            </MotionPressable>
+          )}
           {step === "you" && showDemo && (
             <MotionPressable
               testID="onboarding-use-demo"
@@ -1290,6 +1309,18 @@ const styles = StyleSheet.create({
   brand: {
     ...equinaTheme.typography.title,
     color: equinaTheme.text.primary
+  },
+  topSignIn: {
+    minWidth: 64,
+    minHeight: equinaTheme.accessibility.minimumTapTarget,
+    paddingHorizontal: equinaTheme.spacing.compact,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent"
+  },
+  topSignInText: {
+    ...equinaTheme.typography.label,
+    color: equinaTheme.colors.brass
   },
   demoButton: {
     minWidth: 72,
