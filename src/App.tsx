@@ -439,7 +439,7 @@ const academyLessons = [
     level: "Intermediate",
     topic: "Dressage",
     summary: "Create a softer hand while keeping Ralfy forward and relaxed.",
-    progress: 64,
+    progress: 0,
     image: onboardingEditorial.Dressage,
     chapters: [
       { time: "0:00", title: "Warm-up feel" },
@@ -455,7 +455,7 @@ const academyLessons = [
     level: "Intermediate",
     topic: "Jumping",
     summary: "Build rhythm through small lines without rushing the last stride.",
-    progress: 22,
+    progress: 0,
     image: equinaImages.jumping,
     chapters: [
       { time: "0:00", title: "Canter rhythm" },
@@ -551,7 +551,7 @@ const academyLessons = [
     level: "Beginner",
     topic: "Dressage",
     summary: "Make walk-trot transitions cleaner with a simple three-cue routine.",
-    progress: 48,
+    progress: 0,
     image: equinaImages.profile,
     chapters: [
       { time: "0:00", title: "Seat first" },
@@ -567,7 +567,7 @@ const academyLessons = [
     level: "Mindset",
     topic: "Mindset",
     summary: "A calm mental reset for riders who overthink the bigger fence.",
-    progress: 8,
+    progress: 0,
     image: onboardingEditorial.Eventing,
     chapters: [
       { time: "0:00", title: "Breathe before turn" },
@@ -605,9 +605,9 @@ const academyLessons = [
 }>;
 
 const academyPaths = [
-  { title: "Dressage base", body: "Contact, rhythm, transitions", progress: 38, lessons: "4 lessons", accent: "#183B32" },
-  { title: "Jumping calm", body: "Lines, rhythm, confidence", progress: 22, lessons: "3 lessons", accent: "#8C6A3E" },
-  { title: "Care basics", body: "Recovery, saddle marks, checks", progress: 12, lessons: "3 lessons", accent: "#A7813D" }
+  { title: "Dressage base", body: "Contact, rhythm, transitions", progress: 0, lessons: "4 lessons", accent: "#183B32" },
+  { title: "Jumping calm", body: "Lines, rhythm, confidence", progress: 0, lessons: "3 lessons", accent: "#8C6A3E" },
+  { title: "Care basics", body: "Recovery, saddle marks, checks", progress: 0, lessons: "3 lessons", accent: "#A7813D" }
 ];
 
 const levelGuidance: Record<
@@ -945,7 +945,9 @@ function EquinaApp() {
   // Seeded for demo mode only. A connected account counts its real journal.
   const [localSessionCount, setLocalSessionCount] = useState(4);
   const [careLogged, setCareLogged] = useState(false);
-  const [communityLikes, setCommunityLikes] = useState(18);
+  // Starts at zero. Engagement is the one number a social product must never
+  // invent — it is the whole signal a rider reads the feed for.
+  const [communityLikes, setCommunityLikes] = useState(0);
   const [sharedRide, setSharedRide] = useState(false);
   const [lastRideRecapVisible, setLastRideRecapVisible] = useState(false);
   const [dailyMood, setDailyMood] = useState<MoodOption>("Focused");
@@ -6042,9 +6044,11 @@ function CommunityScreen({
           title={`${rideShare.horseName} finished today's ${rideShare.discipline.toLowerCase()} work`}
           body={`${rideShare.duration} · ${rideShare.focus} · rider marked ${rideShare.mood.toLowerCase()}.`}
           image={rideShare.image}
-          likes={likes + 8}
-          comments={2}
-          verified
+          // A ride the rider just shared has no likes and no comments yet, and
+          // it carries no verification. Inventing either taught them the number
+          // below every other post is invented too.
+          likes={likes}
+          comments={0}
           interactionsEnabled={equinaFeatureFlags.clubInteractions}
           onLike={onLike}
           onComment={() => onClubAction("Comments")}
