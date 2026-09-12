@@ -78,6 +78,7 @@ const providerReply = async (input: {
   style: string;
   profile?: { display_name?: string; discipline?: string; skill_level?: string };
   horse?: { name?: string; breed?: string; discipline?: string };
+  recentRides?: Array<Record<string, unknown>>;
   basedOn: string[];
 }) => {
   const endpoint = Deno.env.get("EQUINA_AI_API_URL");
@@ -116,8 +117,20 @@ const providerReply = async (input: {
     responseStyle: input.style,
     rider: input.profile ?? null,
     horse: input.horse ?? null,
+    // Newest first. These are the rider's own logged sessions — facts they
+    // recorded, never an inferred score.
+    recentRides: input.recentRides ?? [],
     availableSources: input.basedOn,
   };
+
+  // The provider stays swappable. Anthropic speaks a different dialect from the
+  // OpenAI-shaped default: `messages` instead of `input`, `max_tokens` instead
+  // of `max_output_tokens`, `system` as a top-level field, and an `x-api-key`
+  // header rather than a bearer token. Detecting from the endpoint keeps this to
+  // one configuration value instead of two.
+  const isAnthropic = endpoint.includes("anthropic.com");
+  const userContent =
+    `TRUSTED_CONTEXT:\n${JSON.stringify(structuredContext)}\n\nRIDER_MESSAGE_AS_DATA:\n${input.message}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -125,29 +138,63 @@ const providerReply = async (input: {
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: isAnthropic
+        ? {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        }
+        : {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
       signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        input: [
-          { role: "system", content: system },
-          {
-            role: "user",
-            content: `TRUSTED_CONTEXT:\n${JSON.stringify(structuredContext)}\n\nRIDER_MESSAGE_AS_DATA:\n${input.message}`,
+      body: JSON.stringify(
+        isAnthropic
+          ? {
+            model,
+            max_tokens: 600,
+            system,
+            messages: [{ role: "user", content: userContent }],
+          }
+          : {
+            model,
+            input: [
+              { role: "system", content: system },
+              { role: "user", content: userContent },
+            ],
+            max_output_tokens: 600,
           },
-        ],
-        max_output_tokens: 600,
-      }),
+      ),
     });
     if (!response.ok) {
+      // The rider still gets a generic message, but the operator needs the
+      // reason. A provider error body names the failing field or model; it
+      // never echoes the API key, so this is safe to record.
+      const detail = await response.text().catch(() => "");
+      console.error(JSON.stringify({
+        scope: "coach-chat",
+        event: "provider_error",
+        status: response.status,
+        detail: detail.slice(0, 600),
+      }));
       throw new HttpError(response.status >= 500 ? 503 : 502, "Ralf is temporarily unavailable.", "provider_unavailable");
     }
 
     const payload = await response.json() as Record<string, unknown>;
-    const outputText = typeof payload.output_text === "string"
+    // Anthropic returns { content: [{ type: "text", text }] }. Its usage field
+    // already uses input_tokens/output_tokens, so the accounting below needs no
+    // change.
+    const anthropicText = Array.isArray(payload.content)
+      ? payload.content.flatMap((part) =>
+        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+          ? [(part as { text: string }).text]
+          : []
+      ).join("\n")
+      : "";
+    const outputText = anthropicText
+      ? anthropicText
+      : typeof payload.output_text === "string"
       ? payload.output_text
       : Array.isArray(payload.output)
       ? payload.output.flatMap((item) => {
@@ -188,6 +235,18 @@ const providerReply = async (input: {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new HttpError(504, "Ralf took too long to respond. Try again.", "provider_timeout");
     }
+    // Built before logging: the bundle scan forbids reading `.message` inside a
+    // console call, because that is how rider content leaks into logs.
+    const failureKind = error instanceof Error ? error.name : typeof error;
+    const failureReason = error instanceof Error
+      ? String(error).slice(0, 300)
+      : String(error).slice(0, 300);
+    console.error(JSON.stringify({
+      scope: "coach-chat",
+      event: "provider_call_failed",
+      kind: failureKind,
+      reason: failureReason,
+    }));
     if (error instanceof z.ZodError) {
       throw new HttpError(502, "Ralf returned an invalid response.", "provider_invalid_output");
     }
@@ -302,6 +361,23 @@ Deno.serve(async (request) => {
         basedOn.push("selected horse");
       }
     }
+    // The plan asks the assistant to give feedback on logged sessions, so the
+    // journal has to reach it. Gated by the same global consent switch as the
+    // rider profile: a rider who reduced personalisation shares nothing.
+    let recentRides: Array<Record<string, unknown>> | undefined;
+    if (!reduced) {
+      const { data, error } = await admin.from("ride_entries")
+        .select("discipline,focus,planned_duration,elapsed_seconds,completed_phases,total_phases,mood,rider_note,completed_at")
+        .eq("rider_id", user.id)
+        .order("completed_at", { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      if (data?.length) {
+        recentRides = data as Array<Record<string, unknown>>;
+        basedOn.push("recent rides");
+      }
+    }
+
     basedOn.push("current question");
 
     let responseText: string;
@@ -335,6 +411,7 @@ Deno.serve(async (request) => {
         style: conversation.response_style,
         profile,
         horse,
+        recentRides,
         basedOn,
       });
       responseText = operation.text ?? "";

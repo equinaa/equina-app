@@ -4,10 +4,13 @@ export const equinaFeatureFlags = {
   accountSettings: enabled(process.env.EXPO_PUBLIC_ENABLE_ACCOUNT_SETTINGS),
   coachChat: enabled(process.env.EXPO_PUBLIC_ENABLE_COACH_CHAT),
   pushNotifications: enabled(process.env.EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS),
-  clubPublishing: false,
-  clubInteractions: false,
-  shopTransactions: false,
-  shopListingCreation: false,
+  // Default false when the variable is absent, so nothing activates by accident.
+  // These stay gated by the server capability too, and several of those also
+  // require a configured provider, so a compile switch alone opens nothing.
+  clubPublishing: enabled(process.env.EXPO_PUBLIC_ENABLE_CLUB_PUBLISHING),
+  clubInteractions: enabled(process.env.EXPO_PUBLIC_ENABLE_CLUB_INTERACTIONS),
+  shopTransactions: enabled(process.env.EXPO_PUBLIC_ENABLE_SHOP_TRANSACTIONS),
+  shopListingCreation: enabled(process.env.EXPO_PUBLIC_ENABLE_SHOP_LISTING_CREATION),
   shopMessaging: enabled(process.env.EXPO_PUBLIC_ENABLE_SHOP_MESSAGING),
   recordMutations: enabled(process.env.EXPO_PUBLIC_ENABLE_RECORD_MUTATIONS),
   horseManagement: enabled(process.env.EXPO_PUBLIC_ENABLE_HORSE_MANAGEMENT),

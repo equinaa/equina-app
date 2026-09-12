@@ -80,6 +80,7 @@ import {
   type OnboardingAuthProvider,
   type OnboardingCompletionMode,
   type OnboardingDiscipline,
+  type OnboardingPhotoAsset,
   type OnboardingStep
 } from "./features/onboarding/OnboardingScreen";
 import {
@@ -914,6 +915,10 @@ function EquinaApp() {
   const [onboardingGoal, setOnboardingGoal] = useState<RiderGoal>("Daily training");
   const [onboardingHasHorse, setOnboardingHasHorse] = useState(true);
   const [onboardingHorsePhoto, setOnboardingHorsePhoto] = useState("");
+  // Only set when the rider picked a real photo. Sample photos carry a marker
+  // value and nothing to upload.
+  const [onboardingHorsePhotoAsset, setOnboardingHorsePhotoAsset] =
+    useState<OnboardingPhotoAsset | null>(null);
   const [onboardingHorseName, setOnboardingHorseName] = useState("");
   const [onboardingHorseBreed, setOnboardingHorseBreed] = useState("");
   const [onboardingHorseSex, setOnboardingHorseSex] = useState<(typeof horseSexes)[number]>("Gelding");
@@ -1693,7 +1698,7 @@ function EquinaApp() {
   };
 
   const persistOnboarding = async () => {
-    await equinaSession.completeOnboarding({
+    const snapshot = await equinaSession.completeOnboarding({
       displayName: riderDisplayName,
       locale: "en",
       discipline: toDomainDiscipline(onboardingDiscipline),
@@ -1701,6 +1706,28 @@ function EquinaApp() {
       horseName: onboardingHasHorse ? primaryHorseName : undefined,
       horseBreed: onboardingHasHorse ? onboardingHorseBreed.trim() || undefined : undefined
     });
+
+    // The horse has to exist before its photo can be uploaded, so this runs
+    // after onboarding rather than as part of it. A failure here must not undo
+    // a successful sign-up: the rider keeps the account and can add the photo
+    // again from the horse profile.
+    const horseId = snapshot?.primaryHorse?.id;
+    const asset = onboardingHorsePhotoAsset;
+    if (horseId && asset && equinaSession.backend) {
+      try {
+        // Some pickers omit the size. The upload boundary compares the declared
+        // size against the bytes it receives, so measure rather than guess.
+        const byteSize = asset.byteSize > 0
+          ? asset.byteSize
+          : (await (await fetch(asset.uri)).blob()).size;
+        await equinaSession.backend.records.uploadHorsePhoto(horseId, { ...asset, byteSize });
+        await equinaSession.refreshAccount();
+      } catch {
+        refresh("Your horse was saved. The photo could not be uploaded — you can add it from the horse profile.");
+      }
+    }
+
+    setOnboardingHorsePhotoAsset(null);
     await clearOnboardingDraft();
   };
 
@@ -2265,7 +2292,10 @@ function EquinaApp() {
                 onDisciplineChange={updateOnboardingDiscipline}
                 onLevelChange={setOnboardingLevel}
                 onHasHorseChange={setOnboardingHasHorse}
-                onHorsePhotoChange={setOnboardingHorsePhoto}
+                onHorsePhotoChange={(value, asset) => {
+                  setOnboardingHorsePhoto(value);
+                  setOnboardingHorsePhotoAsset(asset ?? null);
+                }}
                 onHorseNameChange={setOnboardingHorseName}
                 onHorseBreedChange={setOnboardingHorseBreed}
                 onNext={advanceOnboarding}
