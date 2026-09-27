@@ -31,7 +31,30 @@ import {
   EquinaSheet
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
+import { cadenceOf, isCareType, nextDueOn } from "../../domain/care-schedule";
 import type { HorseInput, TimelineRecordInput } from "./useHorseRecords";
+
+/**
+ * How often this kind of care comes round. Picking one fills the due date in,
+ * which is the whole point -- a rider should never have to count six weeks
+ * forward on a calendar to book the farrier.
+ */
+const cadenceChoices = ["None", "6 weeks", "3 months", "6 months", "1 year"] as const;
+const cadenceDaysByChoice: Record<(typeof cadenceChoices)[number], number | null> = {
+  None: null,
+  "6 weeks": 42,
+  "3 months": 90,
+  "6 months": 182,
+  "1 year": 365
+};
+const choiceForCadence = (days: number | null): (typeof cadenceChoices)[number] =>
+  cadenceChoices.find((choice) => cadenceDaysByChoice[choice] === days) ?? "None";
+
+/** Setting the cadence back to None has to remove it, not leave the old one. */
+const omitCadence = (details: Record<string, unknown>): Record<string, unknown> => {
+  const { cadenceDays: _dropped, ...rest } = details;
+  return rest;
+};
 
 const disciplines = ["dressage", "jumping", "eventing", "trail"] as const;
 const sexOptions = ["mare", "gelding", "stallion", "unknown"] as const;
@@ -310,6 +333,18 @@ export function RecordEditorSheet({
   const [title, setTitle] = useState("");
   const [occurredOn, setOccurredOn] = useState(today());
   const [dueOn, setDueOn] = useState("");
+  const [cadence, setCadence] = useState<(typeof cadenceChoices)[number]>("None");
+
+  const recurring = isCareType(recordType);
+  const cadenceDays = recurring ? cadenceDaysByChoice[cadence] : null;
+
+  const chooseCadence = (choice: (typeof cadenceChoices)[number]) => {
+    setCadence(choice);
+    const days = cadenceDaysByChoice[choice];
+    if (!days) return;
+    const next = nextDueOn(occurredOn, days);
+    if (next) setDueOn(next);
+  };
   const [providerName, setProviderName] = useState("");
   const [notes, setNotes] = useState("");
   const [asset, setAsset] = useState<UploadAsset | undefined>();
@@ -323,6 +358,7 @@ export function RecordEditorSheet({
     setTitle(record?.title ?? recordTypes.find((entry) => entry.type === nextType)?.label ?? "Record");
     setOccurredOn(record?.occurredOn ?? today());
     setDueOn(record?.dueOn ?? "");
+    setCadence(choiceForCadence(record ? cadenceOf(record) : null));
     setProviderName(record?.providerName ?? "");
     setNotes(record?.notes ?? "");
     setAsset(undefined);
@@ -373,7 +409,9 @@ export function RecordEditorSheet({
       providerName: providerName.trim() || undefined,
       notes: notes.trim() || undefined,
       source: record?.source ?? "rider",
-      details: record?.details ?? {}
+      details: cadenceDays
+        ? { ...(record?.details ?? {}), cadenceDays }
+        : omitCadence(record?.details ?? {})
     }, asset);
   };
 
@@ -447,6 +485,15 @@ export function RecordEditorSheet({
             />
           </View>
         </View>
+        {recurring ? (
+          <EquinaSelector
+            label="Repeats"
+            options={cadenceChoices}
+            value={cadence}
+            testPrefix="record-editor-cadence"
+            onChange={chooseCadence}
+          />
+        ) : null}
         <EquinaField
           testID="record-editor-provider"
           label="Provider"

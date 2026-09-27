@@ -107,6 +107,8 @@ import {
   HorseEditorSheet,
   RecordEditorSheet
 } from "./features/records/HorseRecordSheets";
+import { CareSchedule } from "./features/records/CareSchedule";
+import { buildCareSchedule, completionFor, type CareItem } from "./domain/care-schedule";
 import {
   useHorseRecords,
   type HorseRecordsController,
@@ -4151,6 +4153,29 @@ function StableScreen({
     .filter((record) => record.dueOn && record.status !== "archived")
     .sort((left, right) => String(left.dueOn).localeCompare(String(right.dueOn)))[0];
 
+  // Derived from the due dates on every render, so a vaccination that lapsed
+  // in March reports itself as lapsed. The stored status column never moves.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const careSchedule = buildCareSchedule(records, todayIso);
+  const horseNames = Object.fromEntries(horses.map((horse) => [horse.id, horse.name]));
+
+  const logCareDone = async (item: CareItem) => {
+    if (!canMutateRecords) return;
+    const completion = completionFor(item, todayIso);
+    if (!completion) return;
+    recordsController.clearError();
+    await recordsController.createRecord({
+      recordType: item.careType,
+      status: "current",
+      title: item.record.title,
+      occurredOn: completion.occurredOn,
+      dueOn: completion.dueOn,
+      providerName: item.record.providerName,
+      source: item.record.source,
+      details: { ...item.record.details, cadenceDays: completion.cadenceDays }
+    });
+  };
+
   const openHorseEditor = () => {
     recordsController.clearError();
     setHorseEditorVisible(true);
@@ -4558,6 +4583,19 @@ function StableScreen({
 
           {view === "health" && (
             <>
+              <SectionTitle
+                title="Care schedule"
+                action={careSchedule.length ? `${careSchedule.length} tracked` : "none yet"}
+              />
+              <CareSchedule
+                schedule={careSchedule}
+                horseNames={horseNames}
+                showHorse={horses.length > 1}
+                onLogDone={canMutateRecords ? (item) => void logCareDone(item) : undefined}
+                onAddDueDate={canMutateRecords ? () => openRecordEditor("farrier") : undefined}
+                busy={Boolean(saving)}
+              />
+
               <View style={styles.stableHealthCard}>
                 <View style={styles.stableHealthIcon}>
                   <HeartPulse size={21} color={equinaTheme.colors.ivory} />
