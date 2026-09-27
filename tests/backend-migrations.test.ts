@@ -85,7 +85,7 @@ const missingRls = await db.query<{ tablename: string }>(`
 assert.deepEqual(missingRls.rows, [], `All public backend tables need RLS: ${missingRls.rows.map((row) => row.tablename).join(", ")}`);
 
 const seededFlags = await db.query<{ enabled: boolean; rollout_percent: number }>("select enabled, rollout_percent from public.app_feature_flags");
-assert.equal(seededFlags.rows.length, 11);
+assert.equal(seededFlags.rows.length, 12);
 assert.ok(seededFlags.rows.every((flag) => !flag.enabled && flag.rollout_percent === 0));
 
 const riderA = "10000000-0000-4000-8000-000000000001";
@@ -757,6 +757,167 @@ await assert.rejects(
   /ride_entries_phases_consistent/,
   "Completed phases must not exceed the planned total."
 );
+
+
+// --- Ralf credit ledger -----------------------------------------------------
+
+await db.exec("reset role;");
+
+// Only the free tier ships with a number. Mid and premium are a commercial
+// decision nobody has made, and a missing row must resolve to no credits.
+const policies = await db.query<{ key: string; monthly_credits: number }>(
+  "select key, monthly_credits from public.coach_credit_policies order by key"
+);
+assert.deepEqual(policies.rows, [{ key: "free", monthly_credits: 15 }],
+  "Seeding a tier we have not priced would assert a commercial decision that was never made.");
+
+const spend = async (user: string, key: string, cost = 1) =>
+  await db.query<{ spend_coach_credits: { spent: number; balance: number; idempotent: boolean } }>(
+    "select public.spend_coach_credits($1, $2, $3, 'test') as spend_coach_credits",
+    [user, key, cost]
+  );
+const balanceOf = async (user: string) => {
+  const result = await db.query<{ balance: number }>(
+    "select private.coach_credit_balance($1) as balance", [user]
+  );
+  return result.rows[0]?.balance ?? -1;
+};
+
+// While the flag is off nothing is metered, nothing is charged, and nothing is
+// recorded. This is what lets the ledger ship before a paywall exists.
+await db.exec("update public.app_feature_flags set enabled = false, rollout_percent = 0 where key = 'coach_credits';");
+const unmetered = await spend(riderA, "20000000-0000-4000-8000-000000000000");
+assert.deepEqual(unmetered.rows[0]?.spend_coach_credits, { metered: false, spent: 0, idempotent: false });
+const lotsWhileOff = await db.query<{ n: number }>(
+  "select count(*)::int as n from public.coach_credit_lots where user_id = $1", [riderA]
+);
+assert.equal(lotsWhileOff.rows[0]?.n, 0, "An unmetered call must not even grant the free allowance.");
+
+await db.exec("update public.app_feature_flags set enabled = true, rollout_percent = 100 where key = 'coach_credits';");
+
+// The free allowance is granted lazily, on first spend, with no sweeping job.
+const firstSpend = await spend(riderA, "20000000-0000-4000-8000-000000000001");
+assert.equal(firstSpend.rows[0]?.spend_coach_credits.spent, 1);
+assert.equal(firstSpend.rows[0]?.spend_coach_credits.balance, 14,
+  "The free tier grants 15 on first use, and the first message costs one of them.");
+
+// A retried nonce must return the first result, not charge twice.
+const retry = await spend(riderA, "20000000-0000-4000-8000-000000000001");
+assert.equal(retry.rows[0]?.spend_coach_credits.idempotent, true);
+assert.equal(await balanceOf(riderA), 14, "A device retrying after a timeout must not be charged again.");
+
+// Granting is idempotent on (user, source, source_ref): a webhook replayed ten
+// times grants once.
+for (let attempt = 0; attempt < 3; attempt += 1) {
+  await db.query(
+    "select public.grant_coach_credits($1, 'purchased', 100, null, 'app_store', 'txn-1', 'pack')", [riderA]
+  );
+}
+assert.equal(await balanceOf(riderA), 114, "Replaying a purchase webhook must grant its credits exactly once.");
+
+// Credits bought through in-app purchase may not expire -- a store rule, so it
+// is a constraint rather than a convention.
+await assert.rejects(
+  db.query(`insert into public.coach_credit_lots(user_id, bucket, granted, remaining, expires_at, source, source_ref)
+            values ($1, 'purchased', 10, 10, now() + interval '30 days', 'app_store', 'txn-expiring')`, [riderA]),
+  /coach_credit_lots_purchased_never_expire/,
+  "Store rules forbid expiring purchased credits."
+);
+
+// What dies first is spent first, so a rider never loses a pack they paid for
+// because an allowance was sitting next to it.
+const before = await db.query<{ bucket: string; remaining: number }>(
+  "select bucket, remaining from public.coach_credit_lots where user_id = $1 order by bucket", [riderA]
+);
+assert.deepEqual(before.rows, [{ bucket: "purchased", remaining: 100 }, { bucket: "subscription", remaining: 14 }]);
+await spend(riderA, "20000000-0000-4000-8000-000000000002", 5);
+const after = await db.query<{ bucket: string; remaining: number }>(
+  "select bucket, remaining from public.coach_credit_lots where user_id = $1 order by bucket", [riderA]
+);
+assert.deepEqual(after.rows, [{ bucket: "purchased", remaining: 100 }, { bucket: "subscription", remaining: 9 }],
+  "The expiring allowance must drain before the purchased pack.");
+
+// A spend that crosses two batches records the split, so the refund can put
+// each share back where it came from.
+await spend(riderA, "20000000-0000-4000-8000-000000000003", 12);
+const crossing = await db.query<{ lots: Array<{ lot: number; credits: number }> }>(
+  "select lots from public.coach_credit_ledger where request_key = $1 and kind = 'spend'",
+  ["20000000-0000-4000-8000-000000000003"]
+);
+assert.equal(crossing.rows[0]?.lots.length, 2, "A spend crossing two batches must record how it was split.");
+assert.deepEqual(crossing.rows[0]?.lots.map((entry) => entry.credits), [9, 3]);
+
+// Nobody pays for a provider failure.
+await db.query("select public.refund_coach_credits($1, $2, 'provider failed')",
+  [riderA, "20000000-0000-4000-8000-000000000003"]);
+const refunded = await db.query<{ bucket: string; remaining: number }>(
+  "select bucket, remaining from public.coach_credit_lots where user_id = $1 order by bucket", [riderA]
+);
+assert.deepEqual(refunded.rows, [{ bucket: "purchased", remaining: 100 }, { bucket: "subscription", remaining: 9 }],
+  "A refund returns each share to the batch it came from.");
+
+// Refunding twice must not mint credits.
+await db.query("select public.refund_coach_credits($1, $2, 'duplicate')",
+  [riderA, "20000000-0000-4000-8000-000000000003"]);
+assert.equal(await balanceOf(riderA), 109, "A replayed refund must be a no-op, not a second credit.");
+
+// Running out raises PT402, which PostgREST turns into HTTP 402, and the
+// detail reports the balance BEFORE anything was drained.
+await spend(riderA, "20000000-0000-4000-8000-000000000006", 100);
+assert.equal(await balanceOf(riderA), 9);
+await assert.rejects(
+  db.query("select public.spend_coach_credits($1, $2, 10, 'too expensive')",
+    [riderA, "20000000-0000-4000-8000-000000000004"]),
+  (error: unknown) =>
+    error instanceof Error &&
+    /needed 10, spendable 9/.test(String((error as { detail?: string }).detail ?? error.message)),
+  "An exhausted balance must report what the rider actually had, not the partially drained state."
+);
+assert.equal(await balanceOf(riderA), 9, "A failed spend must charge nothing at all -- not even the batches it walked.");
+
+// The ledger is append-only. An audit trail that can be edited is a log.
+await assert.rejects(
+  db.query("update public.coach_credit_ledger set delta = 999 where user_id = $1", [riderA]),
+  /append-only/,
+  "The credit ledger must refuse edits."
+);
+await assert.rejects(
+  db.query("delete from public.coach_credit_ledger where user_id = $1", [riderA]),
+  /append-only/,
+  "The credit ledger must refuse deletes."
+);
+
+// Batches and ledger are written together and must always agree.
+const drift = await db.query("select * from private.coach_credit_drift()");
+assert.deepEqual(drift.rows, [], "Lot totals and ledger totals must reconcile exactly.");
+
+// The monthly window is anchored to the original moment and multiplied, never
+// iterated: a rider who starts on the 31st must not walk backwards.
+const anniversary = await db.query<{ period_start: Date }>(`
+  select period_start from private.coach_credit_period('2026-01-31T09:00:00Z'::timestamptz, '2026-04-15T09:00:00Z'::timestamptz)
+`);
+assert.equal(
+  anniversary.rows[0]?.period_start.toISOString().slice(0, 10), "2026-03-31",
+  "31 March, not 28 March: the window is anchored to the original 31st and multiplied. " +
+  "Iterating month by month would clamp at 28 February and never recover the 31st."
+);
+
+// A rider cannot read another rider's credits, and cannot write their own.
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+const peeking = await db.query("select count(*)::int as n from public.coach_credit_lots");
+assert.equal((peeking.rows[0] as { n: number }).n, 0, "Credits are private to the rider who holds them.");
+await assert.rejects(
+  db.query(`insert into public.coach_credit_lots(user_id, bucket, granted, remaining, source, source_ref)
+            values ($1, 'promo', 500, 500, 'promo', 'self-service')`, [riderB]),
+  /(row-level security|permission denied)/,
+  "A rider must never be able to grant themselves credits."
+);
+await assert.rejects(
+  db.query("select public.spend_coach_credits($1, $2, 1, 'direct')", [riderB, "20000000-0000-4000-8000-000000000005"]),
+  /permission denied/,
+  "Spending is a service-role path; the client never calls it directly."
+);
+await db.exec("reset role;");
 
 await db.close();
 console.log("Backend migrations executed successfully in isolated Postgres.");
