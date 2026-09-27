@@ -45,6 +45,9 @@ type MessageRow = {
   created_at: string;
 };
 
+/** How much of a rider note reaches the prompt. Keeps one credit bounded. */
+const RIDE_NOTE_PROMPT_LIMIT = 400;
+
 const healthPattern = /\b(colic|lame|lameness|swollen|swelling|injury|injured|medication|dose|fever|temperature|bleeding|cannot stand|won't eat|not eating|pain)\b/i;
 const unsafeOutputPattern = /\b(diagnos(?:e|is)|prescri(?:be|ption)|safe to ride|clear(?:ed)? to work|guaranteed treatment)\b/i;
 
@@ -312,9 +315,10 @@ Deno.serve(async (request) => {
       request_key_input: input.clientNonce,
     });
     if (usageError) {
-      const code = String(usageError.message).includes("minute")
-        ? "coach_rate_minute"
-        : String(usageError.message).includes("daily") ? "coach_rate_daily" : "coach_rate_failed";
+      // PT429 is the burst window and the runaway ceiling, and nothing else.
+      // Discriminating on a substring of the English message used to decide
+      // this, which broke silently the moment the wording changed.
+      const code = usageError.code === "PT429" ? "coach_rate_limited" : "coach_rate_failed";
       throw new HttpError(429, "Ralf needs a short pause before another message.", code);
     }
 
@@ -373,7 +377,16 @@ Deno.serve(async (request) => {
         .limit(5);
       if (error) throw error;
       if (data?.length) {
-        recentRides = data as Array<Record<string, unknown>>;
+        // The column accepts 2000 characters and five rides can therefore
+        // carry 10,000 characters of notes alone. One credit has to have a
+        // knowable worst case, so the note is capped on the way into the
+        // prompt rather than at the keyboard.
+        recentRides = (data as Array<Record<string, unknown>>).map((ride) => ({
+          ...ride,
+          rider_note: typeof ride.rider_note === "string" && ride.rider_note.length > RIDE_NOTE_PROMPT_LIMIT
+            ? `${ride.rider_note.slice(0, RIDE_NOTE_PROMPT_LIMIT)}…`
+            : ride.rider_note,
+        }));
         basedOn.push("recent rides");
       }
     }
@@ -382,6 +395,7 @@ Deno.serve(async (request) => {
 
     let responseText: string;
     let safetyCategory = "none";
+    let creditState: Record<string, unknown> | null = null;
     let operation: {
       text?: string;
       provider?: string;
@@ -404,16 +418,53 @@ Deno.serve(async (request) => {
         redacted_reason: "Health or lameness language required professional escalation.",
       });
     } else {
-      operation = await providerReply({
-        message: input.message,
-        focus: conversation.context_focus,
-        load: conversation.context_load,
-        style: conversation.response_style,
-        profile,
-        horse,
-        recentRides,
-        basedOn,
+      // Charge only here, and only now. The health branch above never reaches
+      // the provider, so it never costs a credit -- billing a rider for a
+      // canned "call your vet" would be charging for the one answer we give
+      // without asking anyone. The call is idempotent on the same nonce, so a
+      // device retrying after a timeout is not charged twice.
+      const { data: charge, error: chargeError } = await admin.rpc("spend_coach_credits", {
+        target_user_id: user.id,
+        request_key_input: input.clientNonce,
+        cost_input: 1,
+        reason_input: "coach message",
       });
+      if (chargeError) {
+        if (chargeError.code === "PT402") {
+          throw new HttpError(
+            402,
+            "You have used this month's Ralf credits. They return at the start of your next cycle.",
+            "coach_credits_exhausted",
+          );
+        }
+        throw chargeError;
+      }
+      creditState = charge as Record<string, unknown> | null;
+
+      try {
+        operation = await providerReply({
+          message: input.message,
+          focus: conversation.context_focus,
+          load: conversation.context_load,
+          style: conversation.response_style,
+          profile,
+          horse,
+          recentRides,
+          basedOn,
+        });
+      } catch (providerError) {
+        // Nobody pays for a 503. The refund is idempotent on the same nonce,
+        // and a failure to refund must not replace the provider error the
+        // rider actually needs to see.
+        try {
+          await admin.rpc("refund_coach_credits", {
+            target_user_id: user.id,
+            request_key_input: input.clientNonce,
+            reason_input: "provider failed",
+          });
+        } catch { /* the reconciler and the drift check are the backstop */ }
+        throw providerError;
+      }
       responseText = operation.text ?? "";
       if (unsafeOutputPattern.test(responseText)) {
         safetyCategory = "provider_review";
@@ -469,6 +520,11 @@ Deno.serve(async (request) => {
       userMessage: { ...userMessage, status: "complete" },
       assistantMessage,
       idempotent: false,
+      // Absent while the flag is off, so the client can tell "not metered yet"
+      // from "zero left" and never renders a paywall before there is one.
+      credits: creditState && creditState.metered === true
+        ? { balance: creditState.balance, spent: creditState.spent }
+        : undefined,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
