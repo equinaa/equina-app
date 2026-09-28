@@ -108,6 +108,9 @@ import {
   RecordEditorSheet
 } from "./features/records/HorseRecordSheets";
 import { CareSchedule } from "./features/records/CareSchedule";
+import { RideSummaryCard } from "./features/ride/RideSummaryCard";
+import { summarise, type RidePeriod } from "./domain/ride-stats";
+import type { RideEntry } from "./backend/contracts";
 import { buildCareSchedule, completionFor, type CareItem } from "./domain/care-schedule";
 import {
   useHorseRecords,
@@ -2103,6 +2106,7 @@ function EquinaApp() {
             {tab === "home" && (
               <HomeScreen
                 horse={horseState}
+                rideEntries={ridePersistence ? rideJournal.entries : []}
                 riderName={riderDisplayName}
                 arrivingFromOnboarding={onboardingTransitioning}
                 sharedRide={sharedRide}
@@ -2616,6 +2620,7 @@ function DockTabItem({
 
 function HomeScreen({
   horse,
+  rideEntries,
   riderName,
   arrivingFromOnboarding,
   sharedRide,
@@ -2633,6 +2638,7 @@ function HomeScreen({
   onShareRide
 }: {
   horse: HorseState;
+  rideEntries: readonly RideEntry[];
   riderName: string;
   arrivingFromOnboarding: boolean;
   sharedRide: boolean;
@@ -2800,6 +2806,14 @@ function HomeScreen({
     : horse.sessionCount > 0
       ? "Recent sessions saved"
       : "No ride saved yet";
+
+  // Derived on every render from the entries themselves, so a deleted ride
+  // leaves the summary the moment it is deleted and there is no total to drift.
+  const [summaryPeriod, setSummaryPeriod] = useState<RidePeriod>("week");
+  const rideSummary = summarise(rideEntries, summaryPeriod, new Date().toISOString().slice(0, 10));
+  const lastRideDay = rideEntries.length
+    ? [...rideEntries].sort((left, right) => right.completedAt.localeCompare(left.completedAt))[0]?.completedAt.slice(0, 10)
+    : undefined;
   const usesPresetHorsePhoto = horsePhotoOptionsByDiscipline[discipline].some(
     (option) => option.value === horsePhoto
   );
@@ -2925,15 +2939,13 @@ function HomeScreen({
       </Animated.View>
 
       <Animated.View style={[styles.homeDetails, detailsStyle]}>
-        <View style={styles.homeRhythm}>
-          <View style={styles.homeRhythmTopline}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.homeRhythmTitle}>Ride journal</Text>
-              <Text numberOfLines={1} style={styles.homeRhythmMeta}>{latestRideLabel}</Text>
-            </View>
-            <Text style={styles.homeRhythmValue}>{horse.sessionCount} rides</Text>
-          </View>
-        </View>
+        <RideSummaryCard
+          summary={rideSummary}
+          period={summaryPeriod}
+          onPeriodChange={setSummaryPeriod}
+          lifetimeRides={horse.sessionCount}
+          lastRideOn={lastRideDay}
+        />
 
         <View style={styles.homeSectionTopline}>
           <Text style={styles.homeSectionTitle}>Up next</Text>
