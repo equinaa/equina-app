@@ -120,9 +120,12 @@ const styles = StyleSheet.create({
     padding: 2
   },
   toggleOption: {
-    minHeight: 30,
+    // The theme sets 44 as the minimum tap target and this has to honour it.
+    // At 30 the pill looked right and was genuinely hard to hit -- found by
+    // failing to press it twice on a real simulator, not by reading the code.
+    minHeight: equinaTheme.accessibility.minimumTapTarget,
     justifyContent: "center",
-    paddingHorizontal: equinaTheme.spacing.compact,
+    paddingHorizontal: equinaTheme.spacing.md,
     borderRadius: equinaTheme.radius.compact
   },
   toggleOptionActive: { backgroundColor: equinaTheme.material.selected },
