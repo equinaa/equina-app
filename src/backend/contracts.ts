@@ -295,6 +295,38 @@ export type UploadKind = "avatar" | "horse_photo" | "horse_record" | "club_post"
 
 export type RideMoodRecord = "fresh" | "focused" | "tender";
 
+export type AcademyChapter = {
+  id: string;
+  startsAtSeconds: number;
+  title: string;
+};
+
+export type AcademyLesson = {
+  id: string;
+  slug: string;
+  title: string;
+  summary: string;
+  category: string;
+  discipline?: Discipline;
+  /** Absent means the lesson suits any rider, not that the level is unknown. */
+  level?: "beginner" | "intermediate" | "advanced" | "pro";
+  access: "free" | "paid";
+  durationSeconds?: number;
+  coachName?: string;
+  coachTitle?: string;
+  videoPath?: string;
+  posterPath?: string;
+  position: number;
+  chapters: AcademyChapter[];
+};
+
+export type AcademyProgress = {
+  lessonId: string;
+  positionSeconds: number;
+  completedAt?: string;
+  lastSeenAt: string;
+};
+
 export type RideEntry = {
   id: string;
   riderId: string;

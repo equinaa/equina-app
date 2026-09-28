@@ -85,7 +85,7 @@ const missingRls = await db.query<{ tablename: string }>(`
 assert.deepEqual(missingRls.rows, [], `All public backend tables need RLS: ${missingRls.rows.map((row) => row.tablename).join(", ")}`);
 
 const seededFlags = await db.query<{ enabled: boolean; rollout_percent: number }>("select enabled, rollout_percent from public.app_feature_flags");
-assert.equal(seededFlags.rows.length, 12);
+assert.equal(seededFlags.rows.length, 13);
 assert.ok(seededFlags.rows.every((flag) => !flag.enabled && flag.rollout_percent === 0));
 
 const riderA = "10000000-0000-4000-8000-000000000001";
@@ -918,6 +918,112 @@ await assert.rejects(
   "Spending is a service-role path; the client never calls it directly."
 );
 await db.exec("reset role;");
+
+// --- Academy content ---------------------------------------------------------
+
+await db.exec("reset role;");
+
+// Nothing is seeded. The ten lessons in the client name coaches who do not
+// exist, and copying invented people into the database would make them records.
+const lessonCount = await db.query<{ n: number }>("select count(*)::int as n from public.academy_lessons");
+assert.equal(lessonCount.rows[0]?.n, 0, "The catalogue ships empty and fills when real lessons arrive.");
+
+const lesson = await db.query<{ id: string }>(`
+  insert into public.academy_lessons(slug, title, summary, category, discipline, level, access, duration_seconds, published_at)
+  values ('contact-basics', 'Elastic contact', 'A softer hand while the horse stays forward.', 'Flatwork', 'dressage', 'intermediate', 'free', 1080, now())
+  returning id
+`);
+const lessonId = lesson.rows[0]?.id as string;
+assert.ok(lessonId);
+
+const draft = await db.query<{ id: string }>(`
+  insert into public.academy_lessons(slug, title, summary, category)
+  values ('unfinished', 'Not ready', 'Still being filmed.', 'Flatwork')
+  returning id
+`);
+const draftId = draft.rows[0]?.id as string;
+
+// A lesson with no level suits every rider -- the client already treats a
+// missing level as "suits anyone", and forcing one on would hide a leg-check
+// lesson from somebody for no reason.
+await db.query(`
+  insert into public.academy_lessons(slug, title, summary, category, published_at)
+  values ('leg-check', 'Checking legs after work', 'What to feel for, and when it matters.', 'Care', now())
+`);
+
+await db.query(`
+  insert into public.academy_chapters(lesson_id, starts_at_seconds, title) values
+    ($1, 0, 'Warm-up feel'),
+    ($1, 260, 'Soft rein connection')
+`, [lessonId]);
+
+await assert.rejects(
+  db.query("insert into public.academy_chapters(lesson_id, starts_at_seconds, title) values ($1, 0, 'Duplicate mark')", [lessonId]),
+  /duplicate key/,
+  "Two chapters cannot start at the same second."
+);
+
+await db.query("insert into public.academy_chapters(lesson_id, starts_at_seconds, title) values ($1, 0, 'Hidden')", [draftId]);
+
+// A draft is not a lesson: riders browse the catalogue, but only what is
+// published, and its chapters follow the same rule.
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+const browsable = await db.query<{ slug: string }>("select slug from public.academy_lessons order by slug");
+assert.deepEqual(browsable.rows.map((row) => row.slug), ["contact-basics", "leg-check"],
+  "An unpublished lesson must not appear in the catalogue.");
+
+const visibleChapters = await db.query<{ n: number }>("select count(*)::int as n from public.academy_chapters");
+assert.equal(visibleChapters.rows[0]?.n, 2, "Chapters of a draft lesson stay hidden with it.");
+
+// Progress writing goes through the same two-layer gate as every other
+// mutation: the flag has to be on for this rider.
+await db.exec("reset role; update public.app_feature_flags set enabled = false, rollout_percent = 0 where key = 'academy_progress';");
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+await assert.rejects(
+  db.query("insert into public.academy_progress(user_id, lesson_id, position_seconds) values ($1, $2, 120)", [riderA, lessonId]),
+  /row-level security/,
+  "Progress must not be writable while the feature is off."
+);
+
+await db.exec("reset role; update public.app_feature_flags set enabled = true, rollout_percent = 100 where key = 'academy_progress';");
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+await db.query("insert into public.academy_progress(user_id, lesson_id, position_seconds) values ($1, $2, 120)", [riderA, lessonId]);
+
+// Position and completion are separate facts. Scrubbing to the end is not
+// finishing, and stopping at 95% is -- only the client knows which happened.
+await db.query("update public.academy_progress set position_seconds = 1026, completed_at = now() where user_id = $1 and lesson_id = $2", [riderA, lessonId]);
+const mine = await db.query<{ position_seconds: number; completed: boolean }>(
+  "select position_seconds, completed_at is not null as completed from public.academy_progress where user_id = $1", [riderA]
+);
+assert.deepEqual(mine.rows, [{ position_seconds: 1026, completed: true }]);
+
+// A rider cannot see or forge another rider's progress.
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+const peek = await db.query<{ n: number }>("select count(*)::int as n from public.academy_progress");
+assert.equal(peek.rows[0]?.n, 0, "Progress is private to the rider who made it.");
+await assert.rejects(
+  db.query("insert into public.academy_progress(user_id, lesson_id, position_seconds) values ($1, $2, 900)", [riderA, lessonId]),
+  /row-level security/,
+  "A rider must not be able to write progress onto someone else's account."
+);
+
+// Riders browse the catalogue; they do not edit it. Note the shape of the
+// defence: RLS filters an UPDATE rather than raising, so the statement
+// succeeds having changed nothing. Asserting on an exception here would pass
+// for the wrong reason the day the policy disappeared.
+await db.query("update public.academy_lessons set title = 'Hijacked' where id = $1", [lessonId]);
+await db.exec("reset role;");
+const stillNamed = await db.query<{ title: string }>("select title from public.academy_lessons where id = $1", [lessonId]);
+assert.equal(stillNamed.rows[0]?.title, "Elastic contact", "Only staff manage the catalogue.");
+
+// Deleting a lesson takes its chapters and everyone's progress with it.
+await db.query("delete from public.academy_lessons where id = $1", [lessonId]);
+const orphans = await db.query<{ chapters: number; progress: number }>(`
+  select
+    (select count(*)::int from public.academy_chapters where lesson_id = $1) as chapters,
+    (select count(*)::int from public.academy_progress where lesson_id = $1) as progress
+`, [lessonId]);
+assert.deepEqual(orphans.rows, [{ chapters: 0, progress: 0 }], "A removed lesson leaves nothing behind.");
 
 await db.close();
 console.log("Backend migrations executed successfully in isolated Postgres.");
