@@ -156,6 +156,14 @@ assert.match(socialAuthSource, /credential\.state\s*!==\s*state/);
 assert.match(appConfigSource, /"usesAppleSignIn":\s*true/);
 assert.match(appConfigSource, /"expo-apple-authentication"/);
 assert.doesNotMatch(socialAuthSource, /console\.(log|error)/);
+// Auth code handles emails, passwords, tokens and codes. None of it may log,
+// and a new file in these folders is covered without being listed here.
+for (const directory of [join(root, "src", "features", "account"), join(root, "src", "backend")]) {
+  for (const fileName of readdirSync(directory).filter((name) => /\.tsx?$/.test(name))) {
+    const source = readFileSync(join(directory, fileName), "utf8");
+    assert.doesNotMatch(source, /console\.\w+\(/, `${fileName} must not log.`);
+  }
+}
 
 const coachEdgeSource = readFileSync(join(root, "supabase", "functions", "coach-chat", "index.ts"), "utf8");
 assert.match(coachEdgeSource, /EQUINA_AI_API_KEY/);
@@ -206,5 +214,41 @@ else process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = oldKey;
 assert.equal(equinaFeatureFlags.clubPublishing, false);
 assert.equal(equinaFeatureFlags.shopTransactions, false);
 assert.equal(equinaFeatureFlags.recordMutations, false);
+
+// Every scheduled worker must be called with the header that worker reads.
+//
+// The workers disagree on the name -- some read x-automation-secret, some
+// x-equina-cron-secret -- and a cron job sending the wrong one is a 401 on
+// every run that nothing reports. A schedule copied from a neighbouring job
+// inherits the neighbour's header, which is exactly how this was nearly
+// shipped for account deletions.
+{
+  const functionsDir = join(root, "supabase", "functions");
+  const expectedHeader = new Map<string, string>();
+  for (const name of readdirSync(functionsDir)) {
+    if (!name.startsWith("process-")) continue;
+    const entry = join(functionsDir, name, "index.ts");
+    if (!existsSync(entry)) continue;
+    const source = readFileSync(entry, "utf8");
+    const call = source.match(/requireAutomationSecret\(\s*request,\s*"[A-Z_]+",\s*"(x-[a-z-]+)"/);
+    if (call) expectedHeader.set(name, call[1] as string);
+  }
+  assert.ok(expectedHeader.size >= 4, "Expected to find the automation workers and the header each reads.");
+
+  for (const file of migrationFiles) {
+    const migration = readFileSync(join(migrationsDir, file), "utf8");
+    if (!migration.includes("cron.schedule")) continue;
+    const target = migration.match(/\/(process-[a-z-]+)['"]/);
+    if (!target) continue;
+    const worker = target[1] as string;
+    const expected = expectedHeader.get(worker);
+    assert.ok(expected, `${file} schedules ${worker}, which does not read an automation secret.`);
+    const sent = [...migration.matchAll(/'(x-[a-z-]+)'\s*,\s*\(/g)].map((match) => match[1]);
+    assert.ok(
+      sent.includes(expected),
+      `${file} calls ${worker} with ${sent.join(", ") || "no secret header"}, but ${worker} reads ${expected}.`
+    );
+  }
+}
 
 console.log("Backend security contracts passed.");

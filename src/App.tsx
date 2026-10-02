@@ -108,6 +108,9 @@ import {
   RecordEditorSheet
 } from "./features/records/HorseRecordSheets";
 import { CareSchedule } from "./features/records/CareSchedule";
+import { SignInScreen } from "./features/account/SignInScreen";
+import { signInCopy } from "./features/account/sign-in-copy";
+import { emailRequestOutcome, signInErrorCopy } from "./features/account/sign-in-errors";
 import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
 import type { RideEntry } from "./backend/contracts";
@@ -912,7 +915,14 @@ function EquinaApp() {
   const seeded = useMemo(() => createSeededEquinaApi(), []);
   const { api, buyerSession, sellerSession, horse } = seeded;
   const [accountCreated, setAccountCreated] = useState(false);
+  // Signed-out riders land on the sign-in screen. "create" hands them to
+  // onboarding, which collects the rider and horse before the account.
+  const [entryRoute, setEntryRoute] = useState<"signin" | "create">("signin");
+  const [signInNotice, setSignInNotice] = useState("");
   const [otpVisible, setOtpVisible] = useState(false);
+  // What the emailed code or link is for. Each needs a different resend and a
+  // different next step once verified.
+  const [otpPurpose, setOtpPurpose] = useState<"create" | "signin" | "recovery">("create");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [pendingAuthPassword, setPendingAuthPassword] = useState("");
@@ -974,7 +984,10 @@ function EquinaApp() {
   const [academyProgress, setAcademyProgress] = useState(0);
   const [academyMode, setAcademyMode] = useState<AcademyMode>("home");
   const [selectedAcademyTitle, setSelectedAcademyTitle] = useState(academyLessons[0]?.title ?? "");
-  const riderDisplayName = onboardingName.trim() || "Ilinca";
+  // What the rider typed, and nothing else, is what gets saved. The display
+  // fallback only fills a header before a name exists.
+  const riderName = onboardingName.trim();
+  const riderDisplayName = riderName || "Rider";
   const riderMonogram = riderDisplayName.slice(0, 2).toUpperCase();
   const primaryHorseName = onboardingHasHorse ? onboardingHorseName.trim() || horse.name : "";
   const rideHorseName = primaryHorseName || "Today's horse";
@@ -1008,6 +1021,44 @@ function EquinaApp() {
       : equinaSession.demoAllowed
         ? "preview"
         : "unavailable";
+  // Everything a previous account or the demo left in memory. Runs on an
+  // explicit sign-out and when a session ends on its own (revoked, expired,
+  // deleted) -- otherwise the next person to sign in on this device would
+  // start from the last one's name, horse and progress.
+  const resetAccountUi = () => {
+    setCoachMessages([]);
+    setLocalLastRide(null);
+    setAccountCreated(false);
+    setOtpVisible(false);
+    setOtpPurpose("create");
+    setAuthError("");
+    setSignInNotice("");
+    setPendingAuthPassword("");
+    setEntryRoute("signin");
+    setOnboardingStep("you");
+    setOnboardingName("");
+    setOnboardingEmail("");
+    setOnboardingDiscipline("Jumping");
+    setOnboardingLevel("Intermediate");
+    setOnboardingHasHorse(true);
+    setOnboardingHorsePhoto("");
+    setOnboardingHorsePhotoAsset(null);
+    setOnboardingHorseName("");
+    setOnboardingHorseBreed("");
+    // Demo mode fills these; none of it may carry into the next account.
+    setOnboardingGoal("Daily training");
+    setOnboardingHorseSex("Gelding");
+    setOnboardingHorseAge("");
+    setOnboardingHorseHeight("");
+    setCoachDiscipline(defaultCoachDiscipline);
+    setCoachGoal(defaultCoachGoal);
+    setCoachLoad(defaultCoachLoad);
+    setCoachStyle(defaultCoachStyle);
+    setCoachOnboarded(false);
+    setAcademyProgress(0);
+    setAcademyMode("home");
+    setTab("home");
+  };
   const accountController = useAccount({
     mode: accountMode,
     backend: equinaSession.backend,
@@ -1024,22 +1075,7 @@ function EquinaApp() {
       await clearShopDrafts(equinaSession.session?.user.id);
       await clearOnboardingDraft();
       await equinaSession.signOut();
-      setCoachMessages([]);
-      setLocalLastRide(null);
-      setAccountCreated(false);
-      setOtpVisible(false);
-      setAuthError("");
-      setPendingAuthPassword("");
-      setOnboardingStep("you");
-      setOnboardingName("");
-      setOnboardingEmail("");
-      setOnboardingDiscipline("Jumping");
-      setOnboardingLevel("Intermediate");
-      setOnboardingHasHorse(true);
-      setOnboardingHorsePhoto("");
-      setOnboardingHorseName("");
-      setOnboardingHorseBreed("");
-      setTab("home");
+      resetAccountUi();
     },
     onClearDemoCoach: () => {
       void clearDemoCoachHistory();
@@ -1148,6 +1184,30 @@ function EquinaApp() {
     image: postRideLesson.image
   };
 
+  // However the session ended -- signing out, an expired session, a failed
+  // link -- the way back in starts at the sign-in screen, where the session's
+  // notice explains it.
+  const previousPhase = useRef(equinaSession.phase);
+  useEffect(() => {
+    const previous = previousPhase.current;
+    previousPhase.current = equinaSession.phase;
+    if (equinaSession.phase !== "signedOut") return;
+    setEntryRoute("signin");
+    // A failed emailed link lands here too; the "waiting for your link" screen
+    // must not stay up over the notice that says the link did not work.
+    setOtpVisible(false);
+    if (previous === "authenticated" || previous === "onboarding" || previous === "demo") {
+      void clearOnboardingDraft();
+      resetAccountUi();
+    }
+  }, [equinaSession.phase]);
+
+  // A notice from the session (expired, failed link) is newer than whatever
+  // this screen last said, such as "we sent a link".
+  useEffect(() => {
+    if (equinaSession.signedOutNotice) setSignInNotice("");
+  }, [equinaSession.signedOutNotice]);
+
   useEffect(() => {
     const snapshot = equinaSession.account;
     if (!snapshot) return;
@@ -1174,11 +1234,20 @@ function EquinaApp() {
     } else if (equinaSession.phase === "onboarding") {
       setAccountCreated(false);
       setOtpVisible(false);
-      setOnboardingStep("preview");
+      // Start at the beginning. Jumping to "preview" was right when riders
+      // always filled onboarding before signing in; a rider who signs in first
+      // has nothing to preview, and would land on a summary of empty fields.
+      // Only a saved draft for this same email resumes at the end.
+      setOnboardingStep("you");
       void readOnboardingDraft().then((draft) => {
-        if (!active || !draft || draft.email.trim().toLowerCase() !== snapshot.email.trim().toLowerCase()) {
+        if (!active) return;
+        if (!draft || draft.email.trim().toLowerCase() !== snapshot.email.trim().toLowerCase()) {
+          // The form now shows this account, not the one a photo was picked
+          // for. Kept, it would be uploaded to a horse that never showed it.
+          setOnboardingHorsePhotoAsset(null);
           return;
         }
+        setOnboardingStep("preview");
         setOnboardingName(draft.name);
         setOnboardingEmail(draft.email);
         setOnboardingDiscipline(draft.discipline);
@@ -1635,6 +1704,12 @@ function EquinaApp() {
   const goBackOnboarding = () => {
     setAuthError("");
     const stepIndex = onboardingSteps.indexOf(onboardingStep);
+    // The first step used to have no way out. A signed-out rider who tapped
+    // "Create an account" by mistake returns to sign-in from here.
+    if (stepIndex <= 0 && equinaSession.phase === "signedOut") {
+      setEntryRoute("signin");
+      return;
+    }
     const nextStep = onboardingSteps[Math.max(stepIndex - 1, 0)] ?? "you";
     setOnboardingStep(nextStep);
   };
@@ -1707,7 +1782,7 @@ function EquinaApp() {
 
   const saveCurrentOnboardingDraft = async () => {
     await saveOnboardingDraft({
-      name: riderDisplayName,
+      name: riderName,
       email: onboardingEmail.trim().toLowerCase(),
       discipline: onboardingDiscipline,
       level: onboardingLevel,
@@ -1719,12 +1794,15 @@ function EquinaApp() {
   };
 
   const persistOnboarding = async () => {
+    // Onboarding cannot advance without a name, so an empty one here means the
+    // form was skipped. Saving a placeholder would put it on a real account.
+    if (!riderName) throw new Error("display_name_required");
     const snapshot = await equinaSession.completeOnboarding({
-      displayName: riderDisplayName,
+      displayName: riderName,
       locale: "en",
       discipline: toDomainDiscipline(onboardingDiscipline),
       skillLevel: toDomainLevel(onboardingLevel),
-      horseName: onboardingHasHorse ? primaryHorseName : undefined,
+      horseName: onboardingHasHorse ? onboardingHorseName.trim() || undefined : undefined,
       horseBreed: onboardingHasHorse ? onboardingHorseBreed.trim() || undefined : undefined
     });
 
@@ -1776,12 +1854,18 @@ function EquinaApp() {
     setAuthBusy(true);
     try {
       if (equinaSession.phase === "onboarding" && equinaSession.session) {
-        await persistOnboarding();
+        try {
+          await persistOnboarding();
+        } catch {
+          setAuthError("Your setup could not be saved. Check your connection and try again.");
+          return;
+        }
         animateIntoApp();
         return;
       }
       await saveCurrentOnboardingDraft();
-      await equinaSession.sendCode(onboardingEmail, riderDisplayName, true);
+      await equinaSession.sendCode(onboardingEmail, riderName || undefined, true);
+      setOtpPurpose("create");
       setOtpVisible(true);
     } catch {
       setAuthError("Your secure sign-in code could not be sent. Check the email and try again.");
@@ -1804,9 +1888,10 @@ function EquinaApp() {
       const result = await equinaSession.createPasswordAccount(
         onboardingEmail,
         password,
-        riderDisplayName
+        riderName || undefined
       );
       if (result.verificationRequired) {
+        setOtpPurpose("create");
         setOtpVisible(true);
         return;
       }
@@ -1831,6 +1916,9 @@ function EquinaApp() {
     try {
       const result = await equinaSession.signInWithPassword(onboardingEmail, password);
       if (!result.snapshot.profile.onboardingCompletedAt) {
+        // An unfinished account with no form filled in yet: the onboarding
+        // phase takes it from the first step instead.
+        if (!riderName) return;
         await persistOnboarding();
       }
       animateIntoApp();
@@ -1846,10 +1934,94 @@ function EquinaApp() {
     if (authBusy || !equinaSession.configured) return;
     setAuthBusy(true);
     try {
-      await equinaSession.requestPasswordRecovery(onboardingEmail);
+      try {
+        await equinaSession.requestPasswordRecovery(onboardingEmail);
+      } catch (error) {
+        // Same neutral answer as the sign-in screen: only a request that never
+        // left the device is reported.
+        if (emailRequestOutcome(error) === "unreachable") {
+          setAuthError(signInCopy.errors.unreachable);
+          return;
+        }
+      }
+      setOtpPurpose("recovery");
       setOtpVisible(true);
-    } catch {
-      setAuthError("Recovery email could not be sent. Wait a moment and try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  // The sign-in-screen handlers authenticate and nothing else.
+  //
+  // The onboarding handlers below also persist the onboarding draft, because
+  // in that flow the rider filled it in before signing in. Here they have not:
+  // the draft is empty, and persisting it would write an invented profile. So
+  // these leave the decision to the session phase -- a rider who finished
+  // onboarding goes straight in, one who never did lands on its first step.
+  const startEntryAttempt = () => {
+    setAuthError("");
+    setSignInNotice("");
+    equinaSession.clearSignedOutNotice();
+    return !authBusy && equinaSession.configured;
+  };
+
+  const signInFromEntry = async (email: string, password: string) => {
+    if (!startEntryAttempt()) return;
+    setAuthBusy(true);
+    try {
+      const result = await equinaSession.signInWithPassword(email, password);
+      setOnboardingEmail(result.snapshot.email);
+    } catch (error) {
+      setAuthError(signInErrorCopy(error, "password"));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const providerFromEntry = async (provider: OnboardingAuthProvider) => {
+    if (!startEntryAttempt()) return;
+    setAuthBusy(true);
+    try {
+      const result = await equinaSession.continueWithProvider(provider);
+      // Null means the rider cancelled inside Apple or Google. That is a
+      // change of mind, not an error, and gets no message.
+      if (!result) return;
+      setOnboardingEmail(result.snapshot.email);
+    } catch (error) {
+      setAuthError(signInErrorCopy(error, provider));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  // Reset links and sign-in links answer the same way whether or not the
+  // account exists; see emailRequestOutcome. Returns whether to move on.
+  const requestEmailFromEntry = async (
+    purpose: "signin" | "recovery",
+    email: string
+  ): Promise<boolean> => {
+    if (!startEntryAttempt()) return false;
+    setAuthBusy(true);
+    try {
+      setOnboardingEmail(email);
+      try {
+        if (purpose === "recovery") await equinaSession.requestPasswordRecovery(email);
+        // shouldCreateUser: false. A typo in a returning rider's email must
+        // not create an empty account.
+        else await equinaSession.sendCode(email, undefined, false);
+      } catch (error) {
+        if (emailRequestOutcome(error) === "unreachable") {
+          setAuthError(signInCopy.errors.unreachable);
+          return false;
+        }
+      }
+      if (equinaSession.emailAuthMode === "otp") {
+        setOtpPurpose(purpose);
+        setOtpVisible(true);
+      } else {
+        setSignInNotice(purpose === "recovery" ? signInCopy.notices.recoverySent : signInCopy.notices.signInLinkSent);
+      }
+      return true;
     } finally {
       setAuthBusy(false);
     }
@@ -1871,7 +2043,7 @@ function EquinaApp() {
       const result = await equinaSession.continueWithProvider(provider);
       if (!result) return;
       setOnboardingEmail(result.snapshot.email);
-      if (result.snapshot.profile.onboardingCompletedAt) return;
+      if (result.snapshot.profile.onboardingCompletedAt || !riderName) return;
       await persistOnboarding();
       animateIntoApp();
     } catch {
@@ -1890,14 +2062,26 @@ function EquinaApp() {
     if (authBusy) return;
     setAuthBusy(true);
     try {
-      await equinaSession.verifyCode(onboardingEmail, code);
+      if (otpPurpose === "recovery") {
+        // Leads to the new-password screen. Nothing about the profile changes.
+        await equinaSession.verifyRecoveryCode(onboardingEmail, code);
+        setOtpVisible(false);
+        return;
+      }
+      const { snapshot } = await equinaSession.verifyCode(onboardingEmail, code);
       if (pendingAuthPassword) {
         await equinaSession.setPassword(pendingAuthPassword);
         setPendingAuthPassword("");
       }
-      await persistOnboarding();
+      // Only a new account carries a filled-in onboarding form. A returning
+      // rider who signed in by code keeps the profile they already have.
+      if (otpPurpose === "create" && !snapshot.profile.onboardingCompletedAt) {
+        await persistOnboarding();
+        setOtpVisible(false);
+        animateIntoApp();
+        return;
+      }
       setOtpVisible(false);
-      animateIntoApp();
     } catch {
       setAuthError("That code is invalid or expired. Request a new code and try again.");
     } finally {
@@ -1997,6 +2181,7 @@ function EquinaApp() {
           state="error"
           error={equinaSession.error}
           onRetry={() => void equinaSession.restore()}
+          onSignOut={() => void accountController.signOut()}
         />
       </SafeAreaView>
     );
@@ -2013,8 +2198,9 @@ function EquinaApp() {
             setAuthBusy(true);
             setAuthError("");
             try {
+              // The phase already decides what comes next: the app for a
+              // finished account, onboarding for one that never finished.
               await equinaSession.completePasswordRecovery(password);
-              setAccountCreated(true);
             } catch {
               setAuthError("The recovery session expired. Request a new recovery link.");
             } finally {
@@ -2292,16 +2478,56 @@ function EquinaApp() {
               { pointerEvents: onboardingTransitioning ? "none" : "auto" }
             ]}
           >
-            {otpVisible ? (
+            {!otpVisible && equinaSession.phase === "signedOut" && entryRoute === "signin" ? (
+              <SignInScreen
+                configured={equinaSession.configured}
+                emailAuthMode={equinaSession.emailAuthMode}
+                busy={authBusy}
+                error={authError}
+                notice={
+                  signInNotice ||
+                  (equinaSession.signedOutNotice ? signInCopy.notices[equinaSession.signedOutNotice] : "")
+                }
+                showDemo={equinaSession.demoAllowed}
+                onProvider={(provider) => void providerFromEntry(provider)}
+                onPasswordSignIn={(email, password) => void signInFromEntry(email, password)}
+                onPasswordRecovery={(email) => requestEmailFromEntry("recovery", email)}
+                onEmailLinkSignIn={(email) => requestEmailFromEntry("signin", email)}
+                onCreateAccount={() => setEntryRoute("create")}
+                onUseDemo={useDemoAccount}
+                onClearMessages={() => {
+                  setAuthError("");
+                  setSignInNotice("");
+                  equinaSession.clearSignedOutNotice();
+                }}
+              />
+            ) : otpVisible ? (
               <AuthVerificationScreen
                 email={onboardingEmail}
                 mode={equinaSession.emailAuthMode}
+                purpose={otpPurpose}
                 error={authError}
                 verifying={authBusy}
                 onVerify={(code) => void verifyOnboardingCode(code)}
                 onResend={async () => {
                   setAuthError("");
-                  await equinaSession.sendCode(onboardingEmail, riderDisplayName, true);
+                  try {
+                    // A reset resends a reset, and a returning rider's sign-in
+                    // never creates an account. Only the create flow may.
+                    if (otpPurpose === "recovery") await equinaSession.requestPasswordRecovery(onboardingEmail);
+                    else if (otpPurpose === "signin") await equinaSession.sendCode(onboardingEmail, undefined, false);
+                    else await equinaSession.sendCode(onboardingEmail, riderName || undefined, true);
+                  } catch (error) {
+                    // Same neutral answer as the first request, so a resend
+                    // cannot reveal what the first one hid.
+                    if (otpPurpose !== "create" && emailRequestOutcome(error) === "sent") return;
+                    setAuthError(
+                      emailRequestOutcome(error) === "unreachable"
+                        ? signInCopy.errors.unreachable
+                        : "The email could not be sent. Wait a minute and try again."
+                    );
+                    throw error;
+                  }
                 }}
                 onBack={() => {
                   setOtpVisible(false);
@@ -2341,6 +2567,22 @@ function EquinaApp() {
                 onPasswordSignIn={signInOnboardingWithPassword}
                 onPasswordRecovery={recoverOnboardingPassword}
                 onUseDemo={useDemoAccount}
+                // Signed in with an account that never finished onboarding --
+                // possibly the wrong one. Offer the way out from the first step.
+                onSwitchAccount={
+                  equinaSession.phase === "onboarding" ? () => void accountController.signOut() : undefined
+                }
+                // Only while the form is still empty. Once the rider has typed a
+                // name, the sheet's sign-in keeps the form and saves it to an
+                // account that never finished onboarding.
+                onSignInInstead={
+                  equinaSession.phase === "signedOut" && !riderName
+                    ? () => {
+                        setAuthError("");
+                        setEntryRoute("signin");
+                      }
+                    : undefined
+                }
                 completionMode={onboardingCompletionMode}
                 signedIn={Boolean(equinaSession.session)}
                 emailAuthMode={equinaSession.emailAuthMode}

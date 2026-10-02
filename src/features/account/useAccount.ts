@@ -106,7 +106,13 @@ export function useAccount({
     if (mode !== "demo") return;
     let active = true;
     void AsyncStorage.getItem(demoStorageKey).then((raw) => {
-      if (!active || !raw) return;
+      if (!active) return;
+      // Nothing saved yet: show the demo profile as it is now. The initial
+      // state was built on the first render, before demo mode filled it in.
+      if (!raw) {
+        setDemoSnapshot(fallbackSnapshot);
+        return;
+      }
       try {
         setDemoSnapshot(JSON.parse(raw) as AccountSnapshot);
       } catch {
@@ -114,7 +120,7 @@ export function useAccount({
       }
     });
     return () => { active = false; };
-  }, [mode]);
+  }, [fallbackSnapshot, mode]);
 
   const saveDemo = useCallback(async (next: AccountSnapshot) => {
     setDemoSnapshot(next);
