@@ -730,7 +730,7 @@ function SecuritySettings({
           />
         </SettingsGroup>
       )}
-      <Text style={styles.footnote}>Deletion removes your personal profile, horse data, Ralf history, and push devices. Payment, fraud, and dispute records follow their legal retention period.</Text>
+      <Text style={styles.footnote}>Deletion removes your profile, your horses and their records, your ride journal, Academy progress, Ralf history, and push devices. Payment, fraud, and dispute records follow their legal retention period.</Text>
     </View>
   );
 }

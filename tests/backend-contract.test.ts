@@ -176,8 +176,18 @@ const notificationEdgeSource = readFileSync(join(root, "supabase", "functions", 
 assert.doesNotMatch(notificationEdgeSource, /message\.body|payload\.body/);
 const deletionEdgeSource = readFileSync(join(root, "supabase", "functions", "process-account-deletions", "index.ts"), "utf8");
 assert.match(deletionEdgeSource, /queueStorageCleanup/);
-assert.match(deletionEdgeSource, /from\("horses"\)\.delete\(\)/);
-assert.match(deletionEdgeSource, /from\("data_export_requests"\)\.delete\(\)/);
+// Rows are erased by erase_account_data in one transaction; which tables it
+// reaches is proven in backend-migrations.test.ts. Storage paths must be read
+// and queued before the rows that hold them are gone.
+assert.match(deletionEdgeSource, /rpc\("erase_account_data"/);
+assert.ok(
+  deletionEdgeSource.lastIndexOf("queueStorageCleanup(") < deletionEdgeSource.indexOf('rpc("erase_account_data"'),
+  "Storage paths must be queued before the rows holding them are erased."
+);
+assert.ok(
+  deletionEdgeSource.indexOf('rpc("erase_account_data"') < deletionEdgeSource.indexOf("deleteUser(userId, true)"),
+  "The account's data must be erased before its sign-in is removed."
+);
 assert.ok(
   deletionEdgeSource.indexOf("deleteUser(userId, true)") <
     deletionEdgeSource.indexOf("deletion_completed"),

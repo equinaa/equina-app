@@ -277,7 +277,7 @@ await assert.rejects(
     [riderA]
   ),
   /permission denied/,
-  "Account deletion scheduling must pass through the recent-auth Edge Function."
+  "Account deletion scheduling must pass through the audited Edge Function."
 );
 await db.exec(`reset role; set role service_role;`);
 const serverDeletionRequest = await db.query<{ id: string }>(`
@@ -1356,6 +1356,123 @@ const upserted = await db.query<{ saved: number; reaction: string; useful: boole
 `, [riderC, postId, riderA, coachAssistantMessage.rows[0]?.id, upsertLesson.rows[0]?.id, upsertDraft.rows[0]?.id]);
 assert.deepEqual(upserted.rows[0], { saved: 1, reaction: "support", useful: false, position: 600, rate: 1100 },
   "Client upserts must still insert and then update under the column grants.");
+
+// Account erasure. Production soft-deletes the auth user (orders and other
+// legal records still point at it), so nothing cascades from auth.users:
+// erase_account_data has to name every table that holds a rider's data.
+//
+// Records kept on purpose, and why. A new table that references auth.users
+// must either be erased or be added here with its reason.
+const retainedAfterErasure: Record<string, string> = {
+  account_audit_events: "audit trail, including of the deletion itself",
+  account_deletion_requests: "the request; completed_at records the erasure",
+  app_feature_flags: "staff attribution on a global flag",
+  checkout_quotes: "marketplace record, legal retention",
+  club_spaces: "space attribution",
+  coach_credit_ledger: "billing audit trail, append-only",
+  coach_credit_lots: "billing grants the ledger points at",
+  coach_credit_policies: "staff attribution on a policy",
+  coach_safety_events: "trust and safety record",
+  content_reports: "trust and safety record",
+  dispute_evidence: "marketplace dispute, legal retention",
+  horse_record_files: "files on another owner's horse belong to that horse",
+  horse_records: "records on another owner's horse belong to that horse",
+  listing_photos: "marketplace record, legal retention",
+  listing_risk_signals: "trust and safety record",
+  listings: "marketplace record, legal retention",
+  marketplace_conversations: "marketplace record; messages are redacted",
+  marketplace_reports: "trust and safety record",
+  marketplace_reviews: "marketplace record, legal retention",
+  moderation_actions: "trust and safety record",
+  order_disputes: "marketplace dispute, legal retention",
+  order_events: "marketplace order history, legal retention",
+  orders: "marketplace order, legal retention",
+  seller_accounts: "payments onboarding, legal retention",
+  user_sanctions: "trust and safety record"
+};
+// Kept as rows but stripped of the rider's content.
+const redactedAfterErasure = new Set(["club_posts", "club_comments", "marketplace_messages", "profiles"]);
+
+await db.exec("reset role;");
+const riderReferences = await db.query<{ table_name: string; column_name: string }>(`
+  select c.conrelid::regclass::text as table_name, a.attname as column_name
+  from pg_constraint c
+  join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+  where c.contype = 'f'
+    and c.confrelid = 'auth.users'::regclass
+    and c.connamespace = 'public'::regnamespace
+`);
+const erasureSource = (await db.query<{ prosrc: string }>(
+  "select prosrc from pg_proc where proname = 'erase_account_data'"
+)).rows[0]?.prosrc ?? "";
+const tableOf = (name: string) => name.replace(/^public\./, "");
+for (const { table_name } of riderReferences.rows) {
+  const table = tableOf(table_name);
+  assert.ok(
+    new RegExp(`public\\.${table}\\b`).test(erasureSource) || table in retainedAfterErasure,
+    `${table} references auth.users but erase_account_data neither erases it nor is it listed as retained on purpose.`
+  );
+}
+
+// Rows the newer features create, so the erasure is proven against them.
+await db.query(`
+  insert into public.ride_entries(
+    rider_id, horse_id, discipline, focus, started_at, completed_at,
+    elapsed_seconds, completed_phases, total_phases, mood, rider_note
+  ) values ($1, $2, 'jumping', 'Rhythm', now() - interval '1 hour', now(), 1800, 2, 3, 'tender', 'Private note')
+`, [riderA, horseId]);
+await db.query(
+  "insert into public.feature_flag_overrides(user_id, key, enabled, expires_at) values ($1, 'ride_logging', true, now() + interval '30 days')",
+  [riderA]
+);
+const beforeErasure = await db.query<{ rides: number; progress: number; horses: number; conversations: number; packs: number }>(`
+  select
+    (select count(*)::int from public.ride_entries where rider_id = $1) as rides,
+    (select count(*)::int from public.academy_progress where user_id = $1) as progress,
+    (select count(*)::int from public.horses where owner_id = $1) as horses,
+    (select count(*)::int from public.coach_conversations where user_id = $1) as conversations,
+    (select count(*)::int from public.onboarding_starter_packs where user_id = $1) as packs
+`, [riderA]);
+for (const [name, count] of Object.entries(beforeErasure.rows[0] ?? {})) {
+  assert.ok(count > 0, `The erasure test needs rider A to have ${name} before erasing.`);
+}
+
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+await assert.rejects(
+  db.query("select public.erase_account_data($1)", [riderA]),
+  /permission denied/,
+  "Only the deletion worker may erase an account."
+);
+await db.exec("reset role; set role service_role;");
+const savedByOthers = await db.query<{ count: number }>(
+  "select count(*)::int as count from public.saved_listings where user_id = $1", [riderC]
+);
+await db.query("select public.erase_account_data($1)", [riderA]);
+await db.exec("reset role;");
+
+for (const { table_name, column_name } of riderReferences.rows) {
+  const table = tableOf(table_name);
+  if (table in retainedAfterErasure || redactedAfterErasure.has(table)) continue;
+  const left = await db.query<{ count: number }>(
+    `select count(*)::int as count from public.${table} where ${column_name} = $1`, [riderA]
+  );
+  assert.equal(left.rows[0]?.count, 0, `${table}.${column_name} still holds rows of an erased account.`);
+}
+const redacted = await db.query<{ name: string; avatar: string | null; posts: number; comments: number }>(`
+  select
+    (select display_name from public.profiles where id = $1) as name,
+    (select avatar_path from public.profiles where id = $1) as avatar,
+    (select count(*)::int from public.club_posts
+      where author_id = $1 and (body <> '[Deleted by rider]' or moderation_status <> 'deleted')) as posts,
+    (select count(*)::int from public.club_comments
+      where author_id = $1 and (body <> '[Deleted by rider]' or moderation_status <> 'deleted')) as comments
+`, [riderA]);
+assert.deepEqual(redacted.rows[0], { name: "Deleted rider", avatar: null, posts: 0, comments: 0 },
+  "An erased rider's profile, posts and comments must keep no content.");
+const othersAfter = await db.query<{ count: number }>(
+  "select count(*)::int as count from public.saved_listings where user_id = $1", [riderC]
+);
+assert.equal(othersAfter.rows[0]?.count, savedByOthers.rows[0]?.count, "Erasing one rider must not touch another's data.");
 
 await db.close();
 console.log("Backend migrations executed successfully in isolated Postgres.");

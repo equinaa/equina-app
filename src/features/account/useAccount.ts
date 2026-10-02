@@ -319,12 +319,8 @@ export function useAccount({
       const deletionRequest = await backend.account.scheduleDeletion(reason);
       onConnectedSnapshot({ ...snapshot, deletionRequest });
       return deletionRequest;
-    } catch (cause) {
-      const recentAuth = cause instanceof Error && "code" in cause &&
-        (cause as Error & { code?: string }).code === "recent_auth_required";
-      setError(recentAuth
-        ? "Verify your email again before scheduling account deletion."
-        : "Account deletion could not be scheduled.");
+    } catch {
+      setError("Account deletion could not be scheduled. Check your connection and try again.");
       return null;
     } finally {
       setBusy("");
