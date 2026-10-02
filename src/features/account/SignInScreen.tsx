@@ -44,6 +44,8 @@ export type SignInScreenProps = {
   onCreateAccount: () => void;
   onUseDemo: () => void;
   onClearMessages: () => void;
+  /** Prefills the email field, e.g. after an account was created on this device. */
+  initialEmail?: string;
 };
 
 export function SignInScreen({
@@ -59,12 +61,13 @@ export function SignInScreen({
   onEmailLinkSignIn,
   onCreateAccount,
   onUseDemo,
-  onClearMessages
+  onClearMessages,
+  initialEmail = ""
 }: SignInScreenProps) {
   const { height, fontScale } = useWindowDimensions();
   const [sheetVisible, setSheetVisible] = useState(false);
   const [method, setMethod] = useState<AccountMethod>("signin");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
 
   const providers = visibleProviders(Platform.OS, socialAuthAvailability);

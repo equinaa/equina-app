@@ -2539,6 +2539,7 @@ function EquinaApp() {
                   (equinaSession.signedOutNotice ? signInCopy.notices[equinaSession.signedOutNotice] : "")
                 }
                 showDemo={equinaSession.demoAllowed}
+                initialEmail={onboardingEmail}
                 onProvider={(provider) => void providerFromEntry(provider)}
                 onPasswordSignIn={(email, password) => void signInFromEntry(email, password)}
                 onPasswordRecovery={(email) => requestEmailFromEntry("recovery", email)}
@@ -2584,6 +2585,19 @@ function EquinaApp() {
                   setAuthError("");
                   setPendingAuthPassword("");
                 }}
+                onSignInInstead={
+                  otpPurpose === "create"
+                    ? () => {
+                        // Confirmed on a computer, the link cannot finish
+                        // here. The account exists; signing in finishes it,
+                        // and the onboarding draft is still on this device.
+                        setOtpVisible(false);
+                        setAuthError("");
+                        setPendingAuthPassword("");
+                        setEntryRoute("signin");
+                      }
+                    : undefined
+                }
               />
             ) : (
               <OnboardingScreen

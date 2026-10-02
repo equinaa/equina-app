@@ -174,14 +174,17 @@ export function ClubScreen({
         visible={Boolean(composer)}
         spaces={club.spaces}
         defaultSpaceSlug={defaultSpaceSlug}
-        ride={composer?.attachRide ? rideToShare : undefined}
-        offerRide={Boolean(rideToShare)}
+        ride={rideToShare}
+        startWithRide={Boolean(composer?.attachRide)}
         busy={club.busy === "post"}
         onDismiss={() => setComposer(null)}
         onSubmit={async (input) => {
           const result = await club.createPost(input);
           if (!result) return false;
           setComposer(null);
+          // Show the space the post went to; a feed filtered to another space
+          // would hide it and the rider would think it was lost.
+          if (result.published && club.spaceId && club.spaceId !== input.spaceId) club.selectSpace(input.spaceId);
           onNotice(result.published
             ? "Posted to Club."
             : "Your post was not published because it matched the Club guidelines.");
@@ -191,6 +194,7 @@ export function ClubScreen({
 
       <CommentsSheet
         item={commentsFor}
+        liveCommentCount={club.items.find((entry) => entry.post.id === commentsFor?.post.id)?.commentCount}
         canComment={canInteract}
         currentUserId={currentUserId}
         riderName={riderName}
@@ -306,7 +310,7 @@ function ComposerSheet({
   spaces,
   defaultSpaceSlug,
   ride,
-  offerRide,
+  startWithRide,
   busy,
   onDismiss,
   onSubmit
@@ -315,7 +319,8 @@ function ComposerSheet({
   spaces: ClubSpace[];
   defaultSpaceSlug: string;
   ride?: ClubRideShare;
-  offerRide: boolean;
+  /** Opened from "Share ride": the ride starts attached. */
+  startWithRide: boolean;
   busy: boolean;
   onDismiss: () => void;
   onSubmit: (input: { spaceId: string; body: string; rideId?: string; horseId?: string }) => Promise<boolean>;
@@ -324,12 +329,22 @@ function ComposerSheet({
   const [spaceId, setSpaceId] = useState("");
   const [attachRide, setAttachRide] = useState(false);
 
+  // Reset only when the sheet opens. The app re-renders underneath while the
+  // rider types (a realtime refresh, a new ride summary object), and that must
+  // never wipe the draft.
   useEffect(() => {
     if (!visible) return;
     setText("");
-    setAttachRide(Boolean(ride));
+    setAttachRide(startWithRide && Boolean(ride));
+    setSpaceId("");
+  }, [visible]);
+
+  // Spaces can still be loading when the sheet opens; pick the default once
+  // they arrive, and never override a space the rider chose.
+  useEffect(() => {
+    if (!visible || spaceId || !spaces.length) return;
     setSpaceId(spaces.find((space) => space.slug === defaultSpaceSlug)?.id ?? spaces[0]?.id ?? "");
-  }, [defaultSpaceSlug, ride, spaces, visible]);
+  }, [defaultSpaceSlug, spaceId, spaces, visible]);
 
   const rideLine = attachRide && ride ? ride.summary : "";
   const body = [text.trim(), rideLine].filter(Boolean).join("\n\n");
@@ -349,7 +364,7 @@ function ComposerSheet({
           maxLength={postLimit}
           style={styles.composerInput}
         />
-        {offerRide ? (
+        {ride ? (
           <Pressable
             testID="club-composer-ride"
             accessibilityRole="switch"
@@ -392,6 +407,7 @@ function ComposerSheet({
 
 function CommentsSheet({
   item,
+  liveCommentCount,
   canComment,
   currentUserId,
   riderName,
@@ -400,6 +416,8 @@ function CommentsSheet({
   onNotice
 }: {
   item: ClubFeedItem | null;
+  /** The post's comment count as the realtime feed sees it now. */
+  liveCommentCount?: number;
   canComment: boolean;
   currentUserId?: string;
   riderName: string;
@@ -416,14 +434,20 @@ function CommentsSheet({
     setComments(null);
     setDraft("");
     setReportingId("");
+  }, [postId]);
+
+  // Loads when the sheet opens, and again whenever the live feed says the
+  // count changed -- another rider replying while this thread is open.
+  useEffect(() => {
     if (!postId) return;
     let active = true;
     void club.loadComments(postId).then((loaded) => {
-      if (active) setComments(loaded ?? []);
+      if (active && loaded) setComments(loaded);
+      else if (active) setComments((current) => current ?? []);
     });
     return () => { active = false; };
-    // club.loadComments is stable for the session; reloading per post is enough.
-  }, [postId]);
+    // club.loadComments is stable for the session.
+  }, [postId, liveCommentCount]);
 
   const sending = Boolean(postId) && club.busy === `comment:${postId}`;
   const send = async () => {

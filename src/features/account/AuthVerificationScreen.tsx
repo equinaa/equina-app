@@ -25,7 +25,8 @@ export function AuthVerificationScreen({
   verifying,
   onVerify,
   onResend,
-  onBack
+  onBack,
+  onSignInInstead
 }: {
   email: string;
   mode: EmailAuthMode;
@@ -37,6 +38,9 @@ export function AuthVerificationScreen({
   onVerify: (code: string) => void;
   onResend: () => Promise<void>;
   onBack: () => void;
+  /** The link was opened on another device -- a computer, usually. It confirms
+   *  the account but cannot finish here, so offer the way in instead. */
+  onSignInInstead?: () => void;
 }) {
   const [code, setCode] = useState("");
   const [cooldown, setCooldown] = useState(resendCooldownSeconds);
@@ -153,6 +157,16 @@ export function AuthVerificationScreen({
                 : "Resend code"}
           </Text>
         </Pressable>
+        {waitingForLink && onSignInInstead ? (
+          <Pressable
+            testID="auth-otp-other-device"
+            accessibilityRole="button"
+            onPress={onSignInInstead}
+            style={styles.resend}
+          >
+            <Text style={styles.resendText}>Opened the link on another device? Sign in here</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {waitingForLink ? (
