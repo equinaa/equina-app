@@ -222,6 +222,11 @@ if (oldKey === undefined) delete process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KE
 else process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = oldKey;
 
 assert.equal(equinaFeatureFlags.clubPublishing, false);
+// Posting is post-moderated in the database; it must not wait for the
+// external moderation provider, or no rider could ever publish.
+const capabilitiesSource = readFileSync(join(root, "supabase", "functions", "backend-capabilities", "index.ts"), "utf8");
+assert.match(capabilitiesSource, /clubPublishing: Boolean\(flags\.club_publishing\),/);
+assert.match(capabilitiesSource, /listingCreation: Boolean\(flags\.shop_listing_creation && moderationConfigured\)/);
 assert.equal(equinaFeatureFlags.shopTransactions, false);
 assert.equal(equinaFeatureFlags.recordMutations, false);
 
