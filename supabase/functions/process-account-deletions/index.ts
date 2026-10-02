@@ -101,47 +101,9 @@ Deno.serve(async (request) => {
           ),
         ]);
 
-        const postMediaIds = (postMedia ?? []).map((media) => String(media.id));
-        if (postMediaIds.length) {
-          const { error: deleteMediaError } = await admin.from("club_post_media").delete().in("id", postMediaIds);
-          if (deleteMediaError) throw deleteMediaError;
-        }
-        const { error: deleteHorsesError } = await admin.from("horses").delete().eq("owner_id", userId);
-        if (deleteHorsesError) throw deleteHorsesError;
-        const { error: deleteExportsError } = await admin.from("data_export_requests").delete().eq("user_id", userId);
-        if (deleteExportsError) throw deleteExportsError;
-
-        await requireSuccess(admin.from("push_devices").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("notification_outbox").delete().eq("recipient_id", userId));
-        await requireSuccess(admin.from("coach_conversations").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("coach_usage_events").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("upload_tickets").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("club_memberships").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("club_reactions").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("saved_listings").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("club_posts").update({
-          body: "[Deleted by rider]",
-          moderation_status: "deleted",
-        }).eq("author_id", userId));
-        await requireSuccess(admin.from("club_comments").update({
-          body: "[Deleted by rider]",
-          moderation_status: "deleted",
-        }).eq("author_id", userId));
-        await requireSuccess(admin.from("marketplace_messages").update({
-          body: "[Deleted by rider]",
-          deleted_at: now,
-        }).eq("sender_id", userId));
-        await requireSuccess(admin.from("user_blocks").delete().or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`));
-        await requireSuccess(admin.from("profiles").update({
-          display_name: "Deleted rider",
-          avatar_path: null,
-          location: null,
-          discipline: null,
-          skill_level: null,
-          bio: null,
-        }).eq("id", userId));
-        await requireSuccess(admin.from("user_preferences").delete().eq("user_id", userId));
-        await requireSuccess(admin.from("notification_preferences").delete().eq("user_id", userId));
+        // Every row the account owns, erased in one transaction. A new table
+        // with rider data belongs in that function, not in a call added here.
+        await requireSuccess(admin.rpc("erase_account_data", { target_user_id: userId }));
 
         const { error: authError } = await admin.auth.admin.deleteUser(userId, true);
         if (authError) throw authError;

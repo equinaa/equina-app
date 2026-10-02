@@ -170,7 +170,7 @@ All database flags seed to `enabled = false`, `rollout_percent = 0`. Activate on
 capability at a time for named internal test users:
 
 1. `account_settings`: auth restore, OTP, idempotent handoff, preference rollback,
-   export, secure storage, sign-out clearing, recent-auth deletion, worker, and
+   export, secure storage, sign-out clearing, deletion and its worker, and
    recovery states pass.
 2. `coach_chat`: production provider, consent filtering, output validation, health
    escalation, timeout, idempotency, rate limits, history, and three-user isolation

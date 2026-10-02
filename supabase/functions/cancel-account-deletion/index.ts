@@ -1,5 +1,8 @@
 import { handleOptions, HttpError, json, requireMethod, respondToError } from "../_shared/http.ts";
-import { createAdminClient, requireFeature, requireUser } from "../_shared/supabase.ts";
+import { createAdminClient, requireUser } from "../_shared/supabase.ts";
+
+// Not behind the account_settings flag: a rider who scheduled a deletion must
+// always be able to take it back.
 
 Deno.serve(async (request) => {
   const options = handleOptions(request);
@@ -7,8 +10,7 @@ Deno.serve(async (request) => {
 
   try {
     requireMethod(request, "POST");
-    const { user, token } = await requireUser(request);
-    await requireFeature(token, "account_settings");
+    const { user } = await requireUser(request);
     const admin = createAdminClient();
     const { data, error } = await admin.from("account_deletion_requests").update({
       canceled_at: new Date().toISOString(),

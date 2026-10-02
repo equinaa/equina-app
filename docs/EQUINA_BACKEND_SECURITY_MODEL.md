@@ -50,7 +50,7 @@ health notes, and email addresses must not enter logs or analytics.
 | `notification_outbox` | no access | enqueue, claim, suppress, retry, deliver | recipient and category evaluated server-side |
 | `data_export_requests` | own request status read | create export, private upload, signed URL | `user_id = auth.uid()` |
 | `account_audit_events` | no access | append operational events | no message, token, OTP, email, or health content |
-| `account_deletion_requests` | own status read only | schedule/cancel/process | recent-auth scheduling cannot be bypassed through Data API |
+| `account_deletion_requests` | own status read only | schedule/cancel/process | scheduling and its audit event cannot be bypassed through Data API; open to every account (App Store 5.1.1(v)), not behind a rollout flag |
 | `coach_conversations` | own rows read; owned RPCs create/update/archive/delete | provider workflow | owner only; selected horse must be viewable |
 | `coach_messages` | own conversation read only | user/assistant pair insertion | clients cannot forge roles or safety metadata |
 | `coach_message_feedback` | feedback on own assistant messages | moderation access | assistant message must belong to owner |

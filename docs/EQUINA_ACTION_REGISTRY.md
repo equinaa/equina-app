@@ -97,7 +97,7 @@ accurate.
 | Enable human-message push | saved preference, native device, push capability | permission prompt then `register-push-device` | denied/error remains factual; web does not claim registration | implemented / device and credential gated |
 | Export account data | recent authenticated session | `request-data-export` + private Storage | retry; signed link expires | implemented / rollout gated |
 | Clear Ralf history | confirmation | server delete RPC | error preserves history | implemented / rollout gated |
-| Schedule/cancel deletion | connected account; recent auth for schedule | deletion Edge Functions + audit | 14-day grace period; cancel before effective date | implemented / worker deployment gated |
+| Schedule/cancel deletion | connected account; explicit confirmation | deletion Edge Functions + audit | 14-day grace period; cancel before effective date | implemented / worker deployment gated |
 | Sign out | active session or dev demo | revoke push, global sign-out, clear drafts/cache/channels | returns to onboarding/sign-in | implemented |
 | Send Ralf message | connected coach capability or explicit dev demo | `coach-chat` Edge Function | stable nonce, pending, failed retry, provider typed errors | implemented / provider and rollout gated |
 | Adjust Ralf context | conversation open | `update_coach_conversation` | one save; profile level/discipline remain Account-owned | implemented |
@@ -160,7 +160,7 @@ accurate.
 | Claim | Current truth | Rule |
 | --- | --- | --- |
 | Account created | real only after email OTP and idempotent server handoff | Dev demo remains explicitly labelled and is never a production account |
-| Account deletion scheduled | real only through recent-auth Edge Function with a 14-day grace period | Direct Data API insert/update is revoked; worker and audit schedule must be live |
+| Account deletion scheduled | real only through the audited Edge Function with a 14-day grace period; `erase_account_data` removes every table holding rider data | Direct Data API insert/update is revoked; worker and audit schedule must be live |
 | Passport/lab uploaded | no file picker or signed upload | Disable mutation and label sample state |
 | Ralf Coach | server-side AI training assistant boundary; production provider not configured here | Keep `coachChat` off until provider, consent, timeout, and device QA pass |
 | High confidence | derived only from structured context coverage | Never accept confidence from provider prose |
