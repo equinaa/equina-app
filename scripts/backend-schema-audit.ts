@@ -57,6 +57,13 @@ await db.exec(`
   $$;
 
   create publication supabase_realtime;
+
+  -- Hosted Supabase gives anon, authenticated and service_role every privilege
+  -- on whatever is created in public. Auditing without it reports on a
+  -- database that never existed.
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 `);
 
 const migrationsDirectory = join(process.cwd(), "supabase", "migrations");
@@ -94,31 +101,75 @@ const missingPrimaryKeys = await query<{ table_name: string }>(`
   order by c.relname
 `);
 
-const anonMutationGrants = await query<{ table_name: string; privilege_type: string }>(`
-  select table_name, privilege_type
-  from information_schema.table_privileges
-  where table_schema = 'public'
-    and grantee = 'anon'
-    and privilege_type in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER')
-  order by table_name, privilege_type
-`);
-
-const clientMediaMutationGrants = await query<{
+// Every non-SELECT privilege a client role holds on a public table, whether
+// granted on the whole table or on some of its columns.
+const clientWriteGrants = await query<{
+  role: string;
   table_name: string;
   privilege_type: string;
+  table_level: boolean;
 }>(`
-  select table_name, privilege_type
-  from information_schema.table_privileges
-  where table_schema = 'public'
-    and grantee = 'authenticated'
-    and table_name in (
-      'horse_record_files',
-      'club_post_media',
-      'listing_photos',
-      'dispute_evidence'
+  select r.role, c.relname as table_name, p.privilege as privilege_type, true as table_level
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join (values ('anon'), ('authenticated')) r(role)
+  cross join (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(privilege)
+  where n.nspname = 'public' and c.relkind = 'r'
+    and has_table_privilege(r.role, c.oid, p.privilege)
+  union all
+  select r.role, c.relname, p.privilege, false
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join (values ('anon'), ('authenticated')) r(role)
+  cross join (values ('INSERT'), ('UPDATE'), ('REFERENCES')) p(privilege)
+  where n.nspname = 'public' and c.relkind = 'r'
+    and not has_table_privilege(r.role, c.oid, p.privilege)
+    and has_any_column_privilege(r.role, c.oid, p.privilege)
+  order by 1, 2, 3
+`);
+
+const anonMutationGrants = clientWriteGrants.filter((grant) => grant.role === "anon");
+
+// TRUNCATE ignores RLS; the others are DDL no client should run.
+const clientRlsBypassGrants = clientWriteGrants.filter(
+  (grant) => grant.role === "authenticated" && ["TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"].includes(grant.privilege_type)
+);
+
+// A table-level INSERT or UPDATE lets a client write every column a policy
+// lets through, server-owned ones included. Only staff-gated tables keep one.
+const staffManagedWrites = new Set([
+  ...["academy_chapters", "academy_lessons", "app_feature_flags", "coach_credit_policies", "listing_risk_signals", "moderation_actions"]
+    .flatMap((table) => [`${table}:INSERT`, `${table}:UPDATE`]),
+  "content_reports:UPDATE",
+  "marketplace_reports:UPDATE",
+  "user_sanctions:UPDATE"
+]);
+const clientTableWrites = clientWriteGrants.filter(
+  (grant) =>
+    grant.role === "authenticated" &&
+    grant.table_level &&
+    ["INSERT", "UPDATE"].includes(grant.privilege_type) &&
+    !staffManagedWrites.has(`${grant.table_name}:${grant.privilege_type}`)
+);
+
+const clientMediaMutationGrants = clientWriteGrants.filter(
+  (grant) =>
+    grant.role === "authenticated" &&
+    ["horse_record_files", "club_post_media", "listing_photos", "dispute_evidence"].includes(grant.table_name) &&
+    ["INSERT", "UPDATE", "DELETE"].includes(grant.privilege_type)
+);
+
+const clientSequenceGrants = await query<{ sequence_name: string }>(`
+  select c.relname as sequence_name
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relkind = 'S'
+    and (
+      has_sequence_privilege('anon', c.oid, 'USAGE, UPDATE')
+      or has_sequence_privilege('authenticated', c.oid, 'USAGE, UPDATE')
     )
-    and privilege_type in ('INSERT', 'UPDATE', 'DELETE')
-  order by table_name, privilege_type
+  order by c.relname
 `);
 
 const directStorageWritePolicies = await query<{
@@ -273,6 +324,9 @@ const report = {
     missingRls,
     missingPrimaryKeys,
     anonMutationGrants,
+    clientTableWrites,
+    clientRlsBypassGrants,
+    clientSequenceGrants,
     clientMediaMutationGrants,
     directStorageWritePolicies,
     clientServerOwnedColumns,
@@ -295,6 +349,9 @@ if (
   missingRls.length ||
   missingPrimaryKeys.length ||
   anonMutationGrants.length ||
+  clientTableWrites.length ||
+  clientRlsBypassGrants.length ||
+  clientSequenceGrants.length ||
   clientMediaMutationGrants.length ||
   directStorageWritePolicies.length ||
   clientServerOwnedColumns.length ||
