@@ -1,8 +1,12 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
-import type { ClubCommentRecord, ClubFeedItem, ClubMediaRecord, ClubPostRecord, ClubSpace, UploadAsset } from "./contracts";
+import type { ClubCommentRecord, ClubCommentWithAuthor, ClubFeedItem, ClubMediaRecord, ClubPostRecord, ClubSpace, UploadAsset } from "./contracts";
 import { EdgeClient } from "./edge-client";
 import { backendError, requireData } from "./errors";
 import { UploadRepository } from "./upload-repository";
+
+// Realtime topics must not repeat: removing a channel is asynchronous, so a
+// resubscription under the same name could join before the old one has left.
+let channelSequence = 0;
 
 const mapSpace = (row: Record<string, unknown>): ClubSpace => ({
   id: String(row.id), slug: String(row.slug), name: String(row.name),
@@ -156,6 +160,20 @@ export class ClubRepository {
     return (data ?? []).map((row) => mapComment(row as Record<string, unknown>));
   }
 
+  /** Comments with their authors' names, oldest first. */
+  async commentThread(postId: string): Promise<ClubCommentWithAuthor[]> {
+    const comments = await this.comments(postId);
+    if (!comments.length) return [];
+    const authorIds = [...new Set(comments.map((comment) => comment.authorId))];
+    const { data, error } = await this.client.from("profiles").select("id,display_name").in("id", authorIds);
+    if (error) throw backendError(error, "Comment authors could not be loaded.");
+    const names = new Map((data ?? []).map((row) => [
+      String(row.id),
+      row.display_name ? String(row.display_name) : "Rider"
+    ]));
+    return comments.map((comment) => ({ ...comment, authorName: names.get(comment.authorId) ?? "Rider" }));
+  }
+
   async comment(postId: string, body: string, parentId?: string): Promise<ClubCommentRecord> {
     const { data: auth } = await this.client.auth.getUser();
     if (!auth.user) throw backendError(new Error("Authentication required."), "Authentication required.");
@@ -214,9 +232,18 @@ export class ClubRepository {
   }
 
   subscribe(spaceId: string | undefined, onChange: () => void): () => void {
-    let channel: RealtimeChannel = this.client.channel(`club:${spaceId ?? "all"}`);
+    let channel: RealtimeChannel = this.client.channel(`club:${spaceId ?? "all"}:${++channelSequence}`);
     const filter = spaceId ? `space_id=eq.${spaceId}` : undefined;
     channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "club_posts", filter }, onChange);
+    channel.subscribe();
+    return () => { void this.client.removeChannel(channel); };
+  }
+
+  /** Any reaction or comment the rider is allowed to see, in any space. */
+  subscribeActivity(onChange: () => void): () => void {
+    const channel = this.client.channel(`club:activity:${++channelSequence}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "club_reactions" }, onChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "club_comments" }, onChange);
     channel.subscribe();
     return () => { void this.client.removeChannel(channel); };
   }
