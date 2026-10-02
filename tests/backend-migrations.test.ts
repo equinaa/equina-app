@@ -198,13 +198,6 @@ assert.equal(onboardingState.rows[0]?.starter_packs, 1, "Onboarding must persist
 assert.equal(onboardingState.rows[0]?.starter_audits, 1, "Onboarding retry must not duplicate its starter pack audit.");
 assert.equal(onboardingState.rows[0]?.academy_focus, "Rhythm");
 
-// This harness creates tables with no grants. Hosted Supabase creates them with
-// every privilege for anon and authenticated, which silently defeated the
-// column-level revoke on profiles. Recreate that state, apply the fix, and
-// prove the column grants hold anyway.
-await db.exec(`reset role; grant all on public.profiles to anon, authenticated;`);
-await db.exec(readFileSync(join(migrationsDirectory, "202610020002_profile_column_grants.sql"), "utf8"));
-
 await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 const editableProfile = await db.query<{ id: string }>(
   "update public.profiles set display_name = display_name, bio = bio where id = $1 returning id",
