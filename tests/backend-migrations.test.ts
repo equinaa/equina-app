@@ -59,6 +59,14 @@ await db.exec(`
   $$;
 
   create publication supabase_realtime;
+
+  -- Hosted Supabase gives anon, authenticated and service_role every privilege
+  -- on whatever is created in public. Without this the harness tests a database
+  -- that never existed: a grant a migration forgot to revoke would be missing
+  -- here and present in production.
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 `);
 
 const migrationsDirectory = join(process.cwd(), "supabase", "migrations");
@@ -321,7 +329,7 @@ await assert.rejects(
     insert into public.coach_messages(conversation_id, role, body, client_nonce)
     values ($1, 'assistant', 'Forged assistant response', $2)
   `, [coachConversationId, "41000000-0000-4000-8000-000000000001"]),
-  /permission denied/,
+  /(permission denied|row-level security)/,
   "A mobile client must not insert an assistant message."
 );
 
@@ -362,9 +370,21 @@ const hiddenCoachConversation = await db.query("select id from public.coach_conv
 const hiddenCoachMessages = await db.query("select id from public.coach_messages where conversation_id = $1", [coachConversationId]);
 assert.equal(hiddenCoachConversation.rows.length, 0, "A third rider must not read another rider's Ralf conversation.");
 assert.equal(hiddenCoachMessages.rows.length, 0, "A third rider must not infer Ralf messages.");
-await assert.rejects(
-  db.query("select provider_name from public.coach_message_operations"),
-  /permission denied/,
+
+// Hosted Supabase grants SELECT on every public table, so on a server-only
+// table the boundary a client meets is RLS with no read policy: an empty
+// result rather than an error. Either one keeps the rows server-only.
+const visibleRows = async (sql: string) => {
+  try {
+    return (await db.query(sql)).rows.length;
+  } catch (error) {
+    if (error instanceof Error && /permission denied/.test(error.message)) return 0;
+    throw error;
+  }
+};
+assert.equal(
+  await visibleRows("select provider_name from public.coach_message_operations"),
+  0,
   "Provider metadata must remain server-only."
 );
 
@@ -490,11 +510,7 @@ await db.query(`
   values ($1, repeat('a', 64), 'ExponentPushToken[backend-test-device]', 'ios', '0.1.0')
 `, [riderA]);
 await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${riderC}', false);`);
-await assert.rejects(
-  db.query("select id from public.push_devices"),
-  /permission denied/,
-  "Mobile users must not read push tokens."
-);
+assert.equal(await visibleRows("select id from public.push_devices"), 0, "Mobile users must not read push tokens.");
 const hiddenMarketplaceConversation = await db.query(
   "select id from public.marketplace_conversations where id = $1",
   [conversationId]
@@ -1024,6 +1040,301 @@ const orphans = await db.query<{ chapters: number; progress: number }>(`
     (select count(*)::int from public.academy_progress where lesson_id = $1) as progress
 `, [lessonId]);
 assert.deepEqual(orphans.rows, [{ chapters: 0, progress: 0 }], "A removed lesson leaves nothing behind.");
+
+// --- Client write grants ----------------------------------------------------
+
+await db.exec("reset role;");
+
+// Every write a client role holds, exactly as the database grants it: a bare
+// table is a table-level grant, a column list is a column grant. The harness
+// creates tables the way hosted Supabase does, writable by anon and
+// authenticated, so a new table fails here until a migration says what
+// clients may write to it. 202610020004 is where this list comes from.
+type ClientWrites = { insert?: string[] | "table"; update?: string[] | "table"; delete?: true };
+const staffManaged: ClientWrites = { insert: "table", update: "table", delete: true };
+const clientWrites: Record<string, ClientWrites> = {
+  academy_chapters: staffManaged,
+  academy_lessons: staffManaged,
+  academy_progress: {
+    insert: ["user_id", "lesson_id", "position_seconds", "completed_at", "last_seen_at"],
+    update: ["user_id", "lesson_id", "position_seconds", "completed_at", "last_seen_at"],
+    delete: true
+  },
+  app_feature_flags: staffManaged,
+  club_comments: { insert: ["post_id", "author_id", "parent_id", "body"], update: ["body"], delete: true },
+  club_memberships: { insert: ["space_id", "user_id", "role"], update: ["space_id", "user_id", "role"], delete: true },
+  club_posts: { insert: ["author_id", "space_id", "post_type", "body", "horse_id", "ride_id"], update: ["body"] },
+  club_reactions: { insert: ["post_id", "user_id", "reaction"], update: ["post_id", "user_id", "reaction"], delete: true },
+  coach_credit_policies: staffManaged,
+  coach_message_feedback: {
+    insert: ["user_id", "message_id", "useful", "reason"],
+    update: ["user_id", "message_id", "useful", "reason"],
+    delete: true
+  },
+  content_reports: { insert: ["reporter_id", "post_id", "comment_id", "reported_user_id", "reason", "detail"], update: "table" },
+  horse_collaborators: { update: ["accepted_at"], delete: true },
+  horse_records: {
+    insert: ["horse_id", "created_by", "record_type", "status", "title", "occurred_on", "due_on", "provider_name", "notes", "source", "details"],
+    update: ["status", "title", "occurred_on", "due_on", "provider_name", "notes", "source", "details"]
+  },
+  horses: {
+    insert: ["owner_id", "name", "breed", "discipline", "birth_date", "sex", "height_cm", "is_primary", "archived_at"],
+    update: ["name", "breed", "discipline", "birth_date", "sex", "height_cm", "is_primary", "archived_at"]
+  },
+  listing_risk_signals: staffManaged,
+  listing_shipping_rates: {
+    insert: ["listing_id", "country_code", "service_name", "amount_minor", "min_days", "max_days", "tracked", "insured_up_to_minor"],
+    update: ["listing_id", "country_code", "service_name", "amount_minor", "min_days", "max_days", "tracked", "insured_up_to_minor"],
+    delete: true
+  },
+  listings: {
+    insert: ["seller_id", "category", "title", "description", "brand_name", "model", "condition_grade", "price_minor", "currency", "country_code", "locality", "metadata", "status"],
+    update: ["category", "title", "description", "brand_name", "model", "condition_grade", "price_minor", "currency", "country_code", "locality", "metadata"]
+  },
+  marketplace_conversations: { update: ["buyer_archived_at", "seller_archived_at"] },
+  marketplace_messages: { insert: ["conversation_id", "sender_id", "client_nonce", "body"], update: ["delivery_status", "read_at", "deleted_at"] },
+  marketplace_reports: { insert: ["reporter_id", "listing_id", "message_id", "reported_user_id", "reason", "detail"], update: "table" },
+  marketplace_reviews: { insert: ["order_id", "reviewer_id", "reviewee_id", "rating", "body"] },
+  moderation_actions: staffManaged,
+  notification_preferences: {
+    insert: ["user_id", "human_messages", "order_changes", "horse_reminders", "academy_reminders", "message_previews", "quiet_hours_timezone", "quiet_hours_start", "quiet_hours_end"],
+    update: ["human_messages", "order_changes", "horse_reminders", "academy_reminders", "message_previews", "quiet_hours_timezone", "quiet_hours_start", "quiet_hours_end"]
+  },
+  profiles: { update: ["display_name", "locale", "location", "discipline", "skill_level", "bio"] },
+  ride_entries: {
+    insert: ["rider_id", "horse_id", "discipline", "focus", "planned_duration", "started_at", "completed_at", "elapsed_seconds", "completed_phases", "total_phases", "mood", "rider_note"],
+    update: ["focus", "mood", "rider_note", "elapsed_seconds", "completed_phases"],
+    delete: true
+  },
+  saved_listings: { insert: ["user_id", "listing_id"], update: ["user_id", "listing_id"], delete: true },
+  user_blocks: { insert: ["blocker_id", "blocked_id"], update: ["blocker_id", "blocked_id"], delete: true },
+  user_preferences: {
+    insert: ["user_id", "academy_discipline", "academy_level", "academy_focus", "use_rider_profile", "use_selected_horse", "use_ride_history", "reduced_personalization"],
+    update: ["academy_discipline", "academy_level", "academy_focus", "use_rider_profile", "use_selected_horse", "use_ride_history", "reduced_personalization"]
+  },
+  user_sanctions: { update: "table" }
+};
+const describeGrant = (table: string, privilege: string, columns: string[] | "table") =>
+  `authenticated ${privilege} ${table}${columns === "table" ? "" : `(${[...columns].sort().join(",")})`}`;
+const expectedGrants = Object.entries(clientWrites).flatMap(([table, writes]) => [
+  ...(writes.insert ? [describeGrant(table, "INSERT", writes.insert)] : []),
+  ...(writes.update ? [describeGrant(table, "UPDATE", writes.update)] : []),
+  ...(writes.delete ? [describeGrant(table, "DELETE", "table")] : [])
+]).sort();
+
+const tableGrants = await db.query<{ role: string; privilege: string; table_name: string }>(`
+  select r.role, p.privilege, c.relname as table_name
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join (values ('anon'), ('authenticated')) r(role)
+  cross join (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(privilege)
+  where n.nspname = 'public' and c.relkind = 'r' and has_table_privilege(r.role, c.oid, p.privilege)
+`);
+const columnGrants = await db.query<{ role: string; privilege: string; table_name: string; columns: string }>(`
+  select r.role, p.privilege, c.relname as table_name, string_agg(a.attname, ',' order by a.attname) as columns
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+  cross join (values ('anon'), ('authenticated')) r(role)
+  cross join (values ('INSERT'), ('UPDATE'), ('REFERENCES')) p(privilege)
+  where n.nspname = 'public' and c.relkind = 'r'
+    and not has_table_privilege(r.role, c.oid, p.privilege)
+    and has_column_privilege(r.role, c.oid, a.attnum, p.privilege)
+  group by 1, 2, 3
+`);
+const actualGrants = [
+  ...tableGrants.rows.map((grant) => `${grant.role} ${grant.privilege} ${grant.table_name}`),
+  ...columnGrants.rows.map((grant) => `${grant.role} ${grant.privilege} ${grant.table_name}(${grant.columns})`)
+].sort();
+assert.deepEqual(actualGrants, expectedGrants, "Client roles must hold exactly the writes listed above, and anon none at all.");
+
+const clientSequences = await db.query<{ sequence_name: string }>(`
+  select c.relname as sequence_name
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relkind = 'S'
+    and (has_sequence_privilege('anon', c.oid, 'USAGE, UPDATE') or has_sequence_privilege('authenticated', c.oid, 'USAGE, UPDATE'))
+`);
+assert.deepEqual(clientSequences.rows, [], "Every sequence backs a server-written table; clients must not advance or reset one.");
+
+// Every write the app makes directly must be one the grants allow, so a column
+// added to a repository payload fails here rather than as "permission denied"
+// in the app.
+// A PostgREST upsert sends ON CONFLICT DO UPDATE SET for every column in its
+// payload, so it needs INSERT and UPDATE on all of them.
+const objectKeys = (source: string, open: number) => {
+  const entries: string[] = [];
+  let entry = "";
+  let depth = 0;
+  let quote = "";
+  for (let index = open; index < source.length; index += 1) {
+    const char = source[index] as string;
+    if (quote) {
+      if (char === quote && source[index - 1] !== "\\") quote = "";
+    } else if (char === "\"" || char === "'" || char === "`") {
+      quote = char;
+    } else if ("{[(".includes(char)) {
+      depth += 1;
+      if (depth === 1) continue;
+    } else if ("}])".includes(char)) {
+      depth -= 1;
+      if (depth === 0) {
+        entries.push(entry);
+        break;
+      }
+    } else if (char === "," && depth === 1) {
+      entries.push(entry);
+      entry = "";
+      continue;
+    }
+    entry += char;
+  }
+  return entries.filter((value) => value.trim()).map((value) => {
+    const key = /^\s*(\w+)\s*(?::|$)/.exec(value)?.[1];
+    if (!key) throw new Error(`Cannot read a column from payload entry "${value.trim()}".`);
+    return key;
+  });
+};
+const payloadColumns = (source: string, argumentStart: number) => {
+  if (source.slice(argumentStart).trimStart().startsWith("{")) return objectKeys(source, source.indexOf("{", argumentStart));
+  // A named payload: built up as payload.column = ..., or declared as an object.
+  const name = /^\s*(\w+)/.exec(source.slice(argumentStart))?.[1] ?? "";
+  const method = source.slice(source.lastIndexOf("\n  async ", argumentStart), argumentStart);
+  const assigned = [...method.matchAll(new RegExp(`\\b${name}\\.(\\w+)\\s*=(?!=)`, "g"))].map((match) => match[1] as string);
+  const declared = new RegExp(`const ${name} = ([^;]*);`).exec(method)?.[1] ?? "";
+  const columns = [...assigned, ...[...declared.matchAll(/(\w+)\s*:/g)].map((match) => match[1] as string)];
+  if (!columns.length) throw new Error(`Cannot find the columns written through "${name}".`);
+  return columns;
+};
+const backendDirectory = join(process.cwd(), "src", "backend");
+const writtenTables = new Set<string>();
+const ungrantedWrites: string[] = [];
+for (const fileName of readdirSync(backendDirectory).filter((name) => name.endsWith("-repository.ts")).sort()) {
+  const source = readFileSync(join(backendDirectory, fileName), "utf8");
+  for (const call of source.matchAll(/\.from\("(\w+)"\)\s*\.(insert|update|upsert|delete)\(/g)) {
+    const [, table = "", verb = ""] = call;
+    writtenTables.add(table);
+    const columns = verb === "delete" ? [] : payloadColumns(source, call.index + call[0].length);
+    for (const privilege of verb === "upsert" ? ["INSERT", "UPDATE"] : [verb.toUpperCase()]) {
+      if (privilege === "DELETE") {
+        const allowed = await db.query<{ allowed: boolean }>(
+          "select has_table_privilege('authenticated', $1, 'DELETE') as allowed", [`public.${table}`]
+        );
+        if (!allowed.rows[0]?.allowed) ungrantedWrites.push(`${fileName}: DELETE ${table}`);
+        continue;
+      }
+      for (const column of columns) {
+        const allowed = await db.query<{ allowed: boolean }>(
+          "select has_column_privilege('authenticated', $1, $2, $3) as allowed", [`public.${table}`, column, privilege]
+        );
+        if (!allowed.rows[0]?.allowed) ungrantedWrites.push(`${fileName}: ${privilege} ${table}.${column}`);
+      }
+    }
+  }
+}
+assert.deepEqual(ungrantedWrites, [], "Every column the app writes directly must be granted to authenticated.");
+const clientWrittenTables = Object.entries(clientWrites)
+  .filter(([, writes]) => Array.isArray(writes.insert) || Array.isArray(writes.update))
+  .map(([table]) => table);
+assert.deepEqual([...writtenTables].sort(), clientWrittenTables.sort(),
+  "Column grants must match tables the app actually writes; drop a grant when its last writer goes.");
+
+// What those grants close. Privileges are checked before RLS, so each of these
+// fails the same way whichever row it would have matched.
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+const refusedWrites: Array<[string, string]> = [
+  ["update public.club_posts set moderation_status = 'visible'", "An author must not republish a post moderation hid."],
+  ["update public.club_comments set moderation_status = 'visible'", "An author must not republish a comment moderation hid."],
+  ["update public.club_posts set space_id = space_id", "A post must not move into a space its author cannot read."],
+  [`insert into public.club_posts(author_id, space_id, post_type, body, created_at)
+    values (auth.uid(), gen_random_uuid(), 'journal', 'Pinned', '2099-01-01')`, "A post's place in the feed must not be chosen by its author."],
+  ["delete from public.club_posts", "Post deletion goes through delete-club-post, which also removes media."],
+  ["update public.horse_records set created_by = auth.uid()", "A record's author must not be rewritten."],
+  ["update public.listings set published_at = now()", "Publication belongs to the moderation pipeline."],
+  ["update public.listings set status = 'draft'", "Listing status moves only through publish and archive."],
+  [`insert into public.content_reports(reporter_id, reported_user_id, assigned_to)
+    values (auth.uid(), gen_random_uuid(), auth.uid())`, "A reporter must not assign their own report."],
+  [`insert into public.marketplace_reviews(order_id, reviewer_id, reviewee_id, rating, verified)
+    values (gen_random_uuid(), auth.uid(), gen_random_uuid(), 5, true)`, "A review's verification is not the reviewer's to set."],
+  [`insert into public.marketplace_messages(conversation_id, sender_id, client_nonce, body, read_at)
+    values (gen_random_uuid(), auth.uid(), gen_random_uuid(), 'Seen', now())`, "A sender must not mark their own message read."],
+  ["update public.user_preferences set version = version", "The preferences version is bumped by trigger only."],
+  ["truncate public.ride_entries", "TRUNCATE skips RLS entirely; no client may hold it."]
+];
+for (const [statement, message] of refusedWrites) {
+  await assert.rejects(db.query(statement), /permission denied/, message);
+}
+await db.exec("reset role; set role anon; select set_config('request.jwt.claim.sub', '', false);");
+for (const statement of [
+  "insert into public.profiles(id, display_name) values (gen_random_uuid(), 'Anonymous')",
+  "update public.listings set title = title",
+  "delete from public.saved_listings"
+]) {
+  await assert.rejects(db.query(statement), /permission denied/, `anon must not write: ${statement}`);
+}
+
+// The statement supabase-js sends for .upsert(row). It needs the UPDATE grant
+// even when nothing conflicts; running it twice also takes the DO UPDATE path.
+const upsert = (table: string, row: Record<string, unknown>, conflict: string) => {
+  const columns = Object.keys(row);
+  return db.query(`
+    insert into public.${table}(${columns.join(", ")})
+    values (${columns.map((_, index) => `$${index + 1}`).join(", ")})
+    on conflict (${conflict}) do update set ${columns.map((column) => `${column} = excluded.${column}`).join(", ")}
+  `, Object.values(row));
+};
+await db.exec("reset role;");
+// New posts wait for the moderation worker; reacting needs a visible one.
+await db.query("update public.club_posts set moderation_status = 'visible' where id = $1", [postId]);
+const upsertLesson = await db.query<{ id: string }>(`
+  insert into public.academy_lessons(slug, title, summary, category, published_at)
+  values ('seat-basics', 'A quieter seat', 'Sitting still so the horse can move.', 'Flatwork', now())
+  returning id
+`);
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderC}', false);`);
+for (const reaction of ["like", "support"]) {
+  await upsert("saved_listings", { user_id: riderC, listing_id: listingId }, "user_id, listing_id");
+  await upsert("user_blocks", { blocker_id: riderC, blocked_id: riderB }, "blocker_id, blocked_id");
+  await upsert("club_reactions", { post_id: postId, user_id: riderC, reaction }, "post_id, user_id");
+}
+// No UPDATE policy on memberships: a first join must work, a repeat is refused.
+await upsert("club_memberships", { space_id: spaceId, user_id: riderC, role: "member" }, "space_id, user_id");
+await assert.rejects(
+  upsert("club_memberships", { space_id: spaceId, user_id: riderC, role: "member" }, "space_id, user_id"),
+  /row-level security/,
+  "The UPDATE grant on memberships exists only so the upsert plans; RLS still refuses the update."
+);
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+await upsert("coach_message_feedback", {
+  user_id: riderA, message_id: coachAssistantMessage.rows[0]?.id, useful: false, reason: "Too general"
+}, "user_id, message_id");
+for (const position of [60, 600]) {
+  await upsert("academy_progress", {
+    user_id: riderA, lesson_id: upsertLesson.rows[0]?.id, position_seconds: position,
+    completed_at: null, last_seen_at: new Date().toISOString()
+  }, "user_id, lesson_id");
+}
+const upsertDraft = await db.query<{ id: string }>(`
+  insert into public.listings(seller_id, category, title, description, brand_name, condition_grade, price_minor, currency, country_code, locality, metadata, status)
+  values ($1, 'pad', 'Dressage square pad navy', 'Light wear on the girth straps.', 'Equiline', 'good', 6500, 'EUR', 'DE', 'Aachen', '{}', 'draft')
+  returning id
+`, [riderA]);
+for (const amount of [900, 1100]) {
+  await upsert("listing_shipping_rates", {
+    listing_id: upsertDraft.rows[0]?.id, country_code: "DE", service_name: "DHL Paket", amount_minor: amount,
+    min_days: 1, max_days: 3, tracked: true, insured_up_to_minor: 50000
+  }, "listing_id, country_code, service_name");
+}
+await db.exec("reset role;");
+const upserted = await db.query<{ saved: number; reaction: string; useful: boolean; position: number; rate: number }>(`
+  select
+    (select count(*)::int from public.saved_listings where user_id = $1) as saved,
+    (select reaction::text from public.club_reactions where user_id = $1 and post_id = $2) as reaction,
+    (select useful from public.coach_message_feedback where user_id = $3 and message_id = $4) as useful,
+    (select position_seconds from public.academy_progress where user_id = $3 and lesson_id = $5) as position,
+    (select amount_minor from public.listing_shipping_rates where listing_id = $6) as rate
+`, [riderC, postId, riderA, coachAssistantMessage.rows[0]?.id, upsertLesson.rows[0]?.id, upsertDraft.rows[0]?.id]);
+assert.deepEqual(upserted.rows[0], { saved: 1, reaction: "support", useful: false, position: 600, rate: 1100 },
+  "Client upserts must still insert and then update under the column grants.");
 
 await db.close();
 console.log("Backend migrations executed successfully in isolated Postgres.");
