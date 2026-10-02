@@ -2,15 +2,20 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { WifiOff } from "lucide-react-native";
 import { EquinaButton } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
+import { signInCopy } from "./sign-in-copy";
 
 export function SessionGateScreen({
   state,
   error,
-  onRetry
+  onRetry,
+  onSignOut
 }: {
   state: "restoring" | "error";
   error?: string;
   onRetry?: () => void;
+  /** Without this, a stored session that keeps failing to restore -- a
+   *  deleted account, a revoked token -- left "Try again" as the only button. */
+  onSignOut?: () => void;
 }) {
   return (
     <View style={styles.root}>
@@ -28,6 +33,15 @@ export function SessionGateScreen({
             {error || "Check your connection and try again. Your account data has not been changed."}
           </Text>
           {onRetry ? <EquinaButton testID="session-retry" label="Try again" onPress={onRetry} /> : null}
+          {onSignOut ? (
+            <EquinaButton
+              testID="session-sign-out"
+              label={signInCopy.exits.gateError}
+              variant="secondary"
+              showArrow={false}
+              onPress={onSignOut}
+            />
+          ) : null}
         </>
       )}
     </View>

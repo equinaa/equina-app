@@ -23,7 +23,8 @@ export type NativeAppleCredential = {
 
 WebBrowser.maybeCompleteAuthSession();
 
-const oauthSessionTimeoutMs = 90_000;
+// Room for a provider password plus two-factor approval on another device.
+const oauthSessionTimeoutMs = 300_000;
 
 export const authRedirectUri = () =>
   Platform.OS === "web"

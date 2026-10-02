@@ -156,6 +156,14 @@ assert.match(socialAuthSource, /credential\.state\s*!==\s*state/);
 assert.match(appConfigSource, /"usesAppleSignIn":\s*true/);
 assert.match(appConfigSource, /"expo-apple-authentication"/);
 assert.doesNotMatch(socialAuthSource, /console\.(log|error)/);
+// Auth code handles emails, passwords, tokens and codes. None of it may log,
+// and a new file in these folders is covered without being listed here.
+for (const directory of [join(root, "src", "features", "account"), join(root, "src", "backend")]) {
+  for (const fileName of readdirSync(directory).filter((name) => /\.tsx?$/.test(name))) {
+    const source = readFileSync(join(directory, fileName), "utf8");
+    assert.doesNotMatch(source, /console\.\w+\(/, `${fileName} must not log.`);
+  }
+}
 
 const coachEdgeSource = readFileSync(join(root, "supabase", "functions", "coach-chat", "index.ts"), "utf8");
 assert.match(coachEdgeSource, /EQUINA_AI_API_KEY/);

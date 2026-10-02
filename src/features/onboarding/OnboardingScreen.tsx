@@ -43,6 +43,8 @@ import {
   EquinaSheet
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
+import { visibleProviders } from "../account/provider-visibility";
+import { signInCopy } from "../account/sign-in-copy";
 
 export type OnboardingStep = "you" | "horse" | "preview";
 export type OnboardingDiscipline = "Dressage" | "Jumping" | "Eventing" | "Trail";
@@ -57,7 +59,7 @@ export type OnboardingPhotoAsset = {
 export type RiderLevel = "Beginner" | "Intermediate" | "Advanced" | "Pro";
 export type OnboardingCompletionMode = "connected" | "preview" | "unavailable";
 export type OnboardingAuthProvider = "apple" | "google";
-type AccountMethod = "choice" | "email" | "password" | "signin" | "recovery";
+export type AccountMethod = "choice" | "email" | "password" | "signin" | "recovery";
 
 export const onboardingSteps: readonly OnboardingStep[] = ["you", "horse", "preview"];
 
@@ -128,6 +130,10 @@ type OnboardingScreenProps = {
   onHorseBreedChange: (value: string) => void;
   onNext: () => void;
   onBack: () => void;
+  /** Signs out of an account that has not finished onboarding. */
+  onSwitchAccount?: () => void;
+  /** Returns to the sign-in screen. Without it, "Sign in" opens the sheet. */
+  onSignInInstead?: () => void;
   onComplete: () => Promise<void> | void;
   onSocialAuth: (provider: OnboardingAuthProvider) => Promise<void> | void;
   onPasswordContinue: (password: string) => Promise<void> | void;
@@ -164,6 +170,8 @@ export function OnboardingScreen({
   onHorseBreedChange,
   onNext,
   onBack,
+  onSwitchAccount,
+  onSignInInstead,
   onComplete,
   onSocialAuth,
   onPasswordContinue,
@@ -380,12 +388,32 @@ export function OnboardingScreen({
               hitSlop={6}
               onPress={() => {
                 selectionHaptic();
+                if (onSignInInstead) {
+                  onSignInInstead();
+                  return;
+                }
                 setAccountMethod("signin");
                 setAccountSheetVisible(true);
               }}
               style={styles.topSignIn}
             >
               <Text style={styles.topSignInText}>Sign in</Text>
+            </MotionPressable>
+          )}
+          {step === "you" && signedIn && onSwitchAccount && (
+            <MotionPressable
+              testID="onboarding-switch-account"
+              accessibilityRole="button"
+              accessibilityLabel={signInCopy.exits.onboarding}
+              accessibilityHint={signInCopy.exits.onboardingHint}
+              hitSlop={6}
+              onPress={() => {
+                selectionHaptic();
+                onSwitchAccount();
+              }}
+              style={styles.topSignIn}
+            >
+              <Text style={styles.topSignInText}>{signInCopy.exits.onboarding}</Text>
             </MotionPressable>
           )}
           {step === "you" && showDemo && (
@@ -670,7 +698,7 @@ function StageHeader({ title, body }: { title: string; body: string }) {
   );
 }
 
-function AccountMethodSheet({
+export function AccountMethodSheet({
   visible,
   method,
   emailAuthMode,
@@ -686,7 +714,9 @@ function AccountMethodSheet({
   onPasswordContinue,
   onPasswordSignIn,
   onPasswordRecovery,
-  onDismiss
+  onDismiss,
+  intent = "create",
+  onEmailLinkSignIn
 }: {
   visible: boolean;
   method: AccountMethod;
@@ -704,29 +734,42 @@ function AccountMethodSheet({
   onPasswordSignIn: () => void;
   onPasswordRecovery: () => void;
   onDismiss: () => void;
+  /** "signin" is a returning rider on the sign-in screen: the email method
+   *  sends a sign-in link that never creates an account, and there is no
+   *  account-creation path inside the sheet. */
+  intent?: "create" | "signin";
+  onEmailLinkSignIn?: () => void;
 }) {
   const emailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const passwordReady = password.length >= 10 && password.length <= 128;
-  const hasSocialAuth = socialAuthAvailability.apple || socialAuthAvailability.google;
+  const providers = visibleProviders(Platform.OS, socialAuthAvailability);
+  const hasSocialAuth = providers.apple || providers.google;
+  const signingIn = intent === "signin";
   const usesPassword = method === "password" || method === "signin";
   const title = {
     choice: "Save your Equina",
-    email: "Continue with email",
+    email: signingIn
+      ? emailAuthMode === "magic-link" ? "Email me a sign-in link" : "Email me a sign-in code"
+      : "Continue with email",
     password: "Create a password",
     signin: "Welcome back",
     recovery: "Recover your account"
   }[method];
   const primaryLabel = busy
-    ? "Securing account..."
+    ? signingIn
+      ? method === "signin" ? "Signing in..." : "Sending..."
+      : "Securing account..."
     : method === "email"
-      ? emailAuthMode === "magic-link" ? "Email secure link" : "Send secure code"
+      ? signingIn
+        ? emailAuthMode === "magic-link" ? "Email me a link" : "Email me a code"
+        : emailAuthMode === "magic-link" ? "Email secure link" : "Send secure code"
       : method === "password"
         ? "Create secure account"
         : method === "signin"
           ? "Sign in"
-          : "Send recovery link";
+          : emailAuthMode === "magic-link" ? "Send recovery link" : "Send reset code";
   const primaryAction = method === "email"
-    ? onEmailContinue
+    ? signingIn && onEmailLinkSignIn ? onEmailLinkSignIn : onEmailContinue
     : method === "password"
       ? onPasswordContinue
       : method === "signin"
@@ -744,7 +787,7 @@ function AccountMethodSheet({
         <View style={styles.authChoice}>
           <Text style={styles.authIntro}>Keep your plan, Academy progress, horse records, and conversations in sync.</Text>
 
-          {socialAuthAvailability.apple ? (
+          {providers.apple ? (
             Platform.OS === "ios" ? (
               <AppleAuthentication.AppleAuthenticationButton
                 testID="onboarding-auth-apple"
@@ -768,7 +811,7 @@ function AccountMethodSheet({
             )
           ) : null}
 
-          {socialAuthAvailability.google ? (
+          {providers.google ? (
             <SocialAuthButton
               testID="onboarding-auth-google"
               mark="G"
@@ -807,20 +850,25 @@ function AccountMethodSheet({
           >
             <Text style={styles.authAlternativeText}>Already have an account? Sign in</Text>
           </MotionPressable>
-          <Text style={styles.authPrivacy}>Private session · no marketing opt-in · sign out anytime</Text>
         </View>
       ) : (
         <View style={styles.authEmail}>
           <Text style={styles.authIntro}>
             {method === "email"
-              ? emailAuthMode === "magic-link"
-                ? "We will email a secure sign-in link. No password to remember."
-                : "We will send a short verification code. No password to remember."
+              ? signingIn
+                ? emailAuthMode === "magic-link"
+                  ? "We will email you a link that signs you in. No password needed."
+                  : "We will email you a six-digit code that signs you in. No password needed."
+                : emailAuthMode === "magic-link"
+                  ? "We will email a secure sign-in link. No password to remember."
+                  : "We will send a short verification code. No password to remember."
               : method === "password"
-                ? "Use 10 or more characters. Your password is handled only by the secure auth service."
+                ? "Use 10 or more characters."
                 : method === "signin"
                   ? "Use the email and password connected to your Equina."
-                  : "We will send a short-lived recovery link if the account exists."}
+                  : emailAuthMode === "magic-link"
+                    ? "If an Equina account uses this email, we will send a reset link."
+                    : "If an Equina account uses this email, we will send a reset code."}
           </Text>
           <EquinaField
             testID="onboarding-email"
@@ -874,7 +922,7 @@ function AccountMethodSheet({
             leading={<LockKeyhole size={18} color={equinaTheme.colors.ink} />}
             onPress={primaryAction}
           />
-          {method === "email" ? (
+          {method === "email" && !signingIn ? (
             <MotionPressable
               testID="onboarding-auth-use-password"
               accessibilityRole="button"
@@ -882,6 +930,16 @@ function AccountMethodSheet({
               style={styles.authAlternative}
             >
               <Text style={styles.authAlternativeText}>Create an account with a password</Text>
+            </MotionPressable>
+          ) : null}
+          {method === "email" && signingIn ? (
+            <MotionPressable
+              testID="onboarding-auth-back-to-password"
+              accessibilityRole="button"
+              onPress={() => onMethodChange("signin")}
+              style={styles.authAlternative}
+            >
+              <Text style={styles.authAlternativeText}>Sign in with my password instead</Text>
             </MotionPressable>
           ) : null}
           {method === "password" ? (
@@ -904,6 +962,20 @@ function AccountMethodSheet({
               <Text style={styles.authAlternativeText}>Forgot your password?</Text>
             </MotionPressable>
           ) : null}
+          {/* Accounts created from an emailed link have no password at all.
+              Their way back in is another link. */}
+          {method === "signin" && signingIn && onEmailLinkSignIn ? (
+            <MotionPressable
+              testID="onboarding-auth-email-link"
+              accessibilityRole="button"
+              onPress={() => onMethodChange("email")}
+              style={styles.authAlternative}
+            >
+              <Text style={styles.authAlternativeText}>
+                {emailAuthMode === "magic-link" ? "Email me a sign-in link instead" : "Email me a sign-in code instead"}
+              </Text>
+            </MotionPressable>
+          ) : null}
           {method === "recovery" ? (
             <MotionPressable
               testID="onboarding-auth-recovery-back"
@@ -914,10 +986,12 @@ function AccountMethodSheet({
               <Text style={styles.authAlternativeText}>Back to password sign-in</Text>
             </MotionPressable>
           ) : null}
+          {/* On the sign-in screen the options sit behind the sheet, so going
+              back means closing it. */}
           <MotionPressable
             testID="onboarding-auth-methods-back"
             accessibilityRole="button"
-            onPress={() => onMethodChange("choice")}
+            onPress={signingIn ? onDismiss : () => onMethodChange("choice")}
             style={styles.authAlternative}
           >
             <Text style={styles.authAlternativeMuted}>Back to sign-in options</Text>
@@ -928,7 +1002,7 @@ function AccountMethodSheet({
   );
 }
 
-function SocialAuthButton({
+export function SocialAuthButton({
   testID,
   mark,
   label,
@@ -1335,7 +1409,8 @@ const styles = StyleSheet.create({
     color: equinaTheme.colors.brass
   },
   error: {
-    color: equinaTheme.colors.danger,
+    // colors.danger measures 2.7:1 on the canvas and fails AA for text.
+    color: equinaTheme.colorRole.criticalOnDark,
     fontSize: 12,
     lineHeight: 17,
     fontWeight: "400",
@@ -1640,7 +1715,7 @@ const styles = StyleSheet.create({
   },
   photoIssue: {
     ...equinaTheme.typography.meta,
-    color: equinaTheme.colors.danger
+    color: equinaTheme.colorRole.criticalOnDark
   },
   photoSheetBody: {
     gap: equinaTheme.spacing.md
@@ -1840,14 +1915,10 @@ const styles = StyleSheet.create({
     color: equinaTheme.text.primary,
     fontWeight: "600"
   },
-  authPrivacy: {
-    ...equinaTheme.typography.meta,
-    color: equinaTheme.text.tertiary,
-    textAlign: "center"
-  },
   authError: {
     ...equinaTheme.typography.meta,
-    color: equinaTheme.colors.danger
+    // colors.danger measures 2.7:1 on this sheet and fails AA.
+    color: equinaTheme.colorRole.criticalOnDark
   },
   authAlternative: {
     minHeight: equinaTheme.accessibility.minimumTapTarget,

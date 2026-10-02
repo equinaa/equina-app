@@ -10,7 +10,7 @@ import { NotificationRepository } from "./notification-repository";
 import { RecordsRepository } from "./records-repository";
 import { AcademyRepository } from "./academy-repository";
 import { RideRepository } from "./ride-repository";
-import { getSupabaseClient } from "./supabase-client";
+import { forgetStoredSession, getSupabaseClient } from "./supabase-client";
 
 export class EquinaBackend {
   readonly account: AccountRepository;
@@ -27,7 +27,7 @@ export class EquinaBackend {
   constructor() {
     const client = getSupabaseClient();
     this.account = new AccountRepository(client);
-    this.auth = new AuthRepository(client);
+    this.auth = new AuthRepository(client, forgetStoredSession);
     this.coach = new CoachRepository(client);
     this.records = new RecordsRepository(client);
     this.rides = new RideRepository(client);

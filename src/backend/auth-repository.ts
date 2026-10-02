@@ -4,7 +4,11 @@ import { backendError } from "./errors";
 export type AuthProvider = "apple" | "google";
 
 export class AuthRepository {
-  constructor(private readonly client: SupabaseClient) {}
+  constructor(
+    private readonly client: SupabaseClient,
+    // Removes the stored session when supabase-js cannot; see signOut.
+    private readonly forgetStoredSession: () => Promise<void> = async () => undefined
+  ) {}
 
   private validatePassword(password: string) {
     if (password.length < 10 || password.length > 128) {
@@ -38,6 +42,13 @@ export class AuthRepository {
   async verifyEmailCode(email: string, code: string): Promise<Session> {
     const { data, error } = await this.client.auth.verifyOtp({ email: email.trim().toLowerCase(), token: code.trim(), type: "email" });
     if (error || !data.session) throw backendError(error, "That sign-in code is invalid or expired.");
+    return data.session;
+  }
+
+  /** The code from a password-reset email. Signs in for the reset only. */
+  async verifyRecoveryCode(email: string, code: string): Promise<Session> {
+    const { data, error } = await this.client.auth.verifyOtp({ email: email.trim().toLowerCase(), token: code.trim(), type: "recovery" });
+    if (error || !data.session) throw backendError(error, "That recovery code is invalid or expired.");
     return data.session;
   }
 
@@ -140,9 +151,18 @@ export class AuthRepository {
     if (error) throw backendError(error, "Your password could not be saved.");
   }
 
+  // This device only. "global" also ended the rider's session on every other
+  // phone and tablet, without telling them why.
   async signOut(): Promise<void> {
-    const { error } = await this.client.auth.signOut({ scope: "global" });
-    if (error) throw backendError(error, "Could not sign out.");
+    const { error } = await this.client.auth.signOut({ scope: "local" });
+    if (error) {
+      // Offline, supabase-js removes the session when the server call fails --
+      // except when the access token has expired and cannot be refreshed: then
+      // it returns before removing anything. Signing out must not depend on
+      // which of those happened.
+      await this.forgetStoredSession().catch(() => undefined);
+      throw backendError(error, "Could not sign out.");
+    }
   }
 
   onChange(listener: (event: AuthChangeEvent, session: Session | null) => void): () => void {
