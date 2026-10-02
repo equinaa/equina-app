@@ -826,11 +826,12 @@ function ConfirmationSheet({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const copy = action === "signout"
-    ? { title: "Sign out of Equina?", body: "Private messages and drafts will be cleared from this device.", confirm: "Sign out" }
-    : action === "coach-history"
-      ? { title: "Delete Ralf history?", body: "Conversations and assistant responses will be removed. This cannot be undone.", confirm: "Delete history" }
-      : { title: "Schedule account deletion?", body: "You have 14 days to cancel. Personal data is removed when the deletion becomes effective.", confirm: "Schedule deletion" };
+  // The modal keeps fading for a moment after `action` is cleared. Show the
+  // copy it opened with until it is gone: falling through to the last branch
+  // flashed "Schedule account deletion?" every time someone signed out.
+  const [shownAction, setShownAction] = useState<NonNullable<ConfirmAction>>(action ?? "signout");
+  if (action && action !== shownAction) setShownAction(action);
+  const copy = confirmationCopy[action ?? shownAction];
   return (
     <Modal visible={Boolean(action)} transparent animationType="fade" onRequestClose={onCancel}>
       <View style={styles.modalRoot}>
@@ -842,7 +843,7 @@ function ConfirmationSheet({
             <Pressable accessibilityRole="button" accessibilityLabel="Cancel" style={styles.sheetCancel} onPress={onCancel}>
               <Text style={styles.sheetCancelText}>Cancel</Text>
             </Pressable>
-            <Pressable testID={`confirm-${action ?? "none"}`} accessibilityRole="button" accessibilityLabel={copy.confirm} style={styles.sheetDanger} onPress={onConfirm}>
+            <Pressable testID={`confirm-${action ?? "none"}`} accessibilityRole="button" accessibilityLabel={copy.confirm} disabled={!action} style={styles.sheetDanger} onPress={onConfirm}>
               <Text style={styles.sheetDangerText}>{copy.confirm}</Text>
             </Pressable>
           </View>
@@ -851,6 +852,12 @@ function ConfirmationSheet({
     </Modal>
   );
 }
+
+const confirmationCopy: Record<NonNullable<ConfirmAction>, { title: string; body: string; confirm: string }> = {
+  signout: { title: "Sign out of Equina?", body: "Private messages and drafts will be cleared from this device.", confirm: "Sign out" },
+  "coach-history": { title: "Delete Ralf history?", body: "Conversations and assistant responses will be removed. This cannot be undone.", confirm: "Delete history" },
+  "delete-account": { title: "Schedule account deletion?", body: "You have 14 days to cancel. Personal data is removed when the deletion becomes effective.", confirm: "Schedule deletion" }
+};
 
 const routeTitle = (route: AccountRoute) => ({
   root: "Account",

@@ -14,9 +14,13 @@ import { EquinaBackButton, EquinaButton } from "../../ui/primitives/EquinaPrimit
 import { equinaTheme } from "../../ui/theme/theme";
 import type { EmailAuthMode } from "./social-auth";
 
+// Matches the auth service's one-email-per-minute limit (max_frequency).
+const resendCooldownSeconds = 60;
+
 export function AuthVerificationScreen({
   email,
   mode,
+  purpose,
   error,
   verifying,
   onVerify,
@@ -25,6 +29,9 @@ export function AuthVerificationScreen({
 }: {
   email: string;
   mode: EmailAuthMode;
+  /** "create" sends to an address that was just registered. The others answer
+   *  neutrally, because no account may exist for the address at all. */
+  purpose: "create" | "signin" | "recovery";
   error: string;
   verifying: boolean;
   onVerify: (code: string) => void;
@@ -32,7 +39,7 @@ export function AuthVerificationScreen({
   onBack: () => void;
 }) {
   const [code, setCode] = useState("");
-  const [cooldown, setCooldown] = useState(30);
+  const [cooldown, setCooldown] = useState(resendCooldownSeconds);
   const [focused, setFocused] = useState(false);
   const waitingForLink = mode === "magic-link";
 
@@ -44,9 +51,15 @@ export function AuthVerificationScreen({
 
   const resend = async () => {
     if (cooldown > 0) return;
-    await onResend();
-    setCooldown(30);
+    try {
+      await onResend();
+      setCooldown(resendCooldownSeconds);
+    } catch {
+      // onResend already put the reason on screen; the button stays usable.
+    }
   };
+  const neutral = purpose !== "create";
+  const sentTo = neutral ? `If an Equina account uses ${email}, we sent` : "We sent";
 
   return (
     <KeyboardAvoidingView
@@ -60,14 +73,18 @@ export function AuthVerificationScreen({
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.eyebrowText}>Secure sign-in</Text>
+        <Text style={styles.eyebrowText}>{purpose === "recovery" ? "Password reset" : "Secure sign-in"}</Text>
         <Text accessibilityRole="header" style={styles.title}>
           {waitingForLink ? "Open your email." : "Check your inbox."}
         </Text>
         <Text style={styles.body}>
           {waitingForLink
-            ? `Tap the secure link sent to ${email}. Equina will finish here automatically.`
-            : `Enter the six-digit code sent to ${email}.`}
+            ? neutral
+              ? `${sentTo} a link to it. Open it on this device and Equina will finish here.`
+              : `Tap the secure link sent to ${email}. Equina will finish here automatically.`
+            : neutral
+              ? `${sentTo} a six-digit code to it. Enter it below.`
+              : `Enter the six-digit code sent to ${email}.`}
         </Text>
 
         {waitingForLink ? (
@@ -79,7 +96,7 @@ export function AuthVerificationScreen({
           >
             <MailCheck size={28} color={equinaTheme.colors.brass} />
             <View style={styles.linkWaitingCopy}>
-              <Text style={styles.linkWaitingTitle}>Link sent</Text>
+              <Text style={styles.linkWaitingTitle}>{neutral ? "Check your email" : "Link sent"}</Text>
               <Text style={styles.linkWaitingBody}>You can return here after opening it.</Text>
             </View>
             <ActivityIndicator size="small" color={equinaTheme.colors.brass} />
@@ -261,7 +278,8 @@ const styles = StyleSheet.create({
     fontWeight: "400"
   },
   error: {
-    color: equinaTheme.colors.danger,
+    // colors.danger measures 2.7:1 on the canvas and fails AA for text.
+    color: equinaTheme.colorRole.criticalOnDark,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: "400"

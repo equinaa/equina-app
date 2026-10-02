@@ -28,6 +28,9 @@ export const equinaTheme = {
     accent: "#C4A05A",
     positive: "#315B4D",
     critical: "#9D2B2E",
+    // critical is a fill: ivory text on it reads at 6.7:1. As TEXT on the
+    // canvas it is 2.7:1 and unreadable, so error messages use this instead.
+    criticalOnDark: "#E3918C",
     focus: "#F7F3EA"
   },
   surfaceRole: {

@@ -23,6 +23,9 @@ import {
   type SocialAuthProvider
 } from "./social-auth";
 
+/** Why the rider is looking at the sign-in screen, when they did not choose to. */
+export type SignedOutNotice = "expired" | "linkFailed";
+
 export type SessionPhase =
   | "restoring"
   | "signedOut"
@@ -60,6 +63,12 @@ const effectiveCapabilities = (server: BackendCapabilities): BackendCapabilities
   messaging: server.messaging && equinaFeatureFlags.shopMessaging
 });
 
+// The URL the app was opened with, if any. On the web that is the page itself.
+const initialAuthUrl = async () =>
+  Platform.OS === "web"
+    ? typeof window !== "undefined" ? window.location.href : null
+    : Linking.getInitialURL();
+
 export function useEquinaSession() {
   const configured = isBackendConfigured();
   const demoAllowed =
@@ -76,7 +85,23 @@ export function useEquinaSession() {
   const [capabilities, setCapabilities] = useState<BackendCapabilities>(emptyCapabilities);
   const [error, setError] = useState("");
   const [recoveryRequired, setRecoveryRequired] = useState(false);
+  const [signedOutNotice, setSignedOutNotice] = useState<SignedOutNotice | null>(null);
   const processedEmailLinks = useRef(new Set<string>());
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  // Marks a sign-out the rider asked for, so the SIGNED_OUT event it causes is
+  // not reported to them as an expired session.
+  const voluntarySignOut = useRef(false);
+  // While an emailed link is being exchanged, it owns the phase. A restore
+  // finishing in the meantime would otherwise show the sign-in screen, or
+  // worse, overwrite the session the link just created.
+  const emailLinkInFlight = useRef(false);
+  const initialLinkChecked = useRef(false);
+
+  const acceptsEmailLink = useCallback(
+    (url: string) => Boolean(backend) && emailAuthMode === "magic-link" && isEmailAuthCallback(url),
+    [backend]
+  );
 
   const loadAuthenticatedState = useCallback(async (
     targetSession: Session,
@@ -98,8 +123,17 @@ export function useEquinaSession() {
       return;
     }
     setPhase("restoring");
+    // Opened from an emailed link: the link listener below exchanges it and
+    // decides the phase. Settling on "signed out" first would flash the
+    // sign-in screen at someone who is one step from being signed in.
+    if (!initialLinkChecked.current) {
+      initialLinkChecked.current = true;
+      const initialUrl = await initialAuthUrl().catch(() => null);
+      if (initialUrl && acceptsEmailLink(initialUrl)) return;
+    }
     try {
       const connected = await backend.connect();
+      if (emailLinkInFlight.current) return;
       setCapabilities(effectiveCapabilities(connected.capabilities));
       if (!connected.session) {
         setSession(null);
@@ -109,22 +143,35 @@ export function useEquinaSession() {
       }
       await loadAuthenticatedState(connected.session, connected.capabilities);
     } catch {
+      if (emailLinkInFlight.current) return;
       setError("Equina could not restore your session. Check your connection and try again.");
       setPhase("recoverableError");
     }
-  }, [backend, loadAuthenticatedState]);
+  }, [acceptsEmailLink, backend, loadAuthenticatedState]);
 
   useEffect(() => {
     void restore();
     if (!backend) return;
     return backend.auth.onChange((event, nextSession) => {
+      // The first restore decides the starting phase; this event only repeats
+      // what it is already reading.
+      if (event === "INITIAL_SESSION") return;
       if (event === "SIGNED_OUT" || !nextSession) {
+        // A refresh token revoked elsewhere, or an account removed, ends the
+        // session without the rider doing anything. Say so.
+        const wasSignedIn = phaseRef.current === "authenticated" || phaseRef.current === "onboarding";
+        if (!voluntarySignOut.current && wasSignedIn) setSignedOutNotice("expired");
         setSession(null);
         setAccount(null);
         setCapabilities(emptyCapabilities);
         setRecoveryRequired(false);
         setPhase("signedOut");
-      } else if (event === "TOKEN_REFRESHED") {
+      } else if (
+        event === "TOKEN_REFRESHED" &&
+        (phaseRef.current === "authenticated" || phaseRef.current === "onboarding")
+      ) {
+        // Only a live session takes a refreshed token. One that arrives after
+        // sign-out must not quietly re-attach the old account.
         setSession(nextSession);
       }
     });
@@ -144,8 +191,18 @@ export function useEquinaSession() {
     if (!backend) throw new Error("Backend is not configured.");
     const verified = await backend.auth.verifyEmailCode(email, code);
     const connected = await backend.connect();
+    const snapshot = await loadAuthenticatedState(verified, connected.capabilities);
+    return { session: verified, snapshot };
+  }, [backend, loadAuthenticatedState]);
+
+  // A reset code signs the rider in for one purpose: choosing a new password.
+  // The recovery screen stays in front until they do.
+  const verifyRecoveryCode = useCallback(async (email: string, code: string) => {
+    if (!backend) throw new Error("Backend is not configured.");
+    const verified = await backend.auth.verifyRecoveryCode(email, code);
+    const connected = await backend.connect();
     await loadAuthenticatedState(verified, connected.capabilities);
-    return verified;
+    setRecoveryRequired(true);
   }, [backend, loadAuthenticatedState]);
 
   const createPasswordAccount = useCallback(async (
@@ -215,9 +272,16 @@ export function useEquinaSession() {
   }, [backend]);
 
   const completeEmailLink = useCallback(async (url: string) => {
-    if (!backend || emailAuthMode !== "magic-link" || !isEmailAuthCallback(url)) return false;
+    if (!backend || !acceptsEmailLink(url)) return false;
     if (processedEmailLinks.current.has(url)) return true;
+    // Someone already signed in has nothing to exchange a sign-in link for, and
+    // a forged one must not knock them out of the app. A reset link still
+    // applies: it is how a signed-in rider changes a forgotten password.
+    const signedIn = phaseRef.current === "authenticated" || phaseRef.current === "onboarding";
+    if (signedIn && !isPasswordRecoveryCallback(url)) return false;
     processedEmailLinks.current.add(url);
+    emailLinkInFlight.current = true;
+    setSignedOutNotice(null);
     setPhase("restoring");
     try {
       const verified = await backend.auth.exchangeEmailLink(url);
@@ -229,12 +293,17 @@ export function useEquinaSession() {
       }
       return true;
     } catch {
-      processedEmailLinks.current.delete(url);
-      setError("That secure email link is invalid or expired. Request a new one and try again.");
-      setPhase("recoverableError");
+      // Retrying cannot help: the exchange already consumed the one-time
+      // verifier on this device. Return to wherever the rider was, and on the
+      // sign-in screen say why the link did nothing.
+      setSignedOutNotice("linkFailed");
+      emailLinkInFlight.current = false;
+      await restore();
       return false;
+    } finally {
+      emailLinkInFlight.current = false;
     }
-  }, [backend, loadAuthenticatedState]);
+  }, [acceptsEmailLink, backend, loadAuthenticatedState, restore]);
 
   const completePasswordRecovery = useCallback(async (password: string) => {
     if (!backend || !session) throw new Error("Recovery session is no longer valid.");
@@ -246,21 +315,17 @@ export function useEquinaSession() {
     if (emailAuthMode !== "magic-link") return;
     let active = true;
     const handleUrl = async (url: string | null) => {
-      if (!active || !url || !isEmailAuthCallback(url)) return;
+      if (!active || !url || !acceptsEmailLink(url)) return;
       await completeEmailLink(url);
     };
 
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      void handleUrl(window.location.href);
-    } else {
-      void Linking.getInitialURL().then(handleUrl);
-    }
+    void initialAuthUrl().then(handleUrl, () => undefined);
     const subscription = Linking.addEventListener("url", ({ url }) => void handleUrl(url));
     return () => {
       active = false;
       subscription.remove();
     };
-  }, [completeEmailLink]);
+  }, [acceptsEmailLink, completeEmailLink]);
 
   const completeOnboarding = useCallback(async (input: {
     displayName: string;
@@ -303,18 +368,31 @@ export function useEquinaSession() {
   }, [demoAllowed]);
 
   const signOut = useCallback(async () => {
-    if (backend && session) {
-      if (capabilities.pushNotifications) {
-        await backend.notifications.revokeAll().catch(() => undefined);
+    voluntarySignOut.current = true;
+    try {
+      if (backend) {
+        if (session && capabilities.pushNotifications) {
+          await backend.notifications.revokeAll().catch(() => undefined);
+        }
+        // Runs without a loaded session too: "Sign in with a different
+        // account" on the reconnect screen must clear the stored session that
+        // failed to restore. Offline, the local session is still removed and
+        // the server-side token expires on its own.
+        await backend.auth.signOut().catch(() => undefined);
       }
-      await backend.auth.signOut();
+    } finally {
+      voluntarySignOut.current = false;
+      setSession(null);
+      setAccount(null);
+      setCapabilities(emptyCapabilities);
+      setRecoveryRequired(false);
+      setSignedOutNotice(null);
+      setError("");
+      setPhase("signedOut");
     }
-    setSession(null);
-    setAccount(null);
-    setCapabilities(emptyCapabilities);
-    setRecoveryRequired(false);
-    setPhase("signedOut");
   }, [backend, capabilities.pushNotifications, session]);
+
+  const clearSignedOutNotice = useCallback(() => setSignedOutNotice(null), []);
 
   return {
     backend,
@@ -325,10 +403,13 @@ export function useEquinaSession() {
     account,
     capabilities,
     recoveryRequired,
+    signedOutNotice,
+    clearSignedOutNotice,
     error,
     restore,
     sendCode,
     verifyCode,
+    verifyRecoveryCode,
     createPasswordAccount,
     signInWithPassword,
     requestPasswordRecovery,
