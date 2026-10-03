@@ -377,7 +377,8 @@ export function RideRecapScreen({
   horseName: string;
   image: string;
   session: RideSession;
-  recommendation: RideRecommendation;
+  /** Absent while the Academy has no lesson to suggest; the ride goes to Ralf. */
+  recommendation?: RideRecommendation;
   shared: boolean;
   sharingEnabled: boolean;
   onMoodChange: (mood: RideMood) => void;
@@ -513,17 +514,33 @@ export function RideRecapScreen({
               <Sparkles size={18} color={equinaTheme.colors.brass} />
             </View>
 
-            <View
-              testID="ride-recap-recommendation"
-              style={styles.recapLessonRow}
-            >
-              <Image source={{ uri: recommendation.image }} resizeMode="cover" style={styles.recapLessonImage} />
-              <View style={styles.recapLessonCopy}>
-                <Text numberOfLines={2} style={styles.recapLessonTitle}>{recommendation.title}</Text>
-                <Text numberOfLines={1} style={styles.recapLessonMeta}>{recommendation.coach} · {recommendation.duration}</Text>
-                <Text numberOfLines={2} style={styles.recapLessonBody}>{recommendation.summary}</Text>
+            {recommendation ? (
+              <View
+                testID="ride-recap-recommendation"
+                style={styles.recapLessonRow}
+              >
+                <Image source={{ uri: recommendation.image }} resizeMode="cover" style={styles.recapLessonImage} />
+                <View style={styles.recapLessonCopy}>
+                  <Text numberOfLines={2} style={styles.recapLessonTitle}>{recommendation.title}</Text>
+                  <Text numberOfLines={1} style={styles.recapLessonMeta}>
+                    {[recommendation.coach, recommendation.duration].filter(Boolean).join(" · ")}
+                  </Text>
+                  <Text numberOfLines={2} style={styles.recapLessonBody}>{recommendation.summary}</Text>
+                </View>
               </View>
-            </View>
+            ) : (
+              <View testID="ride-recap-ralf" style={styles.recapLessonRow}>
+                <View style={styles.recapRalfMark}>
+                  <Sparkles size={22} color={equinaTheme.colors.brass} />
+                </View>
+                <View style={styles.recapLessonCopy}>
+                  <Text numberOfLines={2} style={styles.recapLessonTitle}>Review this ride with Ralf</Text>
+                  <Text numberOfLines={2} style={styles.recapLessonBody}>
+                    What went well, and the one thing to work on next time.
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
         </ScrollView>
 
@@ -531,11 +548,11 @@ export function RideRecapScreen({
           <MotionPressable
             testID="ride-recap-academy"
             accessibilityRole="button"
-            accessibilityLabel={`Continue with ${recommendation.title} in Academy`}
+            accessibilityLabel={recommendation ? `Continue with ${recommendation.title} in Academy` : "Review this ride with Ralf"}
             onPress={onOpenAcademy}
             style={styles.recapPrimaryButton}
           >
-            <Text style={styles.recapPrimaryText}>Continue in Academy</Text>
+            <Text style={styles.recapPrimaryText}>{recommendation ? "Continue in Academy" : "Review with Ralf"}</Text>
             <ChevronRight size={19} color={equinaTheme.colors.ink} />
           </MotionPressable>
 
@@ -918,6 +935,14 @@ const styles = StyleSheet.create({
   recapLessonCopy: {
     flex: 1,
     minWidth: 0
+  },
+  recapRalfMark: {
+    width: 78,
+    height: 96,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.surfaces.raised
   },
   recapLessonTitle: {
     color: equinaTheme.text.primary,

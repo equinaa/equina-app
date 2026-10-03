@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Discipline } from "../domain/types";
-import type { AcademyChapter, AcademyLesson, AcademyProgress } from "./contracts";
+import type { AcademyChapter, AcademyLesson, AcademyPlaybackLink, AcademyProgress } from "./contracts";
+import { EdgeClient } from "./edge-client";
 import { backendError } from "./errors";
 
 const mapChapter = (row: Record<string, unknown>): AcademyChapter => ({
@@ -23,7 +24,6 @@ const mapLesson = (row: Record<string, unknown>): AcademyLesson => ({
     : Number(row.duration_seconds),
   coachName: row.coach_name ? String(row.coach_name) : undefined,
   coachTitle: row.coach_title ? String(row.coach_title) : undefined,
-  videoPath: row.video_path ? String(row.video_path) : undefined,
   posterPath: row.poster_path ? String(row.poster_path) : undefined,
   position: Number(row.position ?? 0),
   chapters: Array.isArray(row.academy_chapters)
@@ -41,7 +41,11 @@ const mapProgress = (row: Record<string, unknown>): AcademyProgress => ({
 });
 
 export class AcademyRepository {
-  constructor(private readonly client: SupabaseClient) {}
+  private readonly edge: EdgeClient;
+
+  constructor(private readonly client: SupabaseClient) {
+    this.edge = new EdgeClient(client);
+  }
 
   /**
    * The published catalogue, with chapters. Row-level security already hides
@@ -101,6 +105,15 @@ export class AcademyRepository {
       .single();
     if (error) throw backendError(error, "Lesson progress could not be saved.");
     return mapProgress(data as Record<string, unknown>);
+  }
+
+  /**
+   * A link to this lesson's video that works for a few hours. Videos live
+   * with a video host and are never public: the server decides whether this
+   * rider may watch, then signs a link only that lesson's files accept.
+   */
+  async playback(lessonId: string): Promise<AcademyPlaybackLink> {
+    return this.edge.invoke<AcademyPlaybackLink>("academy-playback", { lessonId });
   }
 
   /** Forget a lesson entirely, so it reads as never started. */

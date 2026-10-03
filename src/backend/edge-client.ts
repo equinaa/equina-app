@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import * as Crypto from "expo-crypto";
-import { backendError, requireData } from "./errors";
+import { edgeFailure, requireData } from "./errors";
 
 export class EdgeClient {
   constructor(private readonly client: SupabaseClient) {}
@@ -11,7 +11,7 @@ export class EdgeClient {
       method,
       headers: { "x-request-id": Crypto.randomUUID() }
     });
-    if (error) throw backendError(error, `${name} could not be completed.`);
+    if (error) throw await edgeFailure(error, `${name} could not be completed.`);
     return requireData(data as TResponse | null, null, `${name} returned no data.`);
   }
 }

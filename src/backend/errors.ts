@@ -30,6 +30,39 @@ export const backendError = (error: unknown, fallback: string): EquinaBackendErr
   return new EquinaBackendError(fallback);
 };
 
+/**
+ * What an edge function said when it refused.
+ *
+ * supabase-js reports any non-2xx answer as "Edge Function returned a
+ * non-2xx status code" and keeps the body on `context`. Every function here
+ * answers with `{ error, code }`, and the code is what a screen needs: a
+ * lesson still encoding and a lesson that is gone call for different words.
+ * A request that never got an answer is named as offline, like auth does.
+ */
+export const edgeFailure = async (error: unknown, fallback: string): Promise<EquinaBackendError> => {
+  const candidate = error as { name?: unknown; context?: unknown } | null;
+  if (candidate?.name === "FunctionsFetchError") {
+    return new EquinaBackendError(fallback, networkUnreachable, true);
+  }
+  const response = candidate?.context as { status?: unknown; json?: unknown } | undefined;
+  if (candidate?.name === "FunctionsHttpError" && response && typeof response.json === "function") {
+    try {
+      const body = (await (response.json as () => Promise<unknown>)()) as { error?: unknown; code?: unknown } | null;
+      const status = typeof response.status === "number" ? response.status : 0;
+      if (body && typeof body.code === "string") {
+        return new EquinaBackendError(
+          typeof body.error === "string" ? body.error : fallback,
+          body.code,
+          status === 0 || status >= 500
+        );
+      }
+    } catch {
+      // An answer without a readable body says no more than the status.
+    }
+  }
+  return backendError(error, fallback);
+};
+
 export const requireData = <T>(data: T | null, error: unknown, fallback: string): T => {
   if (error) throw backendError(error, fallback);
   if (data === null) throw new EquinaBackendError(fallback, "missing_data");

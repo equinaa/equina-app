@@ -1044,6 +1044,79 @@ await assert.rejects(
   "A rider must not be able to write progress onto someone else's account."
 );
 
+// --- Lesson videos ----------------------------------------------------------
+
+// The host's asset id is recorded by the server when an upload starts. It is
+// spliced into a signed URL path, so its shape is a constraint, not a hope.
+await db.exec("reset role;");
+const bunnyAsset = "8d2c1f3e-4b5a-4c6d-9e7f-1a2b3c4d5e6f";
+await db.query("insert into public.academy_videos(lesson_id, provider, asset_id) values ($1, 'bunny', $2)", [lessonId, bunnyAsset]);
+await assert.rejects(
+  db.query("insert into public.academy_videos(lesson_id, provider, asset_id) values ($1, 'bunny', '../other-lesson')", [draftId]),
+  /check constraint/,
+  "An asset id that could walk out of its own directory must be refused."
+);
+await assert.rejects(
+  db.query("insert into public.academy_videos(lesson_id, provider, asset_id) values ($1, 'youtube', 'abc')", [draftId]),
+  /check constraint/,
+  "A provider nothing can sign links for must be refused."
+);
+
+// Riders reach a video only through a link the server signs. The catalogue
+// is readable by anyone, so the asset id lives where riders cannot read it.
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+const videoPeek = await db.query<{ n: number }>("select count(*)::int as n from public.academy_videos");
+assert.equal(videoPeek.rows[0]?.n, 0, "A rider must not be able to read a lesson's asset id.");
+await assert.rejects(
+  db.query("update public.academy_videos set status = 'ready' where lesson_id = $1", [lessonId]),
+  /permission denied/,
+  "Only the host's webhook marks a video ready."
+);
+
+// While the host is still encoding, the answer says so -- the edge function
+// turns that into "still being prepared" rather than a dead player.
+const encoding = await db.query("select provider, asset_id, status from public.academy_playback_source($1)", [lessonId]);
+assert.deepEqual(encoding.rows, [{ provider: "bunny", asset_id: bunnyAsset, status: "processing" }]);
+
+await db.exec(`reset role; update public.academy_videos set status = 'ready' where lesson_id = '${lessonId}';`);
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+const watchable = await db.query<{ status: string }>("select status from public.academy_playback_source($1)", [lessonId]);
+assert.deepEqual(watchable.rows, [{ status: "ready" }], "Any signed-in rider may watch a published lesson during the founding phase.");
+
+// A draft reads exactly like a lesson that does not exist.
+await assert.rejects(
+  db.query("select * from public.academy_playback_source($1)", [draftId]),
+  /Lesson not found/,
+  "A rider must not be able to reach a draft's video."
+);
+await assert.rejects(
+  db.query("select * from public.academy_playback_source($1)", ["20000000-0000-4000-8000-0000000000ff"]),
+  /Lesson not found/
+);
+
+// Signed-out visitors browse the catalogue but cannot ask for a video.
+await db.exec("reset role; set role anon; select set_config('request.jwt.claim.sub', '', false);");
+await assert.rejects(
+  db.query("select * from public.academy_playback_source($1)", [lessonId]),
+  /permission denied/,
+  "Watching needs an account."
+);
+
+// Staff preview drafts in the admin through the same rule riders use.
+const academyStaff = "10000000-0000-4000-8000-000000000031";
+await db.exec(`
+  reset role;
+  insert into auth.users(id, email, raw_user_meta_data) values ('${academyStaff}', 'staff@equina.test', '{"display_name":"Equina Staff"}');
+  insert into public.user_roles(user_id, role) values ('${academyStaff}', 'moderator');
+  set role authenticated;
+  select set_config('request.jwt.claim.sub', '${academyStaff}', false);
+`);
+const preview = await db.query("select * from public.academy_playback_source($1)", [draftId]);
+assert.deepEqual(preview.rows, [], "Staff may open a draft; with nothing uploaded there is simply nothing to play yet.");
+const staffVideos = await db.query<{ status: string }>("select status from public.academy_videos");
+assert.deepEqual(staffVideos.rows, [{ status: "ready" }], "Staff see upload state in the admin.");
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+
 // Riders browse the catalogue; they do not edit it. Note the shape of the
 // defence: RLS filters an UPDATE rather than raising, so the statement
 // succeeds having changed nothing. Asserting on an exception here would pass
@@ -1055,12 +1128,13 @@ assert.equal(stillNamed.rows[0]?.title, "Elastic contact", "Only staff manage th
 
 // Deleting a lesson takes its chapters and everyone's progress with it.
 await db.query("delete from public.academy_lessons where id = $1", [lessonId]);
-const orphans = await db.query<{ chapters: number; progress: number }>(`
+const orphans = await db.query<{ chapters: number; progress: number; videos: number }>(`
   select
     (select count(*)::int from public.academy_chapters where lesson_id = $1) as chapters,
-    (select count(*)::int from public.academy_progress where lesson_id = $1) as progress
+    (select count(*)::int from public.academy_progress where lesson_id = $1) as progress,
+    (select count(*)::int from public.academy_videos where lesson_id = $1) as videos
 `, [lessonId]);
-assert.deepEqual(orphans.rows, [{ chapters: 0, progress: 0 }], "A removed lesson leaves nothing behind.");
+assert.deepEqual(orphans.rows, [{ chapters: 0, progress: 0, videos: 0 }], "A removed lesson leaves nothing behind.");
 
 // --- Client write grants ----------------------------------------------------
 

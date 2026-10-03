@@ -4,4 +4,5 @@ import "./care-schedule.test";
 import "./ride-stats.test";
 import "./sign-in.test";
 import "./club.test";
+import "./academy.test";
 await import("./backend-migrations.test");

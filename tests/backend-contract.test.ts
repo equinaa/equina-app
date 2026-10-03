@@ -51,7 +51,7 @@ const functionNames = [
   "process-storage-cleanup", "process-content-moderation", "moderate-report", "lift-sanction"
   , "coach-chat", "request-data-export", "schedule-account-deletion", "cancel-account-deletion",
   "process-account-deletions", "process-data-export-cleanup", "register-push-device",
-  "revoke-push-device", "process-notification-outbox"
+  "revoke-push-device", "process-notification-outbox", "academy-playback"
 ];
 for (const name of functionNames) {
   assert.ok(existsSync(join(root, "supabase", "functions", name, "index.ts")), `${name} Edge Function must exist.`);
@@ -62,7 +62,7 @@ const mobileSource = readdirSync(join(root, "src", "backend"))
   .map((name) => readFileSync(join(root, "src", "backend", name), "utf8"))
   .join("\n");
 assert.doesNotMatch(mobileSource, /SUPABASE_SERVICE_ROLE_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET/);
-assert.doesNotMatch(mobileSource, /EQUINA_AI_API_KEY|ACCOUNT_AUTOMATION_SECRET|NOTIFICATION_AUTOMATION_SECRET/);
+assert.doesNotMatch(mobileSource, /EQUINA_AI_API_KEY|ACCOUNT_AUTOMATION_SECRET|NOTIFICATION_AUTOMATION_SECRET|BUNNY_STREAM_TOKEN_KEY/);
 
 const secureStorageSource = readFileSync(join(root, "src", "backend", "secure-session-storage.ts"), "utf8");
 assert.match(secureStorageSource, /expo-secure-store/);

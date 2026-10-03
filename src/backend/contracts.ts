@@ -315,10 +315,16 @@ export type AcademyLesson = {
   durationSeconds?: number;
   coachName?: string;
   coachTitle?: string;
-  videoPath?: string;
   posterPath?: string;
   position: number;
   chapters: AcademyChapter[];
+};
+
+/** A signed link to one lesson's video, minted by academy-playback. */
+export type AcademyPlaybackLink = {
+  url: string;
+  /** ISO time after which the video host refuses the link. */
+  expiresAt: string;
 };
 
 export type AcademyProgress = {
