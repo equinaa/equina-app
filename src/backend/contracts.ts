@@ -200,6 +200,7 @@ export type ClubPostRecord = {
   updatedAt: string;
 };
 export type ClubCommentRecord = { id: string; postId: string; authorId: string; parentId?: string; body: string; moderationStatus: string; createdAt: string };
+export type ClubCommentWithAuthor = ClubCommentRecord & { authorName: string };
 export type ClubMediaRecord = { id: string; postId: string; mediaType: "image" | "video"; mimeType: string; objectPath: string; position: number; signedUrl: string };
 export type ClubFeedItem = {
   post: ClubPostRecord;

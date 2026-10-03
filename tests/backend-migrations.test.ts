@@ -1304,8 +1304,11 @@ const upsert = (table: string, row: Record<string, unknown>, conflict: string) =
   `, Object.values(row));
 };
 await db.exec("reset role;");
-// New posts wait for the moderation worker; reacting needs a visible one.
-await db.query("update public.club_posts set moderation_status = 'visible' where id = $1", [postId]);
+// Reacting needs a visible post; under post-moderation it already is.
+assert.equal(
+  (await db.query<{ status: string }>("select moderation_status::text as status from public.club_posts where id = $1", [postId])).rows[0]?.status,
+  "visible"
+);
 const upsertLesson = await db.query<{ id: string }>(`
   insert into public.academy_lessons(slug, title, summary, category, published_at)
   values ('seat-basics', 'A quieter seat', 'Sitting still so the horse can move.', 'Flatwork', now())
@@ -1356,6 +1359,68 @@ const upserted = await db.query<{ saved: number; reaction: string; useful: boole
 `, [riderC, postId, riderA, coachAssistantMessage.rows[0]?.id, upsertLesson.rows[0]?.id, upsertDraft.rows[0]?.id]);
 assert.deepEqual(upserted.rows[0], { saved: 1, reaction: "support", useful: false, position: 600, rate: 1100 },
   "Client upserts must still insert and then update under the column grants.");
+
+// Club post-moderation: content is visible as soon as it is written; the
+// phrase filter, three reports and blocking are what stand between it and
+// other riders.
+const riderD = "10000000-0000-4000-8000-000000000004";
+const riderE = "10000000-0000-4000-8000-000000000005";
+await db.exec(`
+  reset role;
+  insert into auth.users(id, email, raw_user_meta_data) values
+    ('${riderD}', 'rider-d@equina.test', '{"display_name":"Rider D"}'),
+    ('${riderE}', 'rider-e@equina.test', '{"display_name":"Rider E"}');
+`);
+const asRider = (rider: string) =>
+  db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${rider}', false);`);
+const statusOf = async (table: "club_posts" | "club_comments", id: string) =>
+  (await db.query<{ status: string }>(`select moderation_status::text as status from public.${table} where id = $1`, [id]))
+    .rows[0]?.status;
+
+await asRider(riderC);
+const openPost = (await db.query<{ id: string; status: string }>(`
+  insert into public.club_posts(author_id, space_id, post_type, body)
+  values ($1, $2, 'ride', 'Rhythm work over poles, then one calm line.') returning id, moderation_status::text as status
+`, [riderC, spaceId])).rows[0];
+assert.equal(openPost?.status, "visible", "A post must be visible to other riders as soon as it is written.");
+const filteredPost = (await db.query<{ id: string; status: string }>(`
+  insert into public.club_posts(author_id, space_id, post_type, body)
+  values ($1, $2, 'journal', 'DM me for a crypto investment that pays for your horse.') returning id, moderation_status::text as status
+`, [riderC, spaceId])).rows[0];
+assert.equal(filteredPost?.status, "hidden", "The phrase filter must hide matching posts on write.");
+await db.query("update public.club_posts set body = 'Nothing to see here.' where id = $1", [filteredPost?.id]);
+await db.exec("reset role;");
+assert.equal(await statusOf("club_posts", filteredPost?.id ?? ""), "hidden", "Editing a hidden post must not republish it.");
+
+await asRider(riderA);
+const openComment = (await db.query<{ id: string; status: string }>(`
+  insert into public.club_comments(post_id, author_id, body)
+  values ($1, $2, 'Lovely rhythm. What distance were the poles?') returning id, moderation_status::text as status
+`, [openPost?.id, riderA])).rows[0];
+assert.equal(openComment?.status, "visible", "A comment must be visible as soon as it is written.");
+
+for (const [index, reporter] of [riderA, riderD, riderE].entries()) {
+  await asRider(reporter);
+  await db.query(
+    "insert into public.content_reports(reporter_id, post_id, reason) values ($1, $2, 'spam')",
+    [reporter, openPost?.id]
+  );
+  await db.exec("reset role;");
+  assert.equal(
+    await statusOf("club_posts", openPost?.id ?? ""),
+    index < 2 ? "visible" : "hidden",
+    index < 2 ? "Fewer than three reports must leave a post up." : "Three different reporters must hide a post."
+  );
+}
+
+await asRider(riderC);
+await db.query("insert into public.user_blocks(blocker_id, blocked_id) values ($1, $2)", [riderC, riderA]);
+const blockedComments = await db.query("select id from public.club_comments where id = $1", [openComment?.id]);
+assert.equal(blockedComments.rows.length, 0, "A blocked rider's comments must be hidden from the rider who blocked them.");
+await asRider(riderA);
+const blockerPost = await db.query("select id from public.club_posts where author_id = $1", [riderC]);
+assert.equal(blockerPost.rows.length, 0, "A blocked rider must not see the blocker's posts either.");
+await db.exec("reset role;");
 
 // Account erasure. Production soft-deletes the auth user (orders and other
 // legal records still point at it), so nothing cascades from auth.users:

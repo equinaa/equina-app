@@ -52,7 +52,11 @@ Deno.serve(async (request) => {
         records: Boolean(flags.record_mutations),
         horseManagement: Boolean(flags.horse_management),
         rideLogging: Boolean(flags.ride_logging),
-        clubPublishing: Boolean(flags.club_publishing && moderationConfigured),
+        // Club is post-moderated (202610020006): the phrase filter, report
+        // threshold and blocking live in the database, so posting does not wait
+        // for the moderation provider. Listings still do; they are reviewed
+        // before they go live.
+        clubPublishing: Boolean(flags.club_publishing),
         clubInteractions: Boolean(flags.club_interactions),
         listingCreation: Boolean(flags.shop_listing_creation && moderationConfigured),
         messaging: Boolean(flags.shop_messaging),

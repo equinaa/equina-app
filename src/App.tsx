@@ -111,6 +111,9 @@ import { CareSchedule } from "./features/records/CareSchedule";
 import { SignInScreen } from "./features/account/SignInScreen";
 import { signInCopy } from "./features/account/sign-in-copy";
 import { emailRequestOutcome, signInErrorCopy } from "./features/account/sign-in-errors";
+import { ClubScreen, type ClubRideShare } from "./features/club/ClubScreen";
+import { rideShareLine, spaceSlugForDiscipline } from "./features/club/club-format";
+import { useClub } from "./features/club/useClub";
 import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
 import type { RideEntry } from "./backend/contracts";
@@ -967,6 +970,8 @@ function EquinaApp() {
   // Starts at zero. Engagement is the one number a social product must never
   // invent — it is the whole signal a rider reads the feed for.
   const [communityLikes, setCommunityLikes] = useState(0);
+  // Bumped by "Share ride" to open the Club composer with the ride attached.
+  const [clubComposeRequest, setClubComposeRequest] = useState(0);
   const [sharedRide, setSharedRide] = useState(false);
   const [lastRideRecapVisible, setLastRideRecapVisible] = useState(false);
   const [dailyMood, setDailyMood] = useState<MoodOption>("Focused");
@@ -1109,6 +1114,29 @@ function EquinaApp() {
   // The app states this number back to the rider as fact ("N rides are now in
   // your journal"), so it has to come from the journal, never from a seed.
   const sessionCount = ridePersistence ? rideJournal.entries.length : localSessionCount;
+  const club = useClub({
+    backend: equinaSession.backend,
+    enabled:
+      accountMode === "connected" &&
+      equinaSession.phase === "authenticated" &&
+      (equinaSession.capabilities.clubPublishing || equinaSession.capabilities.clubInteractions)
+  });
+  const clubSharing = accountMode === "connected"
+    ? equinaSession.capabilities.clubPublishing
+    : equinaFeatureFlags.clubPublishing;
+  const latestRideEntry = ridePersistence ? rideJournal.latestEntry : null;
+  const clubRideShare: ClubRideShare | undefined = latestRideEntry
+    ? {
+        id: latestRideEntry.id,
+        horseId: latestRideEntry.horseId,
+        summary: rideShareLine({
+          horseName: latestRideEntry.horseId ? primaryHorseName : undefined,
+          elapsedSeconds: latestRideEntry.elapsedSeconds,
+          focus: latestRideEntry.focus,
+          mood: latestRideEntry.mood
+        })
+      }
+    : undefined;
   const connectedCatalog = useConnectedShopCatalog({
     backend: equinaSession.backend,
     enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
@@ -1495,6 +1523,15 @@ function EquinaApp() {
   };
 
   const shareRide = (openClub = true) => {
+    // A connected rider shares through the real composer: it opens with the
+    // ride attached, and nothing is posted until they tap Post.
+    if (accountMode === "connected") {
+      setLastRideRecapVisible(false);
+      setTab("community");
+      if (equinaSession.capabilities.clubPublishing) setClubComposeRequest((count) => count + 1);
+      refresh("");
+      return;
+    }
     if (!equinaFeatureFlags.clubPublishing) {
       if (openClub) setTab("community");
       setLastRideRecapVisible(!openClub);
@@ -2240,10 +2277,10 @@ function EquinaApp() {
                 session={lastRide}
                 recommendation={postRideRecommendation}
                 shared={sharedRide}
-                sharingEnabled={equinaFeatureFlags.clubPublishing}
+                sharingEnabled={clubSharing}
                 onMoodChange={updateDailyMood}
                 onOpenAcademy={openPostRideLesson}
-                onShare={() => equinaFeatureFlags.clubPublishing ? shareRide(true) : openCommunity()}
+                onShare={() => clubSharing ? shareRide(true) : openCommunity()}
                 onHome={closeRideRecap}
               />
             ) : (
@@ -2404,7 +2441,20 @@ function EquinaApp() {
                 onCoachStyleChange={setCoachStyle}
               />
             )}
-            {tab === "community" && (
+            {tab === "community" && accountMode === "connected" && (
+              <ClubScreen
+                club={club}
+                canPost={equinaSession.capabilities.clubPublishing}
+                canInteract={equinaSession.capabilities.clubInteractions}
+                currentUserId={equinaSession.session?.user.id}
+                riderName={riderDisplayName}
+                defaultSpaceSlug={spaceSlugForDiscipline(onboardingDiscipline)}
+                rideToShare={clubRideShare}
+                composeRequest={clubComposeRequest}
+                onNotice={refresh}
+              />
+            )}
+            {tab === "community" && accountMode !== "connected" && (
               <CommunityScreen
                 // Seeded posts carry invented authors. A connected rider must
                 // never be shown a community that does not exist.
@@ -2489,6 +2539,7 @@ function EquinaApp() {
                   (equinaSession.signedOutNotice ? signInCopy.notices[equinaSession.signedOutNotice] : "")
                 }
                 showDemo={equinaSession.demoAllowed}
+                initialEmail={onboardingEmail}
                 onProvider={(provider) => void providerFromEntry(provider)}
                 onPasswordSignIn={(email, password) => void signInFromEntry(email, password)}
                 onPasswordRecovery={(email) => requestEmailFromEntry("recovery", email)}
@@ -2534,6 +2585,19 @@ function EquinaApp() {
                   setAuthError("");
                   setPendingAuthPassword("");
                 }}
+                onSignInInstead={
+                  otpPurpose === "create"
+                    ? () => {
+                        // Confirmed on a computer, the link cannot finish
+                        // here. The account exists; signing in finishes it,
+                        // and the onboarding draft is still on this device.
+                        setOtpVisible(false);
+                        setAuthError("");
+                        setPendingAuthPassword("");
+                        setEntryRoute("signin");
+                      }
+                    : undefined
+                }
               />
             ) : (
               <OnboardingScreen
