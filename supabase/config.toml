@@ -35,7 +35,17 @@ enable_anonymous_sign_ins = false
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
-enable_confirmations = true
+# Off for the TestFlight cohort (2026-10-03): signing up with a password signs
+# the rider in at once. With confirmations on, the built-in mailer only reaches
+# members of the Supabase organization, so no tester could finish signing up,
+# and a link opened on another device left the app waiting.
+#
+# Turn it back on -- as a 6-digit code typed in the app, once custom SMTP
+# (Resend) sends the templates -- before the App Store launch, and before
+# Apple or Google sign-in is enabled: automatic identity linking is only safe
+# against pre-account takeover when every email on an account is verified.
+# The hosted project is configured in the Dashboard; keep the two in step.
+enable_confirmations = false
 secure_password_change = true
 max_frequency = "1m"
 otp_length = 6

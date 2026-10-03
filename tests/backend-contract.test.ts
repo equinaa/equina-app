@@ -156,6 +156,18 @@ assert.match(socialAuthSource, /credential\.state\s*!==\s*state/);
 assert.match(appConfigSource, /"usesAppleSignIn":\s*true/);
 assert.match(appConfigSource, /"expo-apple-authentication"/);
 assert.doesNotMatch(socialAuthSource, /console\.(log|error)/);
+// Unconfirmed sign-ups and automatic identity linking must never be live at the
+// same time: with confirmations off, someone could register a rider's email
+// with a password before the rider signs in with Apple or Google, and keep
+// access after the accounts link.
+const authConfig = readFileSync(join(root, "supabase", "config.toml"), "utf8");
+const envExample = readFileSync(join(root, ".env.example"), "utf8");
+if (/^enable_confirmations\s*=\s*false/m.test(authConfig)) {
+  assert.match(envExample, /^EXPO_PUBLIC_ENABLE_APPLE_AUTH=false$/m,
+    "Apple sign-in must stay off while email confirmations are off.");
+  assert.match(envExample, /^EXPO_PUBLIC_ENABLE_GOOGLE_AUTH=false$/m,
+    "Google sign-in must stay off while email confirmations are off.");
+}
 // Auth code handles emails, passwords, tokens and codes. None of it may log,
 // and a new file in these folders is covered without being listed here.
 for (const directory of [join(root, "src", "features", "account"), join(root, "src", "backend")]) {
