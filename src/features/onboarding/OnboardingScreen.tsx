@@ -834,7 +834,10 @@ export function AccountMethodSheet({
             accessibilityRole="button"
             accessibilityLabel="Continue with email"
             disabled={busy}
-            onPress={() => onMethodChange("email")}
+            // A password account works the moment it is created; an emailed
+            // link only works once the email arrives and is opened on this
+            // device. The link stays one tap away as the alternative.
+            onPress={() => onMethodChange("password")}
             style={styles.emailAuthButton}
           >
             <Mail size={19} color={equinaTheme.text.primary} />
