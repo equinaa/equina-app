@@ -114,8 +114,16 @@ gated. Sprint 4 does not activate or redesign those journeys.
      MALWARE_SCAN_TOKEN=REPLACE_SERVER_SIDE_ONLY \
      MALWARE_SCAN_REQUIRED=true \
      CONTENT_MODERATION_URL=https://YOUR_MODERATION_ADAPTER/review \
-     CONTENT_MODERATION_TOKEN=REPLACE
+     CONTENT_MODERATION_TOKEN=REPLACE \
+     BUNNY_STREAM_CDN_HOSTNAME=vz-YOUR_LIBRARY.b-cdn.net \
+     BUNNY_STREAM_TOKEN_KEY=REPLACE
    ```
+
+   Academy videos are played only through links that `academy-playback` signs
+   with `BUNNY_STREAM_TOKEN_KEY`. Turn on token authentication for the Bunny
+   Stream library's CDN before any lesson is published: with it off, a video
+   id alone would play. Without the two secrets the function answers 503 and
+   the app says lesson videos are unavailable.
 
 4. Configure `TAX_QUOTE_URL` and `TAX_QUOTE_TOKEN` before any business-seller
    checkout rollout.

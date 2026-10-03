@@ -1,6 +1,7 @@
 import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Alert,
   Animated,
   Easing,
@@ -24,7 +25,7 @@ import { Asset } from "expo-asset";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { VideoView } from "expo-video";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
   BadgeCheck,
@@ -111,6 +112,21 @@ import { CareSchedule } from "./features/records/CareSchedule";
 import { SignInScreen } from "./features/account/SignInScreen";
 import { signInCopy } from "./features/account/sign-in-copy";
 import { emailRequestOutcome, signInErrorCopy } from "./features/account/sign-in-errors";
+import {
+  academyCredit,
+  academyPathFor,
+  allLevelsLabel,
+  formatChapterTime,
+  liveLessonView,
+  metaLine,
+  pathProgress,
+  personalizedLessons,
+  recommendedLessonFor,
+  type AcademyLessonView
+} from "./features/academy/academy-catalog";
+import { useAcademy } from "./features/academy/useAcademy";
+import { useLessonVideo } from "./features/academy/useLessonVideo";
+import type { AcademyPlaybackLink } from "./backend/contracts";
 import { ClubScreen, type ClubRideShare } from "./features/club/ClubScreen";
 import { rideShareLine, spaceSlugForDiscipline } from "./features/club/club-format";
 import { useClub } from "./features/club/useClub";
@@ -185,7 +201,7 @@ type HorseState = {
 type AcademyState = {
   progress: number;
   mode: AcademyMode;
-  selectedTitle: string;
+  selectedLessonId: string;
 };
 type CoachState = {
   discipline: CoachDiscipline;
@@ -439,185 +455,138 @@ const homeMoodOptions: Array<{
     planBody: "Walk, loosen, check legs after."
   }
 ];
-const academyCoaches = [
-  { name: "Elena Marquez", discipline: "Dressage", badge: "Olympic trainer", initials: "EM", accent: "#315B4D" },
-  { name: "James Whitaker", discipline: "Jumping", badge: "Grand Prix coach", initials: "JW", accent: "#8C6A3E" },
-  { name: "Amelie Laurent", discipline: "Care", badge: "Sport horse physio", initials: "AL", accent: "#D8A94A" }
-];
 const academyDemoVideo = require("../assets/videos/jumping-academy.mp4");
-const academyLessons = [
+
+// Demo mode's Academy. These lessons were never filmed: they show the shape
+// of the Academy, credit no coach, and all play the one bundled clip.
+const academyPreviewLessons: AcademyLessonView[] = ([
   {
     title: "Elastic Contact",
-    coach: "Elena Marquez",
-    coachTitle: "Olympic trainer",
-    duration: "18 min",
+    minutes: 18,
     level: "Intermediate",
     topic: "Dressage",
     summary: "Create a softer hand while keeping Ralfy forward and relaxed.",
-    progress: 0,
     image: onboardingEditorial.Dressage,
-    chapters: [
-      { time: "0:00", title: "Warm-up feel" },
-      { time: "4:20", title: "Soft rein connection" },
-      { time: "12:10", title: "Finish on stretch" }
-    ]
+    chapters: [[0, "Warm-up feel"], [260, "Soft rein connection"], [730, "Finish on stretch"]]
   },
   {
     title: "Confident Lines",
-    coach: "James Whitaker",
-    coachTitle: "Grand Prix coach",
-    duration: "14 min",
+    minutes: 14,
     level: "Intermediate",
     topic: "Jumping",
     summary: "Build rhythm through small lines without rushing the last stride.",
-    progress: 0,
     image: equinaImages.jumping,
-    chapters: [
-      { time: "0:00", title: "Canter rhythm" },
-      { time: "3:30", title: "Two-pole line" },
-      { time: "9:40", title: "Confidence repeat" }
-    ]
+    chapters: [[0, "Canter rhythm"], [210, "Two-pole line"], [580, "Confidence repeat"]]
   },
   {
     title: "Ride the Turn",
-    coach: "James Whitaker",
-    coachTitle: "Grand Prix coach",
-    duration: "12 min",
+    minutes: 12,
     level: "Intermediate",
     topic: "Jumping",
     summary: "Carry a balanced canter through the turn so the line starts before the fence.",
-    progress: 0,
     image: equinaImages.jumpingCoach,
-    chapters: [
-      { time: "0:00", title: "Set the outside aids" },
-      { time: "3:50", title: "Hold the canter quality" },
-      { time: "8:30", title: "Ride the line early" }
-    ]
+    chapters: [[0, "Set the outside aids"], [230, "Hold the canter quality"], [510, "Ride the line early"]]
   },
   {
     title: "Find the Canter",
-    coach: "James Whitaker",
-    coachTitle: "Grand Prix coach",
-    duration: "10 min",
+    minutes: 10,
     level: "Beginner",
     topic: "Jumping",
     summary: "Learn a steady approach rhythm before adding height or technical lines.",
-    progress: 0,
     image: equinaImages.jumpingClub,
-    chapters: [
-      { time: "0:00", title: "Count the rhythm" },
-      { time: "3:10", title: "Poles before fences" },
-      { time: "7:20", title: "Finish on confidence" }
-    ]
+    chapters: [[0, "Count the rhythm"], [190, "Poles before fences"], [440, "Finish on confidence"]]
   },
   {
     title: "See the Distance",
-    coach: "James Whitaker",
-    coachTitle: "Grand Prix coach",
-    duration: "17 min",
+    minutes: 17,
     level: "Advanced",
     topic: "Jumping",
     summary: "Refine line, pace, and decision timing without chasing the distance.",
-    progress: 0,
     image: equinaImages.jumpingCoach,
-    chapters: [
-      { time: "0:00", title: "Read the first stride" },
-      { time: "5:40", title: "Hold the line" },
-      { time: "12:30", title: "Compare two quality reps" }
-    ]
+    chapters: [[0, "Read the first stride"], [340, "Hold the line"], [750, "Compare two quality reps"]]
   },
   {
     title: "Competition Warm-up",
-    coach: "James Whitaker",
-    coachTitle: "Grand Prix coach",
-    duration: "12 min",
+    minutes: 12,
     level: "Pro",
     topic: "Jumping",
     summary: "Build a concise warm-up that sharpens performance without spending the horse.",
-    progress: 0,
     image: equinaImages.jumpingHome,
-    chapters: [
-      { time: "0:00", title: "Set the intent" },
-      { time: "3:45", title: "Use fewer efforts" },
-      { time: "8:50", title: "Enter the ring fresh" }
-    ]
+    chapters: [[0, "Set the intent"], [225, "Use fewer efforts"], [530, "Enter the ring fresh"]]
   },
   {
     title: "Recovery Check",
-    coach: "Amelie Laurent",
-    coachTitle: "Sport horse physio",
-    duration: "11 min",
-    level: "Care",
+    minutes: 11,
+    level: allLevelsLabel,
     topic: "Care",
     summary: "A clean post-ride check for legs, back, mood, and hydration.",
-    progress: 0,
     image: equinaImages.stable,
-    chapters: [
-      { time: "0:00", title: "Leg scan" },
-      { time: "3:15", title: "Back and saddle marks" },
-      { time: "7:50", title: "What to log" }
-    ]
+    chapters: [[0, "Leg scan"], [195, "Back and saddle marks"], [470, "What to log"]]
   },
   {
     title: "Better Transitions",
-    coach: "Elena Marquez",
-    coachTitle: "Olympic trainer",
-    duration: "16 min",
+    minutes: 16,
     level: "Beginner",
     topic: "Dressage",
     summary: "Make walk-trot transitions cleaner with a simple three-cue routine.",
-    progress: 0,
     image: equinaImages.profile,
-    chapters: [
-      { time: "0:00", title: "Seat first" },
-      { time: "5:05", title: "Leg timing" },
-      { time: "11:30", title: "Reward the try" }
-    ]
+    chapters: [[0, "Seat first"], [305, "Leg timing"], [690, "Reward the try"]]
   },
   {
     title: "Brave Oxer Mindset",
-    coach: "James Whitaker",
-    coachTitle: "Grand Prix coach",
-    duration: "13 min",
-    level: "Mindset",
+    minutes: 13,
+    level: allLevelsLabel,
     topic: "Mindset",
     summary: "A calm mental reset for riders who overthink the bigger fence.",
-    progress: 0,
     image: onboardingEditorial.Eventing,
-    chapters: [
-      { time: "0:00", title: "Breathe before turn" },
-      { time: "4:00", title: "Eyes and line" },
-      { time: "9:15", title: "Debrief without drama" }
-    ]
+    chapters: [[0, "Breathe before turn"], [240, "Eyes and line"], [555, "Debrief without drama"]]
   },
   {
     title: "Saddle Marks 101",
-    coach: "Amelie Laurent",
-    coachTitle: "Sport horse physio",
-    duration: "9 min",
-    level: "Care",
+    minutes: 9,
+    level: allLevelsLabel,
     topic: "Care",
     summary: "Spot pressure signs early and know when to ask a saddler.",
-    progress: 0,
     image: equinaImages.tack,
-    chapters: [
-      { time: "0:00", title: "Normal marks" },
-      { time: "2:45", title: "Pressure warning signs" },
-      { time: "6:30", title: "Saddler notes" }
-    ]
+    chapters: [[0, "Normal marks"], [165, "Pressure warning signs"], [390, "Saddler notes"]]
   }
 ] satisfies Array<{
   title: string;
-  coach: string;
-  coachTitle: string;
-  duration: string;
+  minutes: number;
   level: string;
   topic: Exclude<AcademyTopic, "All">;
   summary: string;
-  progress: number;
   image: string;
-  chapters: Array<{ time: string; title: string }>;
-}>;
+  chapters: Array<[number, string]>;
+}>).map((lesson) => ({
+  id: `preview-${lesson.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+  title: lesson.title,
+  coach: academyCredit,
+  coachTitle: "Preview lesson",
+  duration: `${lesson.minutes} min`,
+  durationSeconds: lesson.minutes * 60,
+  level: lesson.level,
+  topic: lesson.topic,
+  summary: lesson.summary,
+  image: lesson.image,
+  chapters: lesson.chapters.map(([seconds, title]) => ({ time: formatChapterTime(seconds), title, seconds })),
+  progress: 0,
+  positionSeconds: 0,
+  completed: false,
+  video: "preview"
+}));
+
+// A live lesson has no picture of its own until posters arrive with the
+// upload pipeline; until then its topic chooses one.
+const academyTopicImages: Record<string, string> = {
+  Dressage: equinaImages.dressage,
+  Jumping: equinaImages.jumping,
+  Care: equinaImages.stable,
+  Mindset: onboardingEditorial.Eventing
+};
+const academyImageFor = (topic: string, discipline?: string) =>
+  academyTopicImages[topic] ??
+  (discipline === "eventing" ? equinaImages.eventing : discipline === "trail" ? equinaImages.trail : equinaImages.profile);
 
 const academyPaths = [
   { title: "Dressage base", body: "Contact, rhythm, transitions", progress: 0, lessons: "4 lessons", accent: "#183B32" },
@@ -654,83 +623,6 @@ const levelGuidance: Record<
     quickPlan: "Plan performance"
   }
 };
-
-const recommendedLessonTitle: Record<CoachDiscipline, Record<RiderLevel, string>> = {
-  Dressage: {
-    Beginner: "Better Transitions",
-    Intermediate: "Elastic Contact",
-    Advanced: "Elastic Contact",
-    Pro: "Elastic Contact"
-  },
-  Jumping: {
-    Beginner: "Find the Canter",
-    Intermediate: "Confident Lines",
-    Advanced: "See the Distance",
-    Pro: "Competition Warm-up"
-  },
-  Eventing: {
-    Beginner: "Recovery Check",
-    Intermediate: "Confident Lines",
-    Advanced: "Brave Oxer Mindset",
-    Pro: "Recovery Check"
-  },
-  Trail: {
-    Beginner: "Recovery Check",
-    Intermediate: "Brave Oxer Mindset",
-    Advanced: "Recovery Check",
-    Pro: "Recovery Check"
-  }
-};
-
-const focusAliases: Record<string, string[]> = {
-  Transitions: ["transition", "cue"],
-  Contact: ["contact", "rein", "hand"],
-  Suppleness: ["supple", "stretch", "loosen"],
-  Rhythm: ["rhythm", "tempo", "canter"],
-  Lines: ["line", "distance"],
-  Confidence: ["confidence", "confident", "brave", "calm"],
-  Balance: ["balance", "pace"],
-  Fitness: ["fitness", "canter set", "hill"],
-  Recovery: ["recovery", "post-ride", "cool"],
-  Relaxation: ["relax", "loose rein", "calm"]
-};
-
-const lessonRelevance = (lesson: (typeof academyLessons)[number], rider: RiderContext, focus = "") => {
-  let score = 0;
-  const disciplineTopic = lesson.topic === rider.discipline;
-  const recommendedTitle = recommendedLessonTitle[rider.discipline][rider.level];
-  const lessonText = `${lesson.title} ${lesson.summary}`.toLowerCase();
-  const lessonHasExplicitLevel = riderLevels.includes(lesson.level as RiderLevel);
-  const matchingFocus = (focusAliases[focus] ?? [focus.toLowerCase()]).some((term) => lessonText.includes(term));
-
-  if (lesson.title === recommendedTitle) score += 100;
-  if (disciplineTopic) score += 48;
-  if (lesson.level === rider.level) score += 32;
-  if (rider.goal === "Competition" && lesson.topic === "Mindset") score += 120;
-  if (rider.goal === "Horse care" && lesson.topic === "Care") score += 180;
-  if (rider.goal === "Learn faster" && lesson.level === rider.level) score += 80;
-  if (focus && matchingFocus) score += 190;
-  if (lessonHasExplicitLevel && lesson.level !== rider.level) score -= 260;
-  if (lesson.progress > 0 && lesson.progress < 100) score += 8;
-
-  return score;
-};
-
-const personalizedLessons = (rider: RiderContext, focus = "") =>
-  [...academyLessons].sort((a, b) => lessonRelevance(b, rider, focus) - lessonRelevance(a, rider, focus));
-
-const academyPathFor = (rider: RiderContext, focus = "") => {
-  const ranked = personalizedLessons(rider, focus);
-  return ranked.filter((lesson, index) => {
-    if (index === 0) return true;
-    const explicitLevel = riderLevels.includes(lesson.level as RiderLevel);
-    const levelCompatible = !explicitLevel || lesson.level === rider.level;
-    const disciplineCompatible = lesson.topic === rider.discipline || lesson.topic === "Care" || lesson.topic === "Mindset";
-    return levelCompatible && disciplineCompatible;
-  });
-};
-
-const recommendedLessonFor = (rider: RiderContext, focus = "") => personalizedLessons(rider, focus)[0] ?? academyLessons[0]!;
 
 const coachPromptsFor = (rider: RiderContext, horse: HorseState) => [
   levelGuidance[rider.level].quickPlan,
@@ -988,7 +880,8 @@ function EquinaApp() {
   const [pendingCoachPrompt, setPendingCoachPrompt] = useState("");
   const [academyProgress, setAcademyProgress] = useState(0);
   const [academyMode, setAcademyMode] = useState<AcademyMode>("home");
-  const [selectedAcademyTitle, setSelectedAcademyTitle] = useState(academyLessons[0]?.title ?? "");
+  // Empty means "the lesson the Academy recommends", whichever that is today.
+  const [selectedAcademyLessonId, setSelectedAcademyLessonId] = useState("");
   // What the rider typed, and nothing else, is what gets saved. The display
   // fallback only fills a header before a name exists.
   const riderName = onboardingName.trim();
@@ -1189,10 +1082,28 @@ function EquinaApp() {
     goal: onboardingGoal,
     frequency: onboardingFrequency
   };
+  // A connected account reads the published catalogue; demo mode keeps the
+  // preview. An empty catalogue is real, and the Academy opens on Ralf.
+  const academyLive = useAcademy({
+    backend: equinaSession.backend,
+    enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
+  });
+  const academyLessons = useMemo(
+    () => accountMode === "connected"
+      ? academyLive.lessons.map((lesson) => liveLessonView(lesson, academyLive.progress[lesson.id], academyImageFor))
+      : academyPreviewLessons,
+    [accountMode, academyLive.lessons, academyLive.progress]
+  );
+  const academyCatalogReady = accountMode !== "connected" || academyLive.loaded;
+  const academyFocus = lastRide?.mood === "Tender" ? "Recovery" : coachGoal;
   const academyState: AcademyState = {
-    progress: academyProgress,
+    // The preview counts taps on "Complete lesson"; a real account counts
+    // what the rider actually watched along their path.
+    progress: accountMode === "connected"
+      ? pathProgress(academyPathFor(academyLessons, riderContext, academyFocus))
+      : academyProgress,
     mode: academyMode,
-    selectedTitle: selectedAcademyTitle
+    selectedLessonId: selectedAcademyLessonId
   };
   const coachState: CoachState = {
     discipline: coachDiscipline,
@@ -1202,15 +1113,16 @@ function EquinaApp() {
     onboarded: coachOnboarded,
     messages: coachMessages
   };
-  const academyFocus = lastRide?.mood === "Tender" ? "Recovery" : coachGoal;
-  const postRideLesson = recommendedLessonFor(riderContext, academyFocus);
-  const postRideRecommendation: RideRecommendation = {
-    title: postRideLesson.title,
-    coach: postRideLesson.coach,
-    duration: postRideLesson.duration,
-    summary: postRideLesson.summary,
-    image: postRideLesson.image
-  };
+  const postRideLesson = recommendedLessonFor(academyLessons, riderContext, academyFocus);
+  const postRideRecommendation: RideRecommendation | undefined = postRideLesson
+    ? {
+        title: postRideLesson.title,
+        coach: postRideLesson.coach,
+        duration: postRideLesson.duration,
+        summary: postRideLesson.summary,
+        image: postRideLesson.image
+      }
+    : undefined;
 
   // However the session ended -- signing out, an expired session, a failed
   // link -- the way back in starts at the sign-in screen, where the session's
@@ -1484,7 +1396,13 @@ function EquinaApp() {
     refresh(`${equinaCoach.name} is ready.`);
   };
 
-  const continueAcademy = () => {
+  // Finishing a preview lesson only moves the preview's bar. A real lesson is
+  // recorded, and the bar follows what the rider actually finished.
+  const completeAcademyLesson = (lessonId: string, positionSeconds: number) => {
+    if (accountMode === "connected") {
+      void academyLive.recordProgress(lessonId, positionSeconds, true);
+      return;
+    }
     setAcademyProgress((progress) => Math.min(100, progress + 8));
     refresh("Lesson progress updated for this preview.");
   };
@@ -1493,15 +1411,22 @@ function EquinaApp() {
     setAcademyMode(mode);
   };
 
-  const openAcademyLesson = (title: string) => {
-    setSelectedAcademyTitle(title);
+  const openAcademyLesson = (lessonId: string) => {
+    setSelectedAcademyLessonId(lessonId);
     navigateAcademy("video");
   };
 
   const openPostRideLesson = () => {
     setLastRideRecapVisible(false);
-    setSelectedAcademyTitle(postRideLesson.title);
-    setAcademyMode("video");
+    if (postRideLesson) {
+      setSelectedAcademyLessonId(postRideLesson.id);
+      setAcademyMode("video");
+    } else {
+      // No lesson to continue with yet, so the ride goes to Ralf instead.
+      setPendingCoachPrompt("Review last ride");
+      setCoachOnboarded(true);
+      setAcademyMode("ai");
+    }
     setTab("assistant");
     refresh("");
   };
@@ -1759,7 +1684,7 @@ function EquinaApp() {
           ? "Heavy week"
           : defaultCoachLoad;
     const starterFocus = coachGoalsByDiscipline[onboardingDiscipline][0] ?? defaultCoachGoal;
-    const starterLesson = recommendedLessonFor(riderContext, starterFocus);
+    const starterLesson = recommendedLessonFor(academyLessons, riderContext, starterFocus);
     setAccountCreated(true);
     setTab("home");
     setLocalLastRide(null);
@@ -1771,7 +1696,7 @@ function EquinaApp() {
     setCoachOnboarded(false);
     setAcademyProgress(0);
     setAcademyMode("home");
-    setSelectedAcademyTitle(starterLesson.title);
+    setSelectedAcademyLessonId(starterLesson?.id ?? "");
     setCoachMessages([
       {
         id: `coach-onboarding-${Date.now()}`,
@@ -2432,7 +2357,14 @@ function EquinaApp() {
                 rider={riderContext}
                 academy={academyState}
                 coach={coachState}
-                onAcademyProgress={continueAcademy}
+                lessons={academyLessons}
+                catalogReady={academyCatalogReady}
+                playbackLink={academyLive.playbackLink}
+                onLessonProgress={(lessonId, positionSeconds, completed) => {
+                  void academyLive.recordProgress(lessonId, positionSeconds, completed);
+                }}
+                onLessonComplete={completeAcademyLesson}
+                onExit={() => setTab("home")}
                 onAcademyModeChange={navigateAcademy}
                 onAcademyLessonOpen={openAcademyLesson}
                 onDisciplineChange={updateCoachDiscipline}
@@ -5264,7 +5196,12 @@ function AssistantScreen({
   rider,
   academy,
   coach,
-  onAcademyProgress,
+  lessons,
+  catalogReady,
+  playbackLink,
+  onLessonProgress,
+  onLessonComplete,
+  onExit,
   onAcademyModeChange,
   onAcademyLessonOpen,
   onDisciplineChange,
@@ -5283,9 +5220,16 @@ function AssistantScreen({
   rider: RiderContext;
   academy: AcademyState;
   coach: CoachState;
-  onAcademyProgress: () => void;
+  lessons: AcademyLessonView[];
+  /** False only while a connected account's catalogue is still loading. */
+  catalogReady: boolean;
+  playbackLink: (lessonId: string) => Promise<AcademyPlaybackLink>;
+  onLessonProgress: (lessonId: string, positionSeconds: number, completed: boolean) => void;
+  onLessonComplete: (lessonId: string, positionSeconds: number) => void;
+  /** Leaves the Academy for the home tab. */
+  onExit: () => void;
   onAcademyModeChange: (mode: AcademyMode) => void;
-  onAcademyLessonOpen: (title: string) => void;
+  onAcademyLessonOpen: (lessonId: string) => void;
   onDisciplineChange: (value: CoachDiscipline) => void;
   onGoalChange: (value: string) => void;
   onLoadChange: (value: string) => void;
@@ -5300,13 +5244,19 @@ function AssistantScreen({
   const guidance = levelGuidance[rider.level];
   const academyFocus = horse.lastRide?.mood === "Tender" ? "Recovery" : coach.goal;
   const academyLearningPath = useMemo(
-    () => academyPathFor(rider, academyFocus),
-    [academyFocus, rider.discipline, rider.goal, rider.level]
+    () => academyPathFor(lessons, rider, academyFocus),
+    [academyFocus, lessons, rider.discipline, rider.goal, rider.level]
   );
-  const recommendedLesson = academyLearningPath[0] ?? recommendedLessonFor(rider, academyFocus);
+  const recommendedLesson = academyLearningPath[0];
   const nextPathLessons = academyLearningPath.slice(1, 3);
   const quickPrompts = coachPromptsFor(rider, horse);
-  const selectedAcademyLesson = academyLessons.find((lesson) => lesson.title === academy.selectedTitle) ?? academyLessons[0]!;
+  const selectedAcademyLesson = lessons.find((lesson) => lesson.id === academy.selectedLessonId) ?? recommendedLesson;
+  // No published lesson is a normal state, not a broken one: until the first
+  // lesson arrives the Academy is Ralf. While the catalogue is still loading,
+  // nothing is shown rather than a lesson that may not exist.
+  const catalogEmpty = catalogReady && lessons.length === 0;
+  const catalogPending = !catalogReady && lessons.length === 0;
+  const visibleMode: AcademyMode = catalogEmpty ? "ai" : academy.mode;
   const coachContext = {
     selectedHorseId,
     hasHorse: horse.hasHorse,
@@ -5321,7 +5271,7 @@ function AssistantScreen({
     enabled: coachEnabled,
     context: coachContext
   });
-  const coachConversationActive = academy.mode === "ai";
+  const coachConversationActive = visibleMode === "ai";
   const hasGuideUserMessage = coachConversation.messages.some((message) => message.role === "user");
   const coachCanSend = draft.trim().length > 0 && !coachConversation.sending;
   const rideLabel = `${horse.sessionCount} ${horse.sessionCount === 1 ? "ride" : "rides"}`;
@@ -5343,12 +5293,14 @@ function AssistantScreen({
         : horse.hasHorse ? `${rideLabel} logged for ${horse.name}` : `${rideLabel} in your journal`,
       prompt: "Review last ride"
     },
-    {
-      Icon: PlayCircle,
-      title: `Understand ${recommendedLesson.title}`,
-      body: `Turn the lesson into one exercise`,
-      prompt: `Explain the exercise in ${recommendedLesson.title}`
-    }
+    ...(recommendedLesson
+      ? [{
+          Icon: PlayCircle,
+          title: `Understand ${recommendedLesson.title}`,
+          body: `Turn the lesson into one exercise`,
+          prompt: `Explain the exercise in ${recommendedLesson.title}`
+        }]
+      : [])
   ];
 
   useEffect(() => {
@@ -5363,13 +5315,19 @@ function AssistantScreen({
       easing: Easing.out(Easing.cubic),
       useNativeDriver: Platform.OS !== "web"
     }).start();
-  }, [academy.mode, academyMotion, reduceAcademyMotion]);
+  }, [visibleMode, academyMotion, reduceAcademyMotion]);
+
+  // Settle on Ralf while there are no lessons, so the first lesson to arrive
+  // does not pull a rider out of a conversation.
+  useEffect(() => {
+    if (catalogEmpty && academy.mode !== "ai") onAcademyModeChange("ai");
+  }, [academy.mode, catalogEmpty]);
 
   useEffect(() => {
-    if (academy.mode !== "ai" || !queuedCoachPrompt) return;
+    if (visibleMode !== "ai" || !queuedCoachPrompt) return;
     onQueuedCoachPromptConsumed();
     void coachConversation.send(queuedCoachPrompt);
-  }, [academy.mode, queuedCoachPrompt]);
+  }, [visibleMode, queuedCoachPrompt]);
 
   const changeAcademyMode = (mode: AcademyMode) => {
     if (mode === academy.mode) return;
@@ -5377,9 +5335,9 @@ function AssistantScreen({
     onAcademyModeChange(mode);
   };
 
-  const openAcademyLesson = (lesson: (typeof academyLessons)[number]) => {
+  const openAcademyLesson = (lesson: AcademyLessonView) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
-    onAcademyLessonOpen(lesson.title);
+    onAcademyLessonOpen(lesson.id);
   };
 
   const sendMessage = (text: string) => {
@@ -5401,25 +5359,25 @@ function AssistantScreen({
 
   return (
     <View style={[styles.academyScreen, coachConversationActive && styles.academyScreenImmersive]}>
-      {academy.mode !== "video" && !coachConversationActive && (
+      {visibleMode !== "video" && !coachConversationActive && !catalogPending && (
         <View style={styles.academySwitch}>
           <Pressable
             testID="academy-mode-watch"
             accessibilityRole="tab"
-            accessibilityState={{ selected: academy.mode === "home" }}
-            style={[styles.academySwitchItem, academy.mode === "home" && styles.academySwitchItemActive]}
+            accessibilityState={{ selected: visibleMode === "home" }}
+            style={[styles.academySwitchItem, visibleMode === "home" && styles.academySwitchItemActive]}
             onPress={() => changeAcademyMode("home")}
           >
-            <Text style={[styles.academySwitchText, academy.mode === "home" && styles.academySwitchTextActive]}>For you</Text>
+            <Text style={[styles.academySwitchText, visibleMode === "home" && styles.academySwitchTextActive]}>For you</Text>
           </Pressable>
           <Pressable
             testID="academy-mode-directory"
             accessibilityRole="tab"
-            accessibilityState={{ selected: academy.mode === "directory" }}
-            style={[styles.academySwitchItem, academy.mode === "directory" && styles.academySwitchItemActive]}
+            accessibilityState={{ selected: visibleMode === "directory" }}
+            style={[styles.academySwitchItem, visibleMode === "directory" && styles.academySwitchItemActive]}
             onPress={() => changeAcademyMode("directory")}
           >
-            <Text style={[styles.academySwitchText, academy.mode === "directory" && styles.academySwitchTextActive]}>Lessons</Text>
+            <Text style={[styles.academySwitchText, visibleMode === "directory" && styles.academySwitchTextActive]}>Lessons</Text>
           </Pressable>
           <Pressable
             testID="academy-mode-ai"
@@ -5452,7 +5410,11 @@ function AssistantScreen({
           }
         ]}
       >
-        {academy.mode === "home" ? (
+        {catalogPending && visibleMode !== "ai" ? (
+          <View testID="academy-loading" style={styles.academyCatalogLoading}>
+            <ActivityIndicator color={nightTheme.muted} />
+          </View>
+        ) : visibleMode === "home" && recommendedLesson ? (
           <View style={styles.personalAcademyHome}>
             <View style={styles.academyPersonalIntro}>
               <View style={styles.academyPersonalMetaRow}>
@@ -5480,7 +5442,9 @@ function AssistantScreen({
               />
               <View style={styles.academyRecommendationTop}>
                 <Text style={styles.academyRecommendationKicker}>{academy.progress > 0 ? "Continue learning" : "Selected for you"}</Text>
-                <Text style={styles.academyRecommendationDuration}>{recommendedLesson.duration}</Text>
+                {recommendedLesson.duration ? (
+                  <Text style={styles.academyRecommendationDuration}>{recommendedLesson.duration}</Text>
+                ) : null}
               </View>
               <View style={styles.academyRecommendationContent}>
                 <Text style={styles.academyRecommendationReason}>Next for your {academyFocus.toLowerCase()}</Text>
@@ -5517,7 +5481,7 @@ function AssistantScreen({
               <View style={styles.academyPathList}>
                 {nextPathLessons.map((lesson, index) => (
                   <Pressable
-                    key={lesson.title}
+                    key={lesson.id}
                     testID={`academy-path-lesson-${index + 1}`}
                     accessibilityRole="button"
                     accessibilityLabel={`Open lesson ${lesson.title}`}
@@ -5527,7 +5491,7 @@ function AssistantScreen({
                     <Text style={styles.academyPathIndex}>0{index + 2}</Text>
                     <View style={styles.academyPathRowCopy}>
                       <Text numberOfLines={1} style={styles.academyPathRowTitle}>{lesson.title}</Text>
-                      <Text style={styles.academyPathRowMeta}>{lesson.coach} · {lesson.duration}</Text>
+                      <Text style={styles.academyPathRowMeta}>{metaLine(lesson.coach, lesson.duration)}</Text>
                     </View>
                     <ChevronRight size={16} color={nightTheme.faint} />
                   </Pressable>
@@ -5554,26 +5518,32 @@ function AssistantScreen({
               <ChevronRight size={16} color={nightTheme.faint} />
             </Pressable>
           </View>
-        ) : academy.mode === "directory" ? (
-          <AcademyDirectory rider={rider} focus={academyFocus} onOpenLesson={openAcademyLesson} />
-        ) : academy.mode === "video" ? (
+        ) : visibleMode === "directory" ? (
+          <AcademyDirectory lessons={lessons} rider={rider} focus={academyFocus} onOpenLesson={openAcademyLesson} />
+        ) : visibleMode === "video" && selectedAcademyLesson ? (
           <AcademyVideoPage
+            lessons={lessons}
             lesson={selectedAcademyLesson}
             progress={academy.progress}
             rider={rider}
             focus={academyFocus}
+            playbackLink={playbackLink}
+            onProgress={onLessonProgress}
             onBack={() => changeAcademyMode("directory")}
-            onComplete={onAcademyProgress}
+            onComplete={onLessonComplete}
             onOpenLesson={openAcademyLesson}
             onOpenGuide={() => openGuideWithPrompt(
               `Explain how ${selectedAcademyLesson.title} should shape ${horse.hasHorse ? `${horse.name}'s` : "my"} next ride`
             )}
           />
-        ) : academy.mode === "ai" ? (
+        ) : visibleMode === "ai" ? (
           <CoachScreen
             context={coachContext}
             controller={coachConversation}
-            onBack={() => changeAcademyMode("home")}
+            // The conversation hides the tab bar, so with no lessons to go
+            // back to, back has to leave the Academy rather than vanish.
+            onBack={catalogEmpty ? onExit : () => changeAcademyMode("home")}
+            backLabel={catalogEmpty ? "Back to home" : undefined}
             onContextChange={(next) => {
               onGoalChange(next.focus);
               onLoadChange(next.load);
@@ -5773,41 +5743,6 @@ function AssistantScreen({
   );
 }
 
-function AcademyLibrary({
-  onOpenDirectory,
-  onOpenAI
-}: {
-  onOpenDirectory: () => void;
-  onOpenAI: () => void;
-}) {
-  return (
-    <View style={styles.academyLibrary}>
-      <View style={styles.academyUtilityRow}>
-        <Pressable testID="academy-open-ai" style={({ pressed }) => [styles.academyUtilityCard, pressed && styles.pressed]} onPress={onOpenAI}>
-          <View style={styles.academyUtilityIcon}>
-            <Sparkles size={17} color={equinaTheme.colors.pine} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.academyUtilityTitle}>{equinaCoach.name} · Coach</Text>
-            <Text style={styles.academyUtilityBody}>Plan, recap, ask</Text>
-          </View>
-          <ChevronRight size={16} color="#8B8578" />
-        </Pressable>
-        <Pressable testID="academy-open-directory" style={({ pressed }) => [styles.academyUtilityCard, pressed && styles.pressed]} onPress={onOpenDirectory}>
-          <View style={styles.academyUtilityIcon}>
-            <PlayCircle size={17} color={equinaTheme.colors.pine} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.academyUtilityTitle}>Lessons</Text>
-            <Text style={styles.academyUtilityBody}>{academyLessons.length} videos</Text>
-          </View>
-          <ChevronRight size={16} color="#8B8578" />
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 function AcademyPathCard({
   path,
   active
@@ -5836,19 +5771,21 @@ function AcademyPathCard({
 }
 
 function AcademyDirectory({
+  lessons,
   rider,
   focus,
   onOpenLesson
 }: {
+  lessons: AcademyLessonView[];
   rider: RiderContext;
   focus: string;
-  onOpenLesson: (lesson: (typeof academyLessons)[number]) => void;
+  onOpenLesson: (lesson: AcademyLessonView) => void;
 }) {
   const [topic, setTopic] = useState<AcademyTopic>("All");
   const [query, setQuery] = useState("");
   const rankedLessons = useMemo(
-    () => personalizedLessons(rider, focus),
-    [focus, rider.discipline, rider.goal, rider.level]
+    () => personalizedLessons(lessons, rider, focus),
+    [focus, lessons, rider.discipline, rider.goal, rider.level]
   );
   const visibleLessons = useMemo(
     () => {
@@ -5919,7 +5856,7 @@ function AcademyDirectory({
             lesson={visibleLessons[0]!}
             featured
             featuredLabel={query.trim() || topic !== "All" ? "Top result" : "Best match"}
-            matchReason={query.trim() || topic !== "All" ? `${visibleLessons[0]!.level} · ${visibleLessons[0]!.coachTitle}` : `${rider.level} · ${focus}`}
+            matchReason={query.trim() || topic !== "All" ? metaLine(visibleLessons[0]!.level, visibleLessons[0]!.coachTitle) : `${rider.level} · ${focus}`}
             onPress={() => onOpenLesson(visibleLessons[0]!)}
           />
           {visibleLessons.length > 1 && (
@@ -5931,7 +5868,7 @@ function AcademyDirectory({
               <View style={styles.academyLessonStack}>
                 {visibleLessons.slice(1).map((lesson) => (
                   <AcademyLessonCard
-                    key={lesson.title}
+                    key={lesson.id}
                     lesson={lesson}
                     featured={false}
                     onPress={() => onOpenLesson(lesson)}
@@ -5953,41 +5890,50 @@ function AcademyDirectory({
 }
 
 function AcademyVideoPage({
+  lessons,
   lesson,
   progress,
   rider,
   focus,
+  playbackLink,
+  onProgress,
   onBack,
   onComplete,
   onOpenLesson,
   onOpenGuide
 }: {
-  lesson: (typeof academyLessons)[number];
+  lessons: AcademyLessonView[];
+  lesson: AcademyLessonView;
   progress: number;
   rider: RiderContext;
   focus: string;
+  playbackLink: (lessonId: string) => Promise<AcademyPlaybackLink>;
+  onProgress: (lessonId: string, positionSeconds: number, completed: boolean) => void;
   onBack: () => void;
-  onComplete: () => void;
-  onOpenLesson: (lesson: (typeof academyLessons)[number]) => void;
+  onComplete: (lessonId: string, positionSeconds: number) => void;
+  onOpenLesson: (lesson: AcademyLessonView) => void;
   onOpenGuide: () => void;
 }) {
   const [videoReady, setVideoReady] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
-  const videoPlayer = useVideoPlayer(academyDemoVideo, (player) => {
-    player.loop = false;
-    player.muted = true;
-    player.timeUpdateEventInterval = 0.5;
-  });
-  const learningPath = academyPathFor(rider, focus);
-  const pathPosition = learningPath.findIndex((item) => item.title === lesson.title);
+  const video = useLessonVideo({ lesson, previewSource: academyDemoVideo, playbackLink, onProgress });
+  const videoPlayer = video.player;
+  const videoPhase = video.state.phase;
+  const learningPath = academyPathFor(lessons, rider, focus);
+  const pathPosition = learningPath.findIndex((item) => item.id === lesson.id);
   const lessonPosition = Math.max(0, pathPosition);
   const nextLesson = pathPosition >= 0 ? learningPath[pathPosition + 1] : undefined;
 
   useEffect(() => {
-    videoPlayer.pause();
-    videoPlayer.currentTime = 0;
     setVideoStarted(false);
-  }, [lesson.title, videoPlayer]);
+    setVideoReady(false);
+  }, [lesson.id]);
+
+  // A tap on play before the signed link arrives is remembered, and playback
+  // starts the moment the video can.
+  useEffect(() => {
+    if (videoStarted && videoPhase === "ready") videoPlayer.play();
+  }, [videoPhase, videoPlayer, videoStarted]);
 
   return (
     <View style={styles.academyVideoPage}>
@@ -6010,44 +5956,71 @@ function AcademyVideoPage({
           accessible
           accessibilityLabel={`Video lesson ${lesson.title}`}
           player={videoPlayer}
-          nativeControls={videoStarted}
+          nativeControls={videoStarted && videoPhase === "ready"}
           playsInline
           contentFit="cover"
           style={styles.academyVideoImage}
           onFirstFrameRender={() => setVideoReady(true)}
         />
-        {(!videoStarted || !videoReady) && <Image source={{ uri: lesson.image }} style={styles.academyVideoPoster} resizeMode="cover" />}
-        {!videoStarted && (
+        {(!videoStarted || !videoReady || videoPhase !== "ready") && (
+          <Image source={{ uri: lesson.image }} style={styles.academyVideoPoster} resizeMode="cover" />
+        )}
+        {video.state.phase === "error" ? (
+          <>
+            <LinearGradient
+              colors={["rgba(8,7,6,0.40)", "rgba(8,7,6,0.82)"]}
+              style={styles.academyVideoScrim}
+            />
+            <View testID="academy-video-error" style={styles.academyVideoMessage}>
+              <Text style={styles.academyVideoMessageText}>{video.state.message}</Text>
+              <Pressable
+                testID="academy-video-retry"
+                accessibilityRole="button"
+                accessibilityLabel="Try loading the video again"
+                style={({ pressed }) => [styles.academyVideoRetry, pressed && styles.pressed]}
+                onPress={() => {
+                  setVideoStarted(false);
+                  video.retry();
+                }}
+              >
+                <Text style={styles.academyVideoRetryText}>Try again</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : !videoStarted ? (
           <>
             <LinearGradient
               colors={["rgba(8,7,6,0.10)", "rgba(8,7,6,0.48)"]}
               style={styles.academyVideoScrim}
             />
-            <View style={styles.academyVideoDuration}>
-              <Text style={styles.academyVideoDurationText}>{lesson.duration}</Text>
-            </View>
+            {lesson.duration ? (
+              <View style={styles.academyVideoDuration}>
+                <Text style={styles.academyVideoDurationText}>{lesson.duration}</Text>
+              </View>
+            ) : null}
             <Pressable
               testID="academy-video-start"
               accessibilityRole="button"
               accessibilityLabel={`Play ${lesson.title}`}
               style={({ pressed }) => [styles.academyVideoCenter, pressed && styles.pressed]}
-              onPress={() => {
-                setVideoStarted(true);
-                videoPlayer.play();
-              }}
+              onPress={() => setVideoStarted(true)}
             >
               <View style={styles.academyVideoPlay}>
                 <Play size={22} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} strokeWidth={1.8} />
               </View>
             </Pressable>
           </>
-        )}
+        ) : videoPhase === "loading" ? (
+          <View testID="academy-video-loading" style={styles.academyVideoCenter}>
+            <ActivityIndicator color={equinaTheme.colors.ivory} />
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.academyVideoDetails}>
-        <Text style={styles.academyVideoKicker}>{lesson.level} · {lesson.topic} · {lesson.duration}</Text>
+        <Text style={styles.academyVideoKicker}>{metaLine(lesson.level, lesson.topic, lesson.duration)}</Text>
         <Text style={styles.academyVideoTitle}>{lesson.title}</Text>
-        <Text style={styles.academyVideoCoach}>{lesson.coach} · {lesson.coachTitle}</Text>
+        <Text style={styles.academyVideoCoach}>{metaLine(lesson.coach, lesson.coachTitle)}</Text>
         <Text style={styles.academyVideoSummary}>{lesson.summary}</Text>
 
         <View style={styles.academyVideoProgressBlock}>
@@ -6083,7 +6056,7 @@ function AcademyVideoPage({
           style={styles.academyLessonCompleteButton}
           onPress={() => {
             void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-            onComplete();
+            onComplete(lesson.id, video.currentPosition());
             if (nextLesson) {
               onOpenLesson(nextLesson);
             } else {
@@ -6150,7 +6123,7 @@ function AcademyLessonCard({
   matchReason,
   onPress
 }: {
-  lesson: (typeof academyLessons)[number];
+  lesson: AcademyLessonView;
   featured: boolean;
   featuredLabel?: string;
   matchReason?: string;
@@ -6175,7 +6148,7 @@ function AcademyLessonCard({
         />
         <View style={styles.academyFeaturedLessonTop}>
           <Text style={styles.academyFeaturedLessonBadge}>{featuredLabel ?? "Best match"}</Text>
-          <Text style={styles.academyFeaturedLessonDuration}>{lesson.duration}</Text>
+          {lesson.duration ? <Text style={styles.academyFeaturedLessonDuration}>{lesson.duration}</Text> : null}
         </View>
         <View style={styles.academyFeaturedLessonContent}>
           <Text style={styles.academyFeaturedLessonReason}>{matchReason ?? lesson.level}</Text>
@@ -6205,7 +6178,7 @@ function AcademyLessonCard({
           <Text style={styles.academyLessonLevel}>{lesson.level}</Text>
         </View>
         <Text numberOfLines={1} style={styles.academyLessonTitle}>{lesson.title}</Text>
-        <Text numberOfLines={1} style={styles.academyLessonMeta}>{lesson.coach} · {lesson.duration}</Text>
+        <Text numberOfLines={1} style={styles.academyLessonMeta}>{metaLine(lesson.coach, lesson.duration)}</Text>
         <Text numberOfLines={1} style={styles.academyLessonSummary}>{lesson.summary}</Text>
       </View>
       <ChevronRight size={17} color="#8B8578" />
@@ -14210,6 +14183,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6
   },
+  academyCatalogLoading: {
+    minHeight: 260,
+    alignItems: "center",
+    justifyContent: "center"
+  },
   academyEmptyTitle: {
     color: nightTheme.text,
     fontSize: 16,
@@ -14302,6 +14280,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,247,230,0.94)"
+  },
+  academyVideoMessage: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    paddingHorizontal: 28
+  },
+  academyVideoMessageText: {
+    color: equinaTheme.colors.ivory,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "600",
+    textAlign: "center"
+  },
+  academyVideoRetry: {
+    minHeight: 44,
+    borderRadius: 22,
+    paddingHorizontal: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,247,230,0.94)"
+  },
+  academyVideoRetryText: {
+    color: equinaTheme.colors.ink,
+    fontSize: 14,
+    fontWeight: "700"
   },
   academyVideoMeta: {
     position: "absolute",

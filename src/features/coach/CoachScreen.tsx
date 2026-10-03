@@ -47,11 +47,14 @@ export function CoachScreen({
   context,
   controller,
   onBack,
+  backLabel = "Back to Academy",
   onContextChange
 }: {
   context: CoachConversationContext;
   controller: CoachConversationController;
   onBack: () => void;
+  /** Where back leads: the Academy, or home while Ralf is the whole Academy. */
+  backLabel?: string;
   onContextChange: (next: CoachConversationContext) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -108,7 +111,7 @@ export function CoachScreen({
         <MotionPressable
           testID="ai-chat-back"
           accessibilityRole="button"
-          accessibilityLabel="Back to Academy"
+          accessibilityLabel={backLabel}
           style={styles.iconButton}
           onPress={onBack}
         >

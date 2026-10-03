@@ -35,9 +35,9 @@ accurate.
 | Horse | Nutrition | Preview a demo stable plan and local check-offs | local prototype |
 | Horse | Health | Inspect sample health records and open Ralf | read-only |
 | Horse | Docs | Inspect sample document state | read-only |
-| Academy | For You | Inspect one personalized lesson path | real client navigation/local data |
-| Academy | Lessons | Search and filter seeded lessons | real client navigation/local data |
-| Academy | Lesson | Play a public demo video and update local progress | local prototype |
+| Academy | For You | Inspect one personalized lesson path | published catalogue for connected accounts; preview catalogue in demo |
+| Academy | Lessons | Search and filter lessons | published catalogue for connected accounts; preview catalogue in demo |
+| Academy | Lesson | Play a lesson through a signed, expiring link and save the rider's place | backend implemented / video host gated (`academy-playback`, Bunny Stream); demo plays a bundled clip |
 | Academy | Coach | Persist a private Ralf conversation through a server provider boundary | backend implemented / rollout gated; explicit dev demo adapter |
 | Club | Feed | Inspect seeded social content | read-only |
 | Shop buyer | Browse | Search, filter, save, and inspect seeded listings | local prototype/read-only |
@@ -66,7 +66,7 @@ accurate.
 | Completed ride phases | rider actions | recap only | Factual count |
 | Horse-feel check-in | rider selection | recap only | Attribute to the rider; never infer it |
 | Ride count | seeded React state | reload resets | Call it journal entries, not weekly performance |
-| Academy progress | React state | reload resets | Local preview; persistence is Sprint 3 |
+| Academy progress | Postgres (`academy_progress`) for connected accounts; React state in demo | durable when `academy_progress` is on; session only otherwise | Finishing is recorded by the player or "Complete lesson", never inferred from a position |
 | Ralf conversations | Postgres/Realtime | durable for connected accounts | server generates assistant role; dev demo is explicitly local |
 | Ralf confidence | server-derived context coverage | message metadata | never trust model prose as confidence |
 | Marketplace messages | Postgres/Realtime | durable | drafts only are local; bodies are server-readable for moderation |

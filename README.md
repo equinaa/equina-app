@@ -13,6 +13,7 @@ Expo / React Native client (iOS, Android, web) on a Supabase backend (Postgres w
 | Client | Expo SDK 55, React Native 0.83, React 19, TypeScript. Dev-client builds (not Expo Go). |
 | Backend | Supabase: Postgres + RLS, Edge Functions (Deno), Storage (all buckets private, signed URLs), Vault, `pg_cron` |
 | AI coach | `supabase/functions/coach-chat` → Anthropic Messages API (Claude). Provider is configured server-side only. |
+| Lesson video | Bunny Stream (HLS). Riders get a signed link that expires, from `supabase/functions/academy-playback`; nothing is public. |
 | Web hosting | Vercel, auto-deploys `main` |
 | Tests | `tsx` runner; migration and RLS tests run against an isolated in-process Postgres |
 
