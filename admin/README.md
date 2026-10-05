@@ -36,6 +36,10 @@ and the admin section of `tests/backend-migrations.test.ts`).
 
 ## Deploy
 
+Live at https://equina-staff.vercel.app (Vercel project `equina-admin`); every
+merge to `main` deploys it. `admin.equina.ai` will point here once the domain's
+DNS is set up.
+
 A Vercel project of its own, separate from the web app:
 
 1. In Vercel, add a new project from this repository and set **Root Directory**

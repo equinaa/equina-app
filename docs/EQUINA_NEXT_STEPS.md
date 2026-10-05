@@ -168,7 +168,7 @@ Before inviting anyone:
 
 | Prerequisite | Why |
 | --- | --- |
-| Public profile projection and visibility choices | Every authenticated account can currently read every profile, **including location**. For horse owners this is physical security, not just privacy |
+| Public profile projection and visibility choices | Every authenticated account can currently read every profile, **including location**. For horse owners this is physical security, not just privacy. *Done 2026-10-05 (202610050002): other riders see name and photo only.* |
 | Sentry provisioned, alerts routed | Today a failure is found by manual inspection |
 | Async paginated data export | The current export is synchronous and silently omits domains |
 | Account deletion worker deployed | Deletion is implemented but not running |
