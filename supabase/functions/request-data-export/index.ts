@@ -1,5 +1,6 @@
 import { handleOptions, json, requireMethod, respondToError } from "../_shared/http.ts";
 import { createAdminClient, requireFeature, requireUser } from "../_shared/supabase.ts";
+import { readInBatches } from "../_shared/id-batches.ts";
 
 type QueryResult<T> = { data: T | null; error: { message?: string } | null };
 
@@ -53,11 +54,10 @@ Deno.serve(async (request) => {
     const ownRow = (table: string, rider: string) =>
       selectRow(admin.from(table).select("*").eq(rider, user.id).maybeSingle());
     // Rows that belong to the rider's own rows: the records of their horses,
-    // the messages of their conversations, the history of their orders.
+    // the messages of their conversations, the history of their orders. The
+    // parent ids travel in the URL, so a long list is read in batches.
     const under = (table: string, parent: string, parentIds: string[]) =>
-      parentIds.length
-        ? selectRows(admin.from(table).select("*").in(parent, parentIds))
-        : Promise.resolve([]);
+      readInBatches(parentIds, (batch) => selectRows(admin.from(table).select("*").in(parent, batch)));
 
     const horses = own("horses", "owner_id");
     const horseRecords = horses.then((rows) => under("horse_records", "horse_id", idsOf(rows)));

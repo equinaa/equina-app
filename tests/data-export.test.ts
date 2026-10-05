@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createClient } from "@supabase/supabase-js";
+import { ID_BATCH_SIZE, idBatches, readInBatches } from "../supabase/functions/_shared/id-batches";
 import { openBackendDatabase } from "./backend-database";
 
 // The account export has to carry every table that holds a rider's data.
@@ -131,4 +133,35 @@ for (const { table, select } of reads) {
 }
 
 await db.close();
+
+// Child rows are read by a list of parent ids, and the ids travel in the URL.
+// A yard with a few hundred records, or a seller with a few hundred orders,
+// would otherwise send a request line past the gateway's 8 KB and lose the
+// whole export.
+assert.match(
+  exportSource,
+  /const under = [^;]*readInBatches\(/,
+  "request-data-export must read child rows in batches of parent ids."
+);
+const parentIds = Array.from({ length: 250 }, (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`);
+assert.deepEqual(idBatches(parentIds).map((batch) => batch.length), [100, 100, 50]);
+const requested: string[][] = [];
+const rows = await readInBatches(parentIds, async (batch) => {
+  requested.push(batch);
+  return batch.map((id) => ({ id }));
+});
+assert.equal(requested.length, 3);
+assert.deepEqual(rows.map((row) => row.id), parentIds);
+assert.deepEqual(await readInBatches([], async () => {
+  throw new Error("No ids, no request.");
+}), []);
+const batchQuery = createClient("https://abcdefghijklmnopqrst.supabase.co", "test-key", {
+  auth: { persistSession: false, autoRefreshToken: false }
+})
+  .from("horse_record_files")
+  .select("*")
+  .in("record_id", parentIds.slice(0, ID_BATCH_SIZE));
+const batchUrl = (batchQuery as unknown as { url: URL }).url.toString();
+assert.ok(batchUrl.length < 8000, `A batch of ${ID_BATCH_SIZE} ids makes a ${batchUrl.length}-character URL.`);
+
 console.log("Account export covers every table that holds a rider's data.");
