@@ -107,7 +107,7 @@ export class AccountRepository {
       { data: deletion, error: deletionError },
       { data: primaryHorse, error: horseError }
     ] = await Promise.all([
-      this.ownProfileRow(user.id),
+      this.client.rpc("my_profile").single(),
       this.client.from("user_preferences").select("*").eq("user_id", user.id).single(),
       this.client.from("notification_preferences").select("*").eq("user_id", user.id).single(),
       this.client.from("account_deletion_requests").select("*").eq("user_id", user.id)
@@ -176,31 +176,20 @@ export class AccountRepository {
       skill_level: input.skillLevel ?? null
     }).eq("id", user.id).select("id").single();
     requireData(data as Row | null, error, "Profile could not be saved.");
-    return await this.ownProfile(user.id, "Profile could not be saved.");
+    return await this.ownProfile("Profile could not be saved.");
   }
 
   async uploadAvatar(asset: UploadAsset): Promise<ProfileRecord> {
     const user = await this.user();
     await this.uploads.upload("avatar", user.id, asset);
-    return await this.ownProfile(user.id, "Avatar could not be saved.");
+    return await this.ownProfile("Avatar could not be saved.");
   }
 
   // Other accounts can read only a rider's name and photo (202610050002), so
   // the rider's own full profile comes from my_profile(), not the table.
-  private async ownProfile(userId: string, failure: string): Promise<ProfileRecord> {
-    const { data, error } = await this.ownProfileRow(userId);
+  private async ownProfile(failure: string): Promise<ProfileRecord> {
+    const { data, error } = await this.client.rpc("my_profile").single();
     return mapProfile(requireData(data as Row | null, error, failure));
-  }
-
-  private async ownProfileRow(userId: string) {
-    const result = await this.client.rpc("my_profile").single();
-    // Before 202610050002 reaches a database the function does not exist yet
-    // (PGRST202) and the table still returns the whole row. Remove once
-    // production has the migration.
-    if (result.error?.code === "PGRST202") {
-      return await this.client.from("profiles").select("*").eq("id", userId).single();
-    }
-    return result;
   }
 
   async updatePreferences(
