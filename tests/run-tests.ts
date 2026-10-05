@@ -8,4 +8,5 @@ import "./academy.test";
 import "./plans.test";
 import "./admin.test";
 import "./mux.test";
+import "./data-export.test";
 await import("./backend-migrations.test");
