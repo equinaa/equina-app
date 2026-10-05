@@ -216,6 +216,51 @@ export function useAccount({
     }
   }, [backend, mode, onConnectedSnapshot, saveDemo, snapshot]);
 
+  // Discipline and level live on the profile, the focus in preferences. One
+  // save writes both, so the second cannot undo the first in the local copy.
+  const saveTrainingProfile = useCallback(async (input: {
+    discipline: Discipline;
+    skillLevel: NonNullable<ProfileRecord["skillLevel"]>;
+    focus: string;
+  }) => {
+    const previous = snapshot;
+    const preferencePatch = {
+      academyFocus: input.focus,
+      academyDiscipline: input.discipline,
+      academyLevel: input.skillLevel
+    };
+    const optimistic: AccountSnapshot = {
+      ...snapshot,
+      profile: { ...snapshot.profile, discipline: input.discipline, skillLevel: input.skillLevel },
+      preferences: { ...snapshot.preferences, ...preferencePatch }
+    };
+    setError("");
+    setBusy("training");
+    try {
+      if (mode === "demo") {
+        await saveDemo(optimistic);
+        return;
+      }
+      if (!backend) throw new Error("Account backend is unavailable.");
+      onConnectedSnapshot(optimistic);
+      const profile = await backend.account.updateProfile({
+        displayName: snapshot.profile.displayName,
+        locale: snapshot.profile.locale,
+        discipline: input.discipline,
+        skillLevel: input.skillLevel
+      });
+      const preferences = await backend.account.updatePreferences(preferencePatch);
+      onConnectedSnapshot({ ...optimistic, profile, preferences });
+    } catch {
+      if (mode === "demo") setDemoSnapshot(previous);
+      else onConnectedSnapshot(previous);
+      setError("Your training profile could not be saved. Try again.");
+      throw new Error("training_profile_save_failed");
+    } finally {
+      setBusy("");
+    }
+  }, [backend, mode, onConnectedSnapshot, saveDemo, snapshot]);
+
   const saveNotifications = useCallback(async (
     patch: Partial<Omit<NotificationPreferencesRecord, "userId" | "updatedAt">>
   ) => {
@@ -349,6 +394,7 @@ export function useAccount({
     saveProfile,
     uploadAvatar,
     savePreferences,
+    saveTrainingProfile,
     saveNotifications,
     loadBlocked,
     unblock,

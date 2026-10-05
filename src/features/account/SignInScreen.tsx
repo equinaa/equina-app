@@ -190,6 +190,21 @@ export function SignInScreen({
               ) : null}
 
               <MotionPressable
+                testID="signin-create"
+                accessibilityRole="button"
+                accessibilityLabel={copy.createAccountA11y}
+                accessibilityState={{ disabled: busy }}
+                disabled={busy}
+                onPress={() => {
+                  onClearMessages();
+                  onCreateAccount();
+                }}
+                style={styles.createButton}
+              >
+                <Text style={styles.createButtonText}>{copy.createAccount}</Text>
+              </MotionPressable>
+
+              <MotionPressable
                 testID="signin-email"
                 accessibilityRole="button"
                 accessibilityLabel={copy.email}
@@ -201,20 +216,6 @@ export function SignInScreen({
                 <Mail size={19} color={equinaTheme.text.primary} />
                 <Text style={styles.emailButtonText}>{copy.email}</Text>
               </MotionPressable>
-
-              <Pressable
-                testID="signin-create"
-                accessibilityRole="button"
-                accessibilityLabel={copy.createAccountA11y}
-                disabled={busy}
-                onPress={() => {
-                  onClearMessages();
-                  onCreateAccount();
-                }}
-                style={styles.createButton}
-              >
-                <Text style={styles.createButtonText}>{copy.createAccount}</Text>
-              </Pressable>
             </>
           ) : (
             <View style={styles.unavailable}>
@@ -225,9 +226,9 @@ export function SignInScreen({
                   testID="signin-demo"
                   accessibilityRole="button"
                   onPress={onUseDemo}
-                  style={styles.createButton}
+                  style={styles.demoButton}
                 >
-                  <Text style={styles.createButtonText}>{copy.unavailable.demo}</Text>
+                  <Text style={styles.demoButtonText}>{copy.unavailable.demo}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -361,8 +362,6 @@ const styles = StyleSheet.create({
     minHeight: 54,
     borderRadius: 14,
     backgroundColor: equinaTheme.surfaces.raised,
-    borderWidth: 1,
-    borderColor: equinaTheme.material.separator,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -374,11 +373,23 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   createButton: {
+    minHeight: 54,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.colorRole.accent
+  },
+  createButtonText: {
+    ...equinaTheme.typography.body,
+    color: equinaTheme.text.inverse,
+    fontWeight: "600"
+  },
+  demoButton: {
     minHeight: equinaTheme.accessibility.minimumTapTarget,
     alignItems: "center",
     justifyContent: "center"
   },
-  createButtonText: {
+  demoButtonText: {
     ...equinaTheme.typography.meta,
     color: equinaTheme.colorRole.accent,
     fontWeight: "600"

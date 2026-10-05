@@ -106,8 +106,9 @@ for (const viewport of viewports) {
   await page.getByText("Account", { exact: true }).first().waitFor();
   screens.push(await inspectLayout(page, viewport, "account"));
 
-  await page.getByTestId("tab-assistant").click();
-  await page.getByTestId("academy-mode-ai").click();
+  // Account and Ralf each cover the tabs; Ralf opens from any tab's header.
+  await page.getByTestId("account-close").click();
+  await page.getByTestId("ralf-button").first().click();
   await page.getByTestId("ralf-conversation").waitFor();
   screens.push(await inspectLayout(page, viewport, "ralf"));
 
@@ -125,11 +126,14 @@ for (const viewport of viewports) {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
 
   await page.getByTestId("ai-chat-back").click();
-  await page.getByTestId("tab-gear").click();
-  await page.locator("[data-testid^='shop-card-']").first().click();
-  await page.getByTestId("shop-product-message").click();
-  await page.getByTestId("shop-conversation").waitFor();
-  screens.push(await inspectLayout(page, viewport, "shop-conversation"));
+  // The Shop tab only exists while a marketplace switch is on.
+  if (await page.getByTestId("tab-gear").isVisible().catch(() => false)) {
+    await page.getByTestId("tab-gear").click();
+    await page.locator("[data-testid^='shop-card-']").first().click();
+    await page.getByTestId("shop-product-message").click();
+    await page.getByTestId("shop-conversation").waitFor();
+    screens.push(await inspectLayout(page, viewport, "shop-conversation"));
+  }
 
   report.push({
     viewport,

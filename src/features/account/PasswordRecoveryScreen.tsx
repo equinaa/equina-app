@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
   },
   error: {
     ...equinaTheme.typography.meta,
-    color: "#E7A4A5"
+    color: equinaTheme.colorRole.criticalOnDark
   },
   cancel: {
     minHeight: 44,

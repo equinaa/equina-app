@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
     width: 44
   },
   error: {
-    color: "#E2A5A6",
+    color: equinaTheme.colorRole.criticalOnDark,
     backgroundColor: "rgba(157,43,46,0.15)",
     fontSize: 12,
     lineHeight: 17,

@@ -14,6 +14,7 @@ import * as Clipboard from "expo-clipboard";
 import { BlurView } from "expo-blur";
 import {
   Archive,
+  ArrowUpRight,
   Check,
   ChevronLeft,
   Clock3,
@@ -27,6 +28,7 @@ import {
   Trash2,
   X
 } from "lucide-react-native";
+import type { EquinaBackend } from "../../backend";
 import { ConversationComposer } from "../../ui/conversation/ConversationComposer";
 import { ConversationMessage } from "../../ui/conversation/ConversationMessage";
 import { ConversationState } from "../../ui/conversation/ConversationState";
@@ -34,27 +36,95 @@ import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
 import { equinaTheme } from "../../ui/theme/theme";
+import type { AccountMode } from "../account/account-types";
 import type { CoachConversationContext, CoachDisplayMessage } from "./coach-types";
-import type { CoachConversationController } from "./useCoachConversation";
+import { useCoachConversation, type CoachConversationController } from "./useCoachConversation";
 
 type Sheet = "more" | "context" | "rename" | "message" | "delete" | null;
 
-const focusOptions = ["Rhythm", "Flatwork", "Confidence", "Recovery"];
+const defaultFocusOptions = ["Rhythm", "Flatwork", "Confidence", "Recovery"];
 const loadOptions = ["Light week", "Normal week", "Heavy week"];
 const styleOptions = ["Concise", "Step by step", "Reflective"];
+
+/**
+ * Ralf, opened from any tab. The conversation lives only while he is open;
+ * coming back resumes the latest one, as the history is saved.
+ */
+export function RalfScreen({
+  mode,
+  backend,
+  enabled,
+  context,
+  queuedPrompt,
+  onQueuedPromptConsumed,
+  suggestions,
+  focusOptions,
+  onBack,
+  onContextChange
+}: {
+  mode: AccountMode;
+  backend: EquinaBackend | null;
+  enabled: boolean;
+  context: CoachConversationContext;
+  /** A question asked from elsewhere ("Ask Ralf about this lesson"), sent on open. */
+  queuedPrompt: string;
+  onQueuedPromptConsumed: () => void;
+  suggestions: readonly string[];
+  /** The rider's discipline's focuses, the same list as their training profile. */
+  focusOptions?: readonly string[];
+  onBack: () => void;
+  onContextChange: (next: CoachConversationContext) => void;
+}) {
+  // A question from elsewhere starts its own conversation rather than landing
+  // in the middle of whatever was open last.
+  const opensWithQuestion = useRef(Boolean(queuedPrompt)).current;
+  const controller = useCoachConversation({
+    mode,
+    backend,
+    enabled,
+    context,
+    resumeLatest: !opensWithQuestion
+  });
+
+  useEffect(() => {
+    if (!queuedPrompt) return;
+    onQueuedPromptConsumed();
+    void controller.send(queuedPrompt);
+  }, [queuedPrompt]);
+
+  return (
+    <CoachScreen
+      context={context}
+      controller={controller}
+      suggestions={suggestions}
+      focusOptions={focusOptions}
+      onBack={onBack}
+      backLabel="Close Ralf"
+      dismiss="close"
+      onContextChange={onContextChange}
+    />
+  );
+}
 
 export function CoachScreen({
   context,
   controller,
+  suggestions = [],
+  focusOptions = defaultFocusOptions,
   onBack,
-  backLabel = "Back to Academy",
+  backLabel = "Back",
+  dismiss = "back",
   onContextChange
 }: {
   context: CoachConversationContext;
   controller: CoachConversationController;
+  /** Questions offered while the conversation is empty, so nobody starts from a blank page. */
+  suggestions?: readonly string[];
+  focusOptions?: readonly string[];
   onBack: () => void;
-  /** Where back leads: the Academy, or home while Ralf is the whole Academy. */
   backLabel?: string;
+  /** "close" when Ralf sits over a tab rather than inside one. */
+  dismiss?: "back" | "close";
   onContextChange: (next: CoachConversationContext) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -115,7 +185,9 @@ export function CoachScreen({
           style={styles.iconButton}
           onPress={onBack}
         >
-          <ChevronLeft size={21} color={equinaTheme.text.primary} />
+          {dismiss === "close"
+            ? <X size={21} color={equinaTheme.text.primary} />
+            : <ChevronLeft size={21} color={equinaTheme.text.primary} />}
         </MotionPressable>
         <View style={styles.identity}>
           <Text numberOfLines={1} style={styles.name}>Ralf</Text>
@@ -123,6 +195,20 @@ export function CoachScreen({
             {context.hasHorse ? context.horseName : "Your riding"} · {context.focus}
           </Text>
         </View>
+        {/* History is what riders come back for, so it sits in the header
+            rather than behind the menu. */}
+        <MotionPressable
+          testID="ai-chat-history"
+          accessibilityRole="button"
+          accessibilityLabel="Ralf history"
+          style={styles.iconButton}
+          onPress={() => {
+            controller.setHistoryOpen(true);
+            void controller.loadHistory();
+          }}
+        >
+          <Clock3 size={20} color={equinaTheme.text.primary} />
+        </MotionPressable>
         <MotionPressable
           testID="ai-chat-more"
           accessibilityRole="button"
@@ -155,10 +241,35 @@ export function CoachScreen({
         {controller.loading && controller.messages.length === 0 ? (
           <ConversationState loading title="Opening your conversation..." />
         ) : controller.messages.length === 0 ? (
-          <ConversationState
-            title={context.hasHorse ? `What does ${context.horseName} need today?` : "What does your next ride need?"}
-            body="Ask for a plan, a recap, or one training idea. Health concerns always go to your veterinarian."
-          />
+          <View style={styles.empty}>
+            <Text accessibilityRole="header" style={styles.emptyTitle}>
+              {context.hasHorse ? `What does ${context.horseName} need today?` : "What does your next ride need?"}
+            </Text>
+            <Text style={styles.emptyBody}>
+              Ask for a plan, a recap, or one training idea. Health concerns always go to your veterinarian.
+            </Text>
+            {suggestions.length > 0 && (controller.connected || controller.demo) ? (
+              <View style={styles.suggestions}>
+                {suggestions.map((suggestion, index) => (
+                  <MotionPressable
+                    key={suggestion}
+                    testID={`ai-quick-prompt-${index + 1}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ask Ralf: ${suggestion}`}
+                    disabled={controller.sending}
+                    style={styles.suggestion}
+                    onPress={() => {
+                      selectionHaptic();
+                      void controller.send(suggestion);
+                    }}
+                  >
+                    <Text numberOfLines={2} style={styles.suggestionText}>{suggestion}</Text>
+                    <ArrowUpRight size={17} color={equinaTheme.colors.brass} />
+                  </MotionPressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
         ) : (
           controller.messages.map((message) => (
             <View key={message.id} style={styles.messageBlock}>
@@ -196,7 +307,7 @@ export function CoachScreen({
         visible={sheet !== null}
         reducedMotion={reducedMotion}
         title={
-          sheet === "context" ? "Adjust context" :
+          sheet === "context" ? "This conversation" :
           sheet === "rename" ? "Rename conversation" :
           sheet === "message" ? "Message" :
           sheet === "delete" ? "Delete conversation?" :
@@ -210,12 +321,7 @@ export function CoachScreen({
               controller.startNew();
               closeSheet();
             }} />
-            <SheetAction Icon={Clock3} label="History" onPress={() => {
-              closeSheet();
-              controller.setHistoryOpen(true);
-              void controller.loadHistory();
-            }} />
-            <SheetAction Icon={Settings2} label="Adjust context" onPress={() => setSheet("context")} />
+            <SheetAction Icon={Settings2} label="This conversation" onPress={() => setSheet("context")} />
             {controller.activeConversation ? (
                 <SheetAction Icon={Pencil} label="Rename" onPress={() => {
                   setRenameDraft(controller.activeConversation?.title ?? "");
@@ -235,6 +341,7 @@ export function CoachScreen({
         ) : sheet === "context" ? (
           <ContextEditor
             value={contextDraft}
+            focusOptions={focusOptions}
             onChange={setContextDraft}
             onSave={() => void saveContext()}
           />
@@ -315,22 +422,27 @@ export function CoachScreen({
 
 function ContextEditor({
   value,
+  focusOptions,
   onChange,
   onSave
 }: {
   value: CoachConversationContext;
+  focusOptions: readonly string[];
   onChange: (value: CoachConversationContext) => void;
   onSave: () => void;
 }) {
   return (
     <View style={styles.editor}>
+      <Text style={styles.editorLead}>
+        For this conversation only. Your usual focus is in Account, under Training profile.
+      </Text>
       <View style={styles.contextHorse}>
         <Text style={styles.fieldLabel}>{value.hasHorse ? "Horse" : "Rider context"}</Text>
         <Text style={styles.contextHorseValue}>{value.hasHorse ? value.horseName : "No horse selected"}</Text>
       </View>
       <OptionRows
         label="Training focus"
-        values={focusOptions}
+        values={focusOptions.includes(value.focus) ? focusOptions : [...focusOptions, value.focus]}
         selected={value.focus}
         onSelect={(focus) => onChange({ ...value, focus })}
       />
@@ -352,7 +464,7 @@ function ContextEditor({
         style={styles.primary}
         onPress={onSave}
       >
-        <Text style={styles.primaryText}>Save context</Text>
+        <Text style={styles.primaryText}>Use for this conversation</Text>
       </MotionPressable>
     </View>
   );
@@ -365,7 +477,7 @@ function OptionRows({
   onSelect
 }: {
   label: string;
-  values: string[];
+  values: readonly string[];
   selected: string;
   onSelect: (value: string) => void;
 }) {
@@ -512,7 +624,7 @@ function SheetAction({
 }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} style={styles.sheetAction} onPress={onPress}>
-      <Icon size={18} color={destructive ? equinaTheme.colors.danger : equinaTheme.text.secondary} />
+      <Icon size={18} color={destructive ? equinaTheme.colorRole.criticalOnDark : equinaTheme.text.secondary} />
       <Text style={[styles.sheetActionText, destructive && styles.sheetActionDestructive]}>{label}</Text>
     </Pressable>
   );
@@ -550,19 +662,19 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   context: {
-    color: equinaTheme.text.tertiary,
+    color: equinaTheme.text.secondary,
     fontSize: 12,
     lineHeight: 16,
     fontWeight: "400",
     marginTop: 1
   },
   errorLine: {
-    backgroundColor: "rgba(157,43,46,0.15)",
+    backgroundColor: equinaTheme.material.quiet,
     paddingHorizontal: 16,
     paddingVertical: 9
   },
   errorText: {
-    color: "#E2A5A6",
+    color: equinaTheme.colorRole.criticalOnDark,
     fontSize: 12,
     lineHeight: 17,
     fontWeight: "400"
@@ -579,6 +691,45 @@ const styles = StyleSheet.create({
   },
   messagesEmpty: {
     justifyContent: "center"
+  },
+  empty: {
+    width: "100%",
+    maxWidth: 380,
+    alignSelf: "center",
+    gap: 8,
+    paddingHorizontal: 4
+  },
+  emptyTitle: {
+    ...equinaTheme.typography.title,
+    color: equinaTheme.text.primary
+  },
+  emptyBody: {
+    color: equinaTheme.text.secondary,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "400"
+  },
+  suggestions: {
+    gap: 8,
+    marginTop: 16
+  },
+  suggestion: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: equinaTheme.radius.control,
+    backgroundColor: equinaTheme.surfaces.raised
+  },
+  suggestionText: {
+    flex: 1,
+    color: equinaTheme.text.primary,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "400"
   },
   messageBlock: {
     gap: 6
@@ -642,10 +793,16 @@ const styles = StyleSheet.create({
     fontWeight: "400"
   },
   sheetActionDestructive: {
-    color: "#E2A5A6"
+    color: equinaTheme.colorRole.criticalOnDark
   },
   editor: {
     gap: 24
+  },
+  editorLead: {
+    color: equinaTheme.text.secondary,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "400"
   },
   fieldLabel: {
     color: equinaTheme.text.secondary,

@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
     marginTop: 1
   },
   error: {
-    color: "#E2A5A6",
+    color: equinaTheme.colorRole.criticalOnDark,
     backgroundColor: "rgba(157,43,46,0.15)",
     fontSize: 12,
     lineHeight: 17,
@@ -560,7 +560,7 @@ const styles = StyleSheet.create({
     fontWeight: "400"
   },
   actionDanger: {
-    color: "#E2A5A6"
+    color: equinaTheme.colorRole.criticalOnDark
   },
   explanation: {
     color: equinaTheme.text.secondary,

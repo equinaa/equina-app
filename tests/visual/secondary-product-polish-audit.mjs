@@ -138,7 +138,10 @@ await clickTestID("account-sign-out");
 screens.push(await inspect("account-sign-out-confirmation"));
 await page.getByRole("button", { name: "Close confirmation" }).click();
 await settle();
+await clickTestID("account-close");
 
+// The Shop screens need a build with a marketplace switch on; otherwise the
+// dock has no Shop tab.
 await clickTestID("tab-gear");
 await page.getByTestId("shop-search").focus();
 screens.push(await inspect("shop-search-focused"));

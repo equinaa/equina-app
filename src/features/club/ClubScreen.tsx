@@ -73,7 +73,6 @@ export function ClubScreen({
   if (!club.enabled) {
     return (
       <View style={styles.screen}>
-        <Text accessibilityRole="header" style={styles.title}>At the barn</Text>
         <View style={styles.notice}>
           <Text style={styles.noticeTitle}>Club is not open for this account yet.</Text>
           <Text style={styles.noticeBody}>Your rides and records stay private. Club opens as soon as your account is added.</Text>
@@ -85,7 +84,20 @@ export function ClubScreen({
   return (
     <View style={styles.screen}>
       <View style={styles.topBar}>
-        <Text accessibilityRole="header" style={styles.title}>At the barn</Text>
+        {canPost ? (
+          <Pressable
+            testID="club-compose"
+            accessibilityRole="button"
+            accessibilityLabel="Write a post"
+            onPress={() => setComposer({ attachRide: false })}
+            style={({ pressed }) => [styles.composerRow, pressed && styles.pressed]}
+          >
+            <Avatar name={riderName} />
+            <Text style={styles.composerPrompt}>How did today's ride go?</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.feedLabel}>Latest from your Club</Text>
+        )}
         <Pressable
           testID="club-refresh"
           accessibilityRole="button"
@@ -99,19 +111,6 @@ export function ClubScreen({
             : <RefreshCw size={18} color={equinaTheme.text.secondary} />}
         </Pressable>
       </View>
-
-      {canPost ? (
-        <Pressable
-          testID="club-compose"
-          accessibilityRole="button"
-          accessibilityLabel="Write a post"
-          onPress={() => setComposer({ attachRide: false })}
-          style={({ pressed }) => [styles.composerRow, pressed && styles.pressed]}
-        >
-          <Avatar name={riderName} />
-          <Text style={styles.composerPrompt}>How did today's ride go?</Text>
-        </Pressable>
-      ) : null}
 
       <ScrollView
         horizontal
@@ -707,11 +706,13 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    gap: equinaTheme.spacing.sm
   },
-  title: {
-    ...equinaTheme.typography.title,
-    color: equinaTheme.text.primary
+  feedLabel: {
+    ...equinaTheme.typography.body,
+    color: equinaTheme.text.secondary,
+    flex: 1
   },
   iconButton: {
     minWidth: equinaTheme.accessibility.minimumTapTarget,
@@ -723,6 +724,7 @@ const styles = StyleSheet.create({
     opacity: 0.72
   },
   composerRow: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: equinaTheme.spacing.compact,
@@ -734,7 +736,7 @@ const styles = StyleSheet.create({
   },
   composerPrompt: {
     ...equinaTheme.typography.body,
-    color: equinaTheme.text.tertiary,
+    color: equinaTheme.text.secondary,
     flex: 1
   },
   chips: {

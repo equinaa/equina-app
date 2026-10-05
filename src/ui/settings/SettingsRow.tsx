@@ -40,7 +40,7 @@ export function SettingsRow({
 }) {
   const content = (
     <>
-      {Icon ? <Icon size={19} strokeWidth={1.7} color={destructive ? equinaTheme.colors.danger : equinaTheme.text.secondary} /> : null}
+      {Icon ? <Icon size={19} strokeWidth={1.7} color={destructive ? equinaTheme.colorRole.criticalOnDark : equinaTheme.text.secondary} /> : null}
       <View style={styles.copy}>
         <Text style={[styles.title, destructive && styles.destructive, disabled && styles.disabled]}>{title}</Text>
         {detail ? <Text style={[styles.detail, disabled && styles.disabled]}>{detail}</Text> : null}
@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   destructive: {
-    color: equinaTheme.colors.danger
+    color: equinaTheme.colorRole.criticalOnDark
   },
   disabled: {
     opacity: 0.45

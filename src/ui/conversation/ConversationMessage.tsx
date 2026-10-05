@@ -48,7 +48,7 @@ export function ConversationMessage({
           style={styles.retry}
           onPress={onRetry}
         >
-          <RefreshCw size={14} color={equinaTheme.colors.danger} />
+          <RefreshCw size={14} color={equinaTheme.colorRole.criticalOnDark} />
           <Text style={styles.retryText}>Retry</Text>
         </Pressable>
       ) : null}
@@ -123,14 +123,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4
   },
   retryText: {
-    color: equinaTheme.colors.danger,
+    color: equinaTheme.colorRole.criticalOnDark,
     fontSize: 12,
     fontWeight: "600"
   },
+  // "Low confidence" changes how an answer should be read, so it is set at a
+  // size and contrast people actually notice.
   meta: {
-    color: equinaTheme.text.tertiary,
-    fontSize: 11,
-    lineHeight: 15,
+    color: equinaTheme.text.secondary,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: "400",
     paddingHorizontal: 4
   },
