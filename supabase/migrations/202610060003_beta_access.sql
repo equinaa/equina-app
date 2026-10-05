@@ -26,7 +26,14 @@ begin;
 --     they wait outside (the deletion and storage cleanup workers run in
 --     production);
 --   * a per-person override, which still wins in both directions: the testers
---     let in by overrides keep exactly what they have.
+--     let in by overrides keep every flag they have.
+--
+-- But what was never behind a flag -- Academy playback and picks, the Club's
+-- reads, other riders' profiles and avatars -- follows the door alone, and an
+-- override of another key is not the door. Those testers have no invite yet
+-- (the list starts here), so they lose those reads from this migration until
+-- they are invited: invite them right after it, before anything else
+-- (docs/EQUINA_FEATURE_FLAG_POLICY.md, "Moving the testers in").
 
 alter table public.app_feature_flags
   drop constraint if exists app_feature_flags_key_check;
@@ -90,8 +97,16 @@ grant select, insert, update, delete on public.beta_invites to service_role;
 -- Who is inside.
 -- ---------------------------------------------------------------------------
 -- An invite that was not taken back matches the account's current email, and
--- the account has confirmed that email -- so nobody gets in by signing up with
--- someone else's invited address.
+-- the account has confirmed that email.
+--
+-- The confirmation proves the address is the rider's only while Supabase Auth
+-- asks for it. With confirmations off -- as for the TestFlight cohort
+-- (supabase/config.toml) -- Auth stamps email_confirmed_at at sign-up and
+-- applies an email change at once, so whoever signs up first with an invited
+-- address that has no account yet gets in. An address that already has an
+-- account is safe: Auth lets no one else sign up with it or move to it. So
+-- until confirmations are back on, invite only riders who already have an
+-- account (Admin -> Beta says which, and warns while they are off).
 create or replace function private.is_beta_member(target_user uuid)
 returns boolean
 language sql
@@ -516,6 +531,82 @@ begin
     updated_by = auth.uid(),
     updated_at = now()
   where key = 'public_access';
+end;
+$$;
+
+-- Per-person overrides (202607290002) win over the door: a public_access
+-- override lets one account in, and any other one opens its feature to an
+-- account outside the beta. Giving one is the same decision as an invite, so it
+-- is an admin power now too; a moderator could set them before.
+create or replace function public.set_feature_flag_override(
+  target_user_id uuid,
+  target_key text,
+  target_enabled boolean,
+  target_expires_at timestamptz default null,
+  target_note text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not private.is_admin() then
+    raise exception 'Only an admin can change who gets a feature.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from auth.users where id = target_user_id) then
+    raise exception 'Target user does not exist';
+  end if;
+  if not exists (select 1 from public.app_feature_flags where key = target_key) then
+    raise exception 'Unknown feature flag';
+  end if;
+  if target_expires_at is not null and target_expires_at <= now() then
+    raise exception 'Expiry must be in the future';
+  end if;
+
+  insert into public.feature_flag_overrides(
+    user_id,
+    key,
+    enabled,
+    expires_at,
+    note,
+    created_by
+  )
+  values (
+    target_user_id,
+    target_key,
+    target_enabled,
+    target_expires_at,
+    nullif(trim(target_note), ''),
+    auth.uid()
+  )
+  on conflict (user_id, key) do update
+  set
+    enabled = excluded.enabled,
+    expires_at = excluded.expires_at,
+    note = excluded.note,
+    created_by = auth.uid(),
+    updated_at = now();
+end;
+$$;
+
+-- Clearing one matters as much: clearing a public_access override that keeps
+-- an account out lets it in once the door opens.
+create or replace function public.clear_feature_flag_override(
+  target_user_id uuid,
+  target_key text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not private.is_admin() then
+    raise exception 'Only an admin can change who gets a feature.' using errcode = '42501';
+  end if;
+  delete from public.feature_flag_overrides
+  where user_id = target_user_id and key = target_key;
 end;
 $$;
 

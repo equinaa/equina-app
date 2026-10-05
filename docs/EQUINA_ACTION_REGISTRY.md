@@ -107,7 +107,8 @@ accurate.
 | Clear Ralf history | confirmation | server delete RPC | error preserves history | implemented / rollout gated |
 | Schedule/cancel deletion | connected account; explicit confirmation | deletion Edge Functions + audit | 14-day grace period; cancel before effective date | implemented / worker deployment gated |
 | Check beta access again | signed-in account at the beta door | `backend-capabilities` (`my_access()`) | still outside: says so; unreachable: connection error; let in: onboarding or the app | implemented |
-| Invite a rider to the beta | admin with a second factor | `staff_invite_beta` | email normalized as matched; re-invite clears a revoke; nobody is emailed | implemented / PGlite tests |
+| Invite a rider to the beta | admin with a second factor | `staff_invite_beta` | email normalized as matched; re-invite clears a revoke; nobody is emailed; while Auth confirmations are off, only riders who already have an account (the page warns) | implemented / PGlite tests |
+| Give or clear a per-person flag override | admin with a second factor (moderators could before the beta door) | `set_feature_flag_override`, `clear_feature_flag_override` | an override wins over the door, so a `public_access` one lets an account in without an invite | implemented / PGlite tests; no admin page, SQL or RPC only |
 | Revoke a beta invite | admin with a second factor | `staff_revoke_beta` | the account stays and waits at the door; Invite again restores it | implemented / PGlite tests |
 | List beta invites | admin with a second factor | `staff_list_beta_invites` | status Invited, Signed up (confirmed account) or Revoked | implemented / PGlite tests |
 | Open or close Equina to everyone | admin with a second factor; ticked confirmation | `staff_set_public_access` (`public_access` at 100% or 0%) | the launch decision; closing again puts uninvited accounts back at the door | implemented / PGlite tests |
@@ -173,7 +174,7 @@ accurate.
 | Claim | Current truth | Rule |
 | --- | --- | --- |
 | Account created | real only after email OTP and idempotent server handoff | Dev demo remains explicitly labelled and is never a production account |
-| Invited to the beta | real when an un-revoked invite matches the account's confirmed email | Equina sends no invite email; never say "we will let you know" |
+| Invited to the beta | real when an un-revoked invite matches the account's confirmed email; proves the address is the rider's only while Auth email confirmations are on | Equina sends no invite email; never say "we will let you know" |
 | Account deletion scheduled | real only through the audited Edge Function with a 14-day grace period; `erase_account_data` removes every table holding rider data | Direct Data API insert/update is revoked; worker and audit schedule must be live |
 | Passport/lab uploaded | no file picker or signed upload | Disable mutation and label sample state |
 | Ralf Coach | server-side AI training assistant boundary; production provider not configured here | Keep `coachChat` off until provider, consent, timeout, and device QA pass |

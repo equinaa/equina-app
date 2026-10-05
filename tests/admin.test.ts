@@ -12,6 +12,7 @@ import {
 } from "../admin/src/lib/lessons";
 import {
   doorState,
+  emailConfirmation,
   inviteNoteLimit,
   inviteState,
   normalizeEmail,
@@ -210,6 +211,15 @@ assert.deepEqual(
   { openToEveryone: false, openBeyondInvites: true, label: "Open to invited riders and 25% of everyone else", detail: undefined }
 );
 assert.equal(doorState({ enabled: true, rollout_percent: 100 }).label, "Open to everyone");
+
+// With Auth confirming nobody's email, an invite to an address with no account
+// goes to whoever signs up with it first, and the page says so.
+assert.equal(emailConfirmation({ mailer_autoconfirm: true }), "off");
+assert.equal(emailConfirmation({ mailer_autoconfirm: false }), "on");
+assert.equal(emailConfirmation({}), "unknown");
+assert.equal(emailConfirmation(null), "unknown");
+assert.equal(emailConfirmation("mailer_autoconfirm"), "unknown");
+assert.equal(emailConfirmation({ mailer_autoconfirm: "false" }), "unknown", "Only a real boolean counts.");
 
 // Opening Equina is the launch: nothing changes without the ticked box.
 const door = (values: Record<string, string>) => readDoorForm((name) => values[name] ?? "");

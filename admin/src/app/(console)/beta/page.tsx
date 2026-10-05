@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { LocalTime } from "@/components/local-time";
-import { doorState, inviteState, type BetaInvite, type DoorFlag } from "@/lib/beta";
+import { doorState, emailConfirmation, inviteState, type BetaInvite, type DoorFlag, type EmailConfirmation } from "@/lib/beta";
+import { supabaseSettings } from "@/lib/env";
 import { requireStaff } from "@/lib/staff";
 import { DoorForm } from "./door-form";
 import { InviteActions } from "./invite-actions";
@@ -10,13 +11,26 @@ export const metadata: Metadata = { title: "Beta" };
 
 const count = (value: number, one: string, many: string) => `${value} ${value === 1 ? one : many}`;
 
+// Auth's public settings say whether it confirms emails, which decides what an
+// invite to an address with no account yet is worth.
+const readEmailConfirmation = async (): Promise<EmailConfirmation> => {
+  try {
+    const { url, key } = supabaseSettings();
+    const response = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key }, cache: "no-store" });
+    return response.ok ? emailConfirmation(await response.json()) : "unknown";
+  } catch {
+    return "unknown";
+  }
+};
+
 export default async function BetaPage() {
   const { supabase, role } = await requireStaff();
   const isAdmin = role === "admin";
 
-  const [{ data: flag }, listed] = await Promise.all([
+  const [{ data: flag }, listed, confirmation] = await Promise.all([
     supabase.from("app_feature_flags").select("enabled, rollout_percent").eq("key", "public_access").maybeSingle(),
-    isAdmin ? supabase.rpc("staff_list_beta_invites") : Promise.resolve({ data: null, error: null })
+    isAdmin ? supabase.rpc("staff_list_beta_invites") : Promise.resolve({ data: null, error: null }),
+    isAdmin ? readEmailConfirmation() : Promise.resolve<EmailConfirmation>("unknown")
   ]);
   const door = doorState(flag as DoorFlag);
   const invites = (listed.data ?? []) as BetaInvite[];
@@ -129,6 +143,19 @@ export default async function BetaPage() {
               They get in as soon as they sign up and confirm this email, or at once if they already have. Equina sends
               no email about it.
             </p>
+            {confirmation === "off" ? (
+              <p className="notice caution" role="note">
+                Email confirmations are off in Supabase Auth, so signing up does not prove an address is the rider’s:
+                whoever signs up first with an invited address gets in. Until they are on, invite only riders who already
+                have an account, who show as Signed up at once, and check that the sign-up date is theirs.
+              </p>
+            ) : null}
+            {confirmation === "unknown" ? (
+              <p className="notice" role="note">
+                Could not check whether Supabase Auth confirms emails. If it does not, invite only riders who already
+                have an account.
+              </p>
+            ) : null}
             <InviteForm />
           </section>
         </div>

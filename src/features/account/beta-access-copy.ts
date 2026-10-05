@@ -7,8 +7,8 @@ export const betaAccessCopy = {
   title: "Equina is invite-only for now.",
   body: (email: string) =>
     email
-      ? `Your account is saved. As soon as ${email} is invited, you can come straight in: there is nothing to set up again.`
-      : "Your account is saved. As soon as its email is invited, you can come straight in: there is nothing to set up again.",
+      ? `Your account is saved. As soon as ${email} is invited, you can come straight in.`
+      : "Your account is saved. As soon as its email is invited, you can come straight in.",
   checkAgain: "Check again",
   checking: "Checking...",
   stillWaiting: "Not yet: this email is not on the invite list.",

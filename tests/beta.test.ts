@@ -6,6 +6,7 @@ import {
   capabilityRefreshIntervalMs,
   effectiveCapabilities,
   emptyCapabilities,
+  loadsPlan,
   showsBetaDoor
 } from "../src/features/account/session-capabilities";
 import type { BackendCapabilities } from "../src/backend/contracts";
@@ -41,6 +42,14 @@ import type { BackendCapabilities } from "../src/backend/contracts";
   assert.equal(showsBetaDoor("recoverableError", outside), false);
   assert.equal(showsBetaDoor("demo", outside), false);
 
+  // The plan loads only inside. At the door my_plan() says no access and no
+  // Club; loading it there would leave that answer standing after the account
+  // is let in. Coming through the door turns loading on, which loads it again.
+  assert.equal(loadsPlan("connected", "authenticated", outside), false);
+  assert.equal(loadsPlan("connected", "authenticated", inside), true);
+  assert.equal(loadsPlan("connected", "onboarding", inside), false);
+  assert.equal(loadsPlan("demo", "demo", inside), false, "The demo never asks the server for a plan.");
+
   // Coming back to the app asks the server again, at most once a minute.
   assert.equal(capabilityRefreshIntervalMs, 60_000);
   assert.equal(capabilitiesStale(0, 1_000), false);
@@ -69,6 +78,7 @@ const revoked = "20000000-0000-4000-8000-000000000004";
 const shouting = "20000000-0000-4000-8000-000000000005";
 const tester = "20000000-0000-4000-8000-000000000006";
 const admin = "20000000-0000-4000-8000-000000000007";
+const moderator = "20000000-0000-4000-8000-000000000008";
 
 await db.exec(`
   insert into auth.users(id, email, email_confirmed_at, raw_user_meta_data) values
@@ -78,8 +88,9 @@ await db.exec(`
     ('${revoked}', 'revoked@example.com', now(), '{"display_name":"Revoked"}'),
     ('${shouting}', 'Shouting.Rider@Example.COM', now(), '{"display_name":"Shouting"}'),
     ('${tester}', 'tester@example.com', now(), '{"display_name":"Tester"}'),
-    ('${admin}', 'admin@example.com', now(), '{"display_name":"Admin"}');
-  insert into public.user_roles(user_id, role) values ('${admin}', 'admin');
+    ('${admin}', 'admin@example.com', now(), '{"display_name":"Admin"}'),
+    ('${moderator}', 'moderator@example.com', now(), '{"display_name":"Moderator"}');
+  insert into public.user_roles(user_id, role) values ('${admin}', 'admin'), ('${moderator}', 'moderator');
   insert into public.beta_invites(email, invited_by) values
     ('member@example.com', '${admin}'),
     ('unconfirmed@example.com', '${admin}'),
@@ -285,7 +296,7 @@ assert.equal(await rowCount("select count(*)::int as count from public.club_comm
 assert.equal(await rowCount("select count(*)::int as count from public.club_reactions"), 1);
 assert.ok(await rowCount("select count(*)::int as count from public.club_spaces") >= 5);
 assert.equal(await rowCount("select count(*)::int as count from public.club_memberships"), 2);
-assert.equal(await rowCount("select count(*)::int as count from public.profiles"), 7);
+assert.equal(await rowCount("select count(*)::int as count from public.profiles"), 8);
 assert.equal(await rowCount("select count(*)::int as count from storage.objects where bucket_id = 'avatars'"), 2);
 
 // --- The invite list is staff's alone ------------------------------------------------------
@@ -389,6 +400,35 @@ const closed = await db.query<{ enabled: boolean; rollout_percent: number }>(
   "select enabled, rollout_percent from public.app_feature_flags where key = 'public_access'"
 );
 assert.deepEqual(closed.rows[0], { enabled: false, rollout_percent: 0 });
+assert.equal(await access(tester), false);
+
+// A per-person override wins over the door, so giving or clearing one is an
+// admin power too. A moderator, second factor and all, lets nobody in.
+await asRider(moderator);
+await secondFactor("aal2");
+await assert.rejects(
+  db.query("select public.set_feature_flag_override($1, 'public_access', true)", [tester]),
+  refusedWith("42501"),
+  "A moderator cannot let an account through the door."
+);
+await assert.rejects(
+  db.query("select public.set_feature_flag_override($1, 'coach_chat', true)", [tester]),
+  refusedWith("42501"),
+  "Nor open one feature to an account outside the beta."
+);
+await assert.rejects(db.query("select public.clear_feature_flag_override($1, 'horse_management')", [tester]), refusedWith("42501"));
+await asAdmin("aal1");
+await assert.rejects(db.query("select public.set_feature_flag_override($1, 'public_access', true)", [tester]), refusedWith("42501"));
+await asAdmin("aal2");
+await db.query("select public.set_feature_flag_override($1, 'public_access', true, null, 'Let in by an admin')", [tester]);
+await secondFactor("");
+await db.exec("reset role;");
+assert.equal(await access(tester), true, "An admin can let one account in with an override.");
+assert.equal(await enabled("horse_management", tester), true, "The tester keeps the override from before the door.");
+await asAdmin("aal2");
+await db.query("select public.clear_feature_flag_override($1, 'public_access')", [tester]);
+await secondFactor("");
+await db.exec("reset role;");
 assert.equal(await access(tester), false);
 
 // --- Erasure ------------------------------------------------------------------------------

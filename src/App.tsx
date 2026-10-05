@@ -95,7 +95,7 @@ import { AuthVerificationScreen } from "./features/account/AuthVerificationScree
 import { BetaAccessScreen } from "./features/account/BetaAccessScreen";
 import { PasswordRecoveryScreen } from "./features/account/PasswordRecoveryScreen";
 import { SessionGateScreen } from "./features/account/SessionGateScreen";
-import { showsBetaDoor } from "./features/account/session-capabilities";
+import { loadsPlan, showsBetaDoor } from "./features/account/session-capabilities";
 import { socialAuthAvailability } from "./features/account/social-auth";
 import type { AccountMode, AccountRoute } from "./features/account/account-types";
 import { useAccount } from "./features/account/useAccount";
@@ -1023,7 +1023,7 @@ function EquinaApp() {
   // of the Club. Until plans are enforced it says everything is open.
   const planController = usePlan({
     backend: equinaSession.backend,
-    enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
+    enabled: loadsPlan(accountMode, equinaSession.phase, equinaSession.capabilities)
   });
   const plan = planController.plan;
   // Selling plans through RevenueCat. Nothing native runs, and the plan
@@ -1053,6 +1053,11 @@ function EquinaApp() {
   // still outside the beta was offered the plans when none could be sold, so
   // coming through the door is when it really arrives.
   const newAccountId = useRef<string | null>(null);
+  // A horse photo picked in onboarding by an account still outside the beta.
+  // Uploading is a beta feature, so it waits here and goes up as the account
+  // comes through the door, rather than failing behind it.
+  const heldHorsePhoto = useRef<{ userId: string; horseId: string; asset: OnboardingPhotoAsset } | null>(null);
+  const uploadHeldHorsePhoto = useRef<(horseId: string, asset: OnboardingPhotoAsset) => Promise<void>>(async () => {});
   const wasAtBetaDoor = useRef(false);
   const arrivingUserId = equinaSession.session?.user.id;
   const offerPlansTo = signUpPlanOffer.offerTo;
@@ -1063,6 +1068,9 @@ function EquinaApp() {
     }
     if (!wasAtBetaDoor.current) return;
     wasAtBetaDoor.current = false;
+    const held = heldHorsePhoto.current;
+    heldHorsePhoto.current = null;
+    if (held && held.userId === arrivingUserId) void uploadHeldHorsePhoto.current(held.horseId, held.asset);
     if (arrivingUserId && newAccountId.current === arrivingUserId) offerPlansTo(arrivingUserId);
   }, [arrivingUserId, betaDoor, offerPlansTo]);
   const club = useClub({
@@ -1852,6 +1860,24 @@ function EquinaApp() {
     });
   };
 
+  // A failure here must not undo a successful sign-up: the rider keeps the
+  // account and can add the photo again from the horse profile.
+  const uploadOnboardingHorsePhoto = async (horseId: string, asset: OnboardingPhotoAsset) => {
+    if (!equinaSession.backend) return;
+    try {
+      // Some pickers omit the size. The upload boundary compares the declared
+      // size against the bytes it receives, so measure rather than guess.
+      const byteSize = asset.byteSize > 0
+        ? asset.byteSize
+        : (await (await fetch(asset.uri)).blob()).size;
+      await equinaSession.backend.records.uploadHorsePhoto(horseId, { ...asset, byteSize });
+      await equinaSession.refreshAccount();
+    } catch {
+      refresh("Your horse was saved. The photo could not be uploaded — you can add it from the horse profile.");
+    }
+  };
+  uploadHeldHorsePhoto.current = uploadOnboardingHorsePhoto;
+
   const persistOnboarding = async () => {
     // Onboarding cannot advance without a name, so an empty one here means the
     // form was skipped. Saving a placeholder would put it on a real account.
@@ -1866,23 +1892,13 @@ function EquinaApp() {
     });
 
     // The horse has to exist before its photo can be uploaded, so this runs
-    // after onboarding rather than as part of it. A failure here must not undo
-    // a successful sign-up: the rider keeps the account and can add the photo
-    // again from the horse profile.
+    // after onboarding rather than as part of it. Outside the beta it waits
+    // for the door (heldHorsePhoto, above).
     const horseId = snapshot?.primaryHorse?.id;
     const asset = onboardingHorsePhotoAsset;
-    if (horseId && asset && equinaSession.backend) {
-      try {
-        // Some pickers omit the size. The upload boundary compares the declared
-        // size against the bytes it receives, so measure rather than guess.
-        const byteSize = asset.byteSize > 0
-          ? asset.byteSize
-          : (await (await fetch(asset.uri)).blob()).size;
-        await equinaSession.backend.records.uploadHorsePhoto(horseId, { ...asset, byteSize });
-        await equinaSession.refreshAccount();
-      } catch {
-        refresh("Your horse was saved. The photo could not be uploaded — you can add it from the horse profile.");
-      }
+    if (horseId && asset && snapshot) {
+      if (equinaSession.capabilities.appAccess) await uploadOnboardingHorsePhoto(horseId, asset);
+      else heldHorsePhoto.current = { userId: snapshot.userId, horseId, asset };
     }
 
     setOnboardingHorsePhotoAsset(null);

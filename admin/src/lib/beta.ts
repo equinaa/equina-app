@@ -57,6 +57,25 @@ export const inviteState = (row: Pick<BetaInvite, "revoked_at" | "has_account">)
   return { label: "Invited", tone: "warning" };
 };
 
+// --- Whether a sign-up proves the address -----------------------------------------
+
+// An invite counts for an account that confirmed the email. That proves the
+// address is the rider's only while Supabase Auth asks for the confirmation:
+// with it off (`mailer_autoconfirm` in Auth's public settings), Auth confirms
+// every address at sign-up and applies an email change at once, so an invite
+// to an address with no account yet lets in whoever signs up with it first.
+export type EmailConfirmation = "on" | "off" | "unknown";
+
+// GET /auth/v1/settings, as JSON.
+export const emailConfirmation = (settings: unknown): EmailConfirmation => {
+  const autoconfirm = typeof settings === "object" && settings !== null
+    ? (settings as { mailer_autoconfirm?: unknown }).mailer_autoconfirm
+    : undefined;
+  if (autoconfirm === true) return "off";
+  if (autoconfirm === false) return "on";
+  return "unknown";
+};
+
 // --- The door ----------------------------------------------------------------------
 
 // The public_access flag as the page reads it.

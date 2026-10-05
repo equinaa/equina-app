@@ -1,5 +1,6 @@
 import type { BackendCapabilities } from "../../backend/contracts";
 import { equinaFeatureFlags } from "../../config/feature-flags";
+import type { AccountMode } from "./account-types";
 import type { SessionPhase } from "./useEquinaSession";
 
 // What the app may do for the session it holds. Kept apart from the session
@@ -56,6 +57,18 @@ export const effectiveCapabilities = (server: BackendCapabilities): BackendCapab
  */
 export const showsBetaDoor = (phase: SessionPhase, capabilities: Pick<BackendCapabilities, "appAccess">) =>
   (phase === "onboarding" || phase === "authenticated") && !capabilities.appAccess;
+
+/**
+ * Whether to load the rider's plan from the server. Not at the door: outside
+ * the beta my_plan() answers with no access and no Club, and nothing would
+ * load it again once the account is let in. Coming through the door turns this
+ * on, which loads the plan the account now has.
+ */
+export const loadsPlan = (
+  mode: AccountMode,
+  phase: SessionPhase,
+  capabilities: Pick<BackendCapabilities, "appAccess">
+) => mode === "connected" && phase === "authenticated" && capabilities.appAccess;
 
 /** How often coming back to the app may ask the server again. */
 export const capabilityRefreshIntervalMs = 60 * 1000;

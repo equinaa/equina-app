@@ -51,16 +51,30 @@ the door is enforced where every flag already is, in `private.feature_enabled`
 (`202610060003_beta_access.sql`):
 
 1. A live per-person override wins, as before, in both directions. Testers let in by
-   overrides keep exactly what they have.
+   overrides keep every flag they have. Giving or clearing an override is now an admin
+   power with the second factor (`set_feature_flag_override`), like an invite: it lets an
+   account past the door for that feature.
 2. Otherwise an account without app access gets `false` for every key except
    `public_access` itself and `account_settings`.
 3. Otherwise the global row and its rollout bucket, as before.
 
 An account has app access (`private.has_app_access`) when an invite that was not revoked
-matches its email, case-insensitively, **and** the account has confirmed that email, so
-nobody gets in by signing up with someone else's invited address. Or when
-`public_access` is on for it: its global rollout at launch, or a per-person override
+matches its email, case-insensitively, **and** the account has confirmed that email. Or
+when `public_access` is on for it: its global rollout at launch, or a per-person override
 that lets one account in without an invite.
+
+The confirmation proves the address is the rider's only while Supabase Auth asks for it.
+Email confirmations are off for the TestFlight cohort (`supabase/config.toml`): Auth then
+confirms every address at sign-up and applies an email change at once, so whoever signs
+up first with an invited address that has no account yet gets in, and the real rider can
+no longer sign up with it. An address that already has an account is safe, because Auth
+lets nobody else sign up with it or move to it. So:
+
+- Until confirmations are back on, invite only riders whose account already exists. Admin
+  → Beta shows them as Signed up at once, with the sign-up date; check that the date is
+  theirs. The page warns while Auth's settings say confirmations are off.
+- Turn email confirmations back on (the 6-digit code, with secure email change) before
+  inviting anyone who has not signed up yet.
 
 `account_settings` is exempt so every account holder can export and delete their own data
 while waiting outside. Content that was never behind a flag is closed separately: the
@@ -76,14 +90,34 @@ returns to the foreground, at most once a minute.
 
 **Inviting someone.** Admin → Beta → Invite a rider: the email they sign up with and an
 optional staff note. They are inside as soon as their account exists with that email
-confirmed. Tell them yourself. Revoke puts them back outside (the account stays); Invite
+confirmed (read the paragraph above while confirmations are off). Tell them yourself. Revoke puts them back outside (the account stays); Invite
 again clears the revoke. Sign in with Apple can hide the address behind a relay, which then
 needs its own invite.
 
-Testers let in by overrides before the door need an invite too: their overrides still work
-on the server, but the app shows the door to any account without app access. Invite them
-before the new app and Edge Functions go live. `scripts/grant-tester.sh` still grants its
-five overrides by hand, and now invites the account's email as well.
+**Moving the testers in.** Testers let in by overrides before the door need an invite too.
+Their overrides keep every flag they have, but what was never behind a flag follows the
+door alone: from the moment the migration lands, an override-only tester gets 403
+`beta_only` from Academy playback and picks, an empty Club, and no other rider's profile
+or avatar, and the new app shows them the door. The invite list only exists once the
+migration has run, so invite them right after it, in the same session, before anything
+else. Every one of them already has an account, so this is safe with confirmations off.
+The emails come from the data, never from the repository:
+
+```sql
+insert into public.beta_invites (email, note)
+select distinct lower(trim(u.email)), 'Tester before the beta door'
+from auth.users u
+join public.feature_flag_overrides o on o.user_id = u.id
+where o.enabled
+  and (o.expires_at is null or o.expires_at > now())
+  and u.email is not null
+  and u.deleted_at is null
+on conflict (email) do nothing;
+```
+
+Then read the list in Admin → Beta and revoke anyone who should not be in the beta.
+`scripts/grant-tester.sh` still grants its five overrides by hand, and now invites the
+account's email as well.
 
 **Opening at launch.** Admin → Beta → Open at launch, after ticking "I understand everyone
 who signs up gets in". This sets `public_access` on at 100%. Closing it again is the same

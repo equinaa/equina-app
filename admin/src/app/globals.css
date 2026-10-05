@@ -679,6 +679,12 @@ a {
   accent-color: var(--accent);
 }
 
+/* What staff must know before acting, rather than an error. */
+.notice.caution {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 .row-actions {
   display: grid;
   gap: 6px;

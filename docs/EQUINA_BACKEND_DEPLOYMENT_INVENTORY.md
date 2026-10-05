@@ -21,7 +21,7 @@ only hosted environment and must not be treated as both staging and production.
 | Item | Remote version | State | Rollout | Rollback |
 | --- | --- | --- | --- | --- |
 | Additive migrations | `202607210001` through `202607290005` | 34/34 synchronized | Global database flags default off | Disable the affected flag; ship a forward migration |
-| Named-user overrides | `202607290002` | Deployed | One internal user: Horse and Records only, 30-day expiry | `clear_feature_flag_override` from an authorized staff session |
+| Named-user overrides | `202607290002` | Deployed | One internal user: Horse and Records only, 30-day expiry | `clear_feature_flag_override` from an admin session with a second factor (since `202610060003`) |
 | Worker leases | `202607290003` and `202607290005` | Deployed | Storage active; other workers disabled | Stop scheduler, preserve jobs, ship a forward migration |
 | Scheduler extensions | `202607290004` | Deployed | `pg_cron` and `pg_net` available | Unschedule the named job |
 
