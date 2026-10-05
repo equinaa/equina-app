@@ -28,7 +28,8 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-web-browser",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "./plugins/with-storekit-configuration.cjs"
     ],
     "ios": {
       "supportsTablet": false,

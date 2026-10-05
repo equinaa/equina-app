@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ClubAccess, PlanKey, PlanState, PlanTier } from "./contracts";
+import type { EdgeClient } from "./edge-client";
 import { backendError, EquinaBackendError } from "./errors";
 
 const planKeys: PlanKey[] = ["free", "mid", "premium"];
@@ -47,7 +48,13 @@ export const mapPlanState = (raw: unknown): PlanState => {
 export const noPicksLeft = "no_picks_left";
 
 export class PlanRepository {
-  constructor(private readonly client: SupabaseClient) {}
+  // The edge client arrives as a type only: importing it here would pull
+  // expo-crypto, and React Native with it, into the Node tests that read
+  // mapPlanState.
+  constructor(
+    private readonly client: SupabaseClient,
+    private readonly edge: Pick<EdgeClient, "invoke">
+  ) {}
 
   /** The rider's plan, picks and every plan's contents, in one call. */
   async mine(): Promise<PlanState> {
@@ -68,5 +75,14 @@ export class PlanRepository {
       throw backendError(error, "This lesson could not be added to your picks.");
     }
     return mapPlanState(data);
+  }
+
+  /**
+   * Asks the server to read the rider's subscriptions from RevenueCat and
+   * write their plan. The RevenueCat webhook writes the same rows, so this
+   * only makes a purchase show at once rather than when the webhook lands.
+   */
+  async syncPurchases(): Promise<void> {
+    await this.edge.invoke<{ synced: boolean }>("sync-purchases");
   }
 }

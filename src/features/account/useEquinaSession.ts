@@ -46,7 +46,8 @@ const emptyCapabilities: BackendCapabilities = {
   clubInteractions: false,
   listingCreation: false,
   messaging: false,
-  checkout: false
+  checkout: false,
+  purchases: false
 };
 
 const effectiveCapabilities = (server: BackendCapabilities): BackendCapabilities => ({
@@ -60,7 +61,9 @@ const effectiveCapabilities = (server: BackendCapabilities): BackendCapabilities
   clubPublishing: server.clubPublishing && equinaFeatureFlags.clubPublishing,
   clubInteractions: server.clubInteractions && equinaFeatureFlags.clubInteractions,
   listingCreation: server.listingCreation && equinaFeatureFlags.shopListingCreation,
-  messaging: server.messaging && equinaFeatureFlags.shopMessaging
+  messaging: server.messaging && equinaFeatureFlags.shopMessaging,
+  // A server from before purchases existed sends no such field: off.
+  purchases: server.purchases === true
 });
 
 // The URL the app was opened with, if any. On the web that is the page itself.

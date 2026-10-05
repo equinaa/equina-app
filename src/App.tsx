@@ -129,6 +129,9 @@ import {
 import { useAcademy } from "./features/academy/useAcademy";
 import { lessonOpen, picksLeft, planFor } from "./features/plans/plan-rules";
 import { usePlan } from "./features/plans/usePlan";
+import { PlanOfferScreen } from "./features/plans/PlanOfferScreen";
+import { usePurchases } from "./features/plans/usePurchases";
+import { useSignUpPlanOffer } from "./features/plans/useSignUpPlanOffer";
 import { useLessonVideo } from "./features/academy/useLessonVideo";
 import type { AcademyPlaybackLink } from "./backend/contracts";
 import { ClubScreen, type ClubRideShare } from "./features/club/ClubScreen";
@@ -1021,6 +1024,27 @@ function EquinaApp() {
     enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
   });
   const plan = planController.plan;
+  // Selling plans through RevenueCat. Nothing native runs, and the plan
+  // screen sells nothing, until every condition in purchasesAvailable holds.
+  const purchases = usePurchases({
+    backend: equinaSession.backend,
+    connected: accountMode === "connected" && equinaSession.phase === "authenticated",
+    userId: equinaSession.session?.user.id ?? null,
+    capability: equinaSession.capabilities.purchases,
+    plan,
+    onPlanChanged: planController.refresh
+  });
+  // A new account sees the plans once, after onboarding, and only while they
+  // are on sale with prices loaded.
+  const signUpPlanOffer = useSignUpPlanOffer({
+    userId: equinaSession.session?.user.id ?? null,
+    ready:
+      purchases.available &&
+      purchases.status === "ready" &&
+      purchases.offers.length > 0 &&
+      accountCreated &&
+      !onboardingTransitioning
+  });
   const club = useClub({
     backend: equinaSession.backend,
     enabled:
@@ -1453,6 +1477,7 @@ function EquinaApp() {
   // and back returns the rider to where they were.
   const openPlans = () => {
     void planController.refresh();
+    if (purchases.status === "failed") purchases.reload();
     openAccountAt("plan");
   };
 
@@ -1842,6 +1867,9 @@ function EquinaApp() {
 
     setOnboardingHorsePhotoAsset(null);
     await clearOnboardingDraft();
+    // Only here does an account finish onboarding for the first time, which
+    // is what makes it new enough for the plan offer.
+    if (snapshot) signUpPlanOffer.offerTo(snapshot.userId);
   };
 
   const completeOnboarding = async () => {
@@ -2509,6 +2537,7 @@ function EquinaApp() {
                 mode={accountMode}
                 marketplaceOpen={marketplaceOpen}
                 plan={plan}
+                purchases={purchases}
                 initialRoute={accountInitialRoute}
                 snapshot={accountController.snapshot}
                 horseName={(accountController.snapshot.primaryHorse?.name ?? primaryHorseName) || "No horse yet"}
@@ -2543,6 +2572,10 @@ function EquinaApp() {
             )}
           </Animated.View>
         )}
+
+        {signUpPlanOffer.visible && purchases.available ? (
+          <PlanOfferScreen plan={plan} purchases={purchases} onClose={signUpPlanOffer.dismiss} />
+        ) : null}
 
         {(!accountCreated || onboardingTransitioning) && (
           <Animated.View

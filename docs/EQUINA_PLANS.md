@@ -70,16 +70,66 @@ Admin → Plans → Give a plan: the rider's email, Plus or Premium, an optional
 It applies at once. Choosing Free takes back the plan staff gave; a plan bought in the store is the
 store's to end. Testers, coaches and Ilinca's own account are given plans this way.
 
+## Selling, through RevenueCat
+
+RevenueCat project **Equina** holds the catalogue:
+
+| | Identifier |
+| --- | --- |
+| Entitlements | `plus` (tier `mid`), `premium` (tier `premium`) |
+| Products | `equina.plus.monthly`, `equina.plus.annual`, `equina.premium.monthly`, `equina.premium.annual`, each with a 7-day free trial |
+| Offering | `default` (current): packages `plus_monthly`, `plus_annual`, `premium_monthly`, `premium_annual` |
+
+Today the products exist only in RevenueCat's **Test Store**, with placeholder prices (USD 4.99 /
+49.99 / 9.99 / 99.99). The App Store products must use the same identifiers.
+
+How a purchase reaches the plan:
+
+1. The app configures RevenueCat with the rider's Supabase id, sells from the `default` offering
+   and, after a purchase or restore, calls `sync-purchases`.
+2. `sync-purchases` and `revenuecat-webhook` both read the rider's whole customer from RevenueCat
+   (`GET /v1/subscribers/{id}`) and rewrite their store rows in `plan_subscriptions`. A repeated,
+   late or out-of-order event therefore changes nothing. Rows from `staff` are never touched.
+3. `my_plan()` then reports the plan, and the limits follow.
+
+The paywall shows only when **all** of these hold: a signed-in rider on iOS or Android (never web
+or the demo), the platform's RevenueCat key, a privacy policy URL, `capabilities.purchases`
+(both server secrets set and `plans` on for that rider) and `my_plan().enforced`.
+
+### Configuration
+
+| Where | Name | Value |
+| --- | --- | --- |
+| App env (EAS / `.env.local`) | `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` | `appl_...` for real builds; the Test Store `test_...` key **only** in development builds (it crashes release and TestFlight builds on purpose) |
+| App env | `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY` | `goog_...`, once Android is set up |
+| App env | `EXPO_PUBLIC_PRIVACY_POLICY_URL` | the public privacy policy page; required to sell |
+| App env | `EXPO_PUBLIC_TERMS_URL` | optional; empty uses Apple's standard EULA |
+| Supabase secrets | `REVENUECAT_SECRET_API_KEY` | a **v1** secret key from RevenueCat → API keys |
+| Supabase secrets | `REVENUECAT_WEBHOOK_AUTHORIZATION` | e.g. `Bearer <long random string>`, typed identically on the webhook |
+| Supabase secrets | `REVENUECAT_ACCEPT_TEST_STORE` | `true` only while testing with the Test Store; **false at launch** |
+| RevenueCat → Integrations → Webhooks | URL | `https://mvdxohyayriywbcknulg.supabase.co/functions/v1/revenuecat-webhook`, environment **both** (App Review buys in the sandbox) |
+
+### Testing
+
+- **Test Store (now):** a development build with the `test_` key. Buying shows RevenueCat's own
+  sheet with success, failure and cancel. A test month renews every 5 minutes and ends after 25; a
+  test year renews hourly. Needs `REVENUECAT_ACCEPT_TEST_STORE=true` on the server.
+- **StoreKit file (optional, needs the `appl_` key):** `npx expo prebuild` writes an
+  "Equina StoreKit" scheme; open `ios/Equina.xcworkspace`, choose it and press Run with Metro
+  running. Upload Xcode's StoreKit certificate (Editor → Save Public Certificate) to RevenueCat
+  first.
+- **Sandbox / TestFlight:** needs App Store Connect.
+
 ## Not built yet
 
-1. **Selling.** Needs the Apple Developer account (as an organization), the Paid Apps agreement
-   and the Small Business Program (15% instead of 30%). Then: Plus and Premium products, monthly
-   and annual, each with the 7-day introductory offer, in App Store Connect; the purchase in the
-   app (StoreKit, through RevenueCat or `expo-iap`); and App Store Server Notifications v2 to an
-   edge function that writes `plan_subscriptions` (`source = 'app_store'`, the original
-   transaction id, status, trial end, `ends_at` = period end plus grace).
-2. **Buttons on the plan screen.** It shows the plans; subscribing arrives with item 1.
-3. **Booking coach sessions** and claiming the event ticket.
+1. **App Store Connect.** The Apple Developer account (as an organization), the Paid Apps
+   agreement, the Small Business Program (15% instead of 30%), the four products with the same
+   identifiers and the 7-day introductory offer, and in RevenueCat the App Store app with the
+   In-App Purchase key (P8) and the app-specific shared secret (iOS 15 still uses StoreKit 1).
+2. **Erasing the RevenueCat customer** when an account is erased (`DELETE /v1/subscribers/{id}`).
+   The app already warns, before deletion, that store billing continues.
+3. **A per-rider limit on `sync-purchases`**, which calls RevenueCat once per request.
+4. **Booking coach sessions** and claiming the event ticket.
 
 ## Open questions for Ilinca
 

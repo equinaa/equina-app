@@ -41,6 +41,14 @@ Deno.serve(async (request) => {
     );
     const accountOperationsConfigured = Boolean(Deno.env.get("ACCOUNT_AUTOMATION_SECRET"));
     const pushConfigured = Boolean(Deno.env.get("NOTIFICATION_AUTOMATION_SECRET"));
+    // Selling a plan needs RevenueCat's secret key, to read what a rider
+    // bought, and the webhook's Authorization value, so renewals, lapses and
+    // refunds arrive afterwards. sync-purchases and revenuecat-webhook refuse
+    // without the same two.
+    const purchasesConfigured = Boolean(
+      Deno.env.get("REVENUECAT_SECRET_API_KEY")?.trim() &&
+      Deno.env.get("REVENUECAT_WEBHOOK_AUTHORIZATION")?.trim(),
+    );
 
     return json({
       version: "2026-09-09",
@@ -61,6 +69,9 @@ Deno.serve(async (request) => {
         listingCreation: Boolean(flags.shop_listing_creation && moderationConfigured),
         messaging: Boolean(flags.shop_messaging),
         checkout: Boolean(flags.shop_transactions && paymentsConfigured),
+        // Plans are sold only once they are enforced: while `plans` is off,
+        // every rider already has everything, and nobody should pay for it.
+        purchases: Boolean(flags.plans && purchasesConfigured),
       },
     }, 200, { "x-request-id": requestId });
   } catch (error) {

@@ -13,6 +13,12 @@ export type BackendCapabilities = {
   listingCreation: boolean;
   messaging: boolean;
   checkout: boolean;
+  /**
+   * Plans can be bought: plans are on and RevenueCat is configured on the
+   * server, so a purchase reaches the database. The app adds its own
+   * conditions (a phone, its RevenueCat key, a privacy policy).
+   */
+  purchases: boolean;
 };
 
 export type BackendStatus = "unconfigured" | "connecting" | "ready" | "error";

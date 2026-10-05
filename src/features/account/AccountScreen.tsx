@@ -49,7 +49,10 @@ import { SettingsRow } from "../../ui/settings/SettingsRow";
 import { equinaTheme } from "../../ui/theme/theme";
 import { trainingFocusByDiscipline } from "../coach/coach-types";
 import { PlanScreen } from "../plans/PlanScreen";
+import { deletionBillingNote, legalLinks } from "../plans/paywall-copy";
 import { planRowValue } from "../plans/plan-rules";
+import { renewingStoreOf } from "../plans/purchase-catalog";
+import type { PurchasesController } from "../plans/usePurchases";
 import type { AccountMode, AccountRoute } from "./account-types";
 
 const disciplines: Array<{ value: Discipline; label: string }> = [
@@ -83,6 +86,7 @@ export function AccountScreen({
   mode,
   marketplaceOpen,
   plan,
+  purchases,
   initialRoute = "root",
   snapshot,
   horseName,
@@ -108,6 +112,8 @@ export function AccountScreen({
   /** Buying, selling or messaging is on, so its settings mean something. */
   marketplaceOpen: boolean;
   plan: PlanState;
+  /** Selling plans; the plan screen sells nothing while it is unavailable. */
+  purchases?: PurchasesController;
   /**
    * Where Account opens. A screen elsewhere that sends a rider to their plan
    * opens it here, and back returns them to that screen.
@@ -160,6 +166,11 @@ export function AccountScreen({
     setRoute(next);
     setExportReady("");
   };
+
+  // Deleting the account cancels nothing in the App Store or Google Play, so
+  // a rider whose plan still renews there is told before they delete.
+  const deletionNote = deletionBillingNote(renewingStoreOf(purchases?.subscription ?? null, plan));
+  const canManageSubscription = Boolean(purchases?.storeReady && purchases.subscription);
 
   const executeConfirmation = async () => {
     const action = confirmAction;
@@ -266,9 +277,11 @@ export function AccountScreen({
           onBlocked={() => navigate("blocked")}
           onDelete={() => setConfirmAction("delete-account")}
           onCancelDeletion={onCancelDeletion}
+          deletionNote={deletionNote}
+          onManageSubscription={canManageSubscription && purchases ? () => void purchases.manage() : undefined}
         />
       ) : route === "plan" ? (
-        <PlanScreen plan={plan} />
+        <PlanScreen plan={plan} purchases={purchases} />
       ) : route === "blocked" ? (
         <BlockedAccounts
           mode={mode}
@@ -282,6 +295,7 @@ export function AccountScreen({
 
       <ConfirmationSheet
         action={confirmAction}
+        deletionNote={deletionNote}
         onCancel={() => setConfirmAction(null)}
         onConfirm={() => void executeConfirmation()}
       />
@@ -759,7 +773,9 @@ function SecuritySettings({
   disabled,
   onBlocked,
   onDelete,
-  onCancelDeletion
+  onCancelDeletion,
+  deletionNote,
+  onManageSubscription
 }: {
   mode: AccountMode;
   deletion?: AccountDeletionRequestRecord;
@@ -767,6 +783,10 @@ function SecuritySettings({
   onBlocked: () => void;
   onDelete: () => void;
   onCancelDeletion: () => Promise<void>;
+  /** A store still renews the rider's plan; deletion does not stop it. */
+  deletionNote: string | null;
+  /** Opens the store's subscription settings, when the app can. */
+  onManageSubscription?: () => void;
 }) {
   return (
     <View style={styles.routeBody}>
@@ -800,6 +820,15 @@ function SecuritySettings({
         </View>
       ) : (
         <SettingsGroup title="Account removal">
+          {deletionNote && onManageSubscription ? (
+            <SettingsRow
+              Icon={Gem}
+              title="Cancel subscription"
+              detail="Before deleting your account"
+              disabled={disabled}
+              onPress={onManageSubscription}
+            />
+          ) : null}
           <SettingsRow
             Icon={Trash2}
             title="Delete account"
@@ -810,6 +839,7 @@ function SecuritySettings({
           />
         </SettingsGroup>
       )}
+      {deletionNote && !deletion ? <Text style={styles.footnote}>{deletionNote}</Text> : null}
       <Text style={styles.footnote}>Deletion removes your profile, your horses and their records, your ride journal, Academy progress, Ralf history, and push devices. Payment, fraud, and dispute records follow their legal retention period.</Text>
     </View>
   );
@@ -851,6 +881,7 @@ function BlockedAccounts({
 }
 
 function HelpAndLegal({ marketplaceOpen }: { marketplaceOpen: boolean }) {
+  const { privacyPolicyUrl } = legalLinks();
   return (
     <View style={styles.routeBody}>
       <Text style={styles.routeLead}>
@@ -872,6 +903,14 @@ function HelpAndLegal({ marketplaceOpen }: { marketplaceOpen: boolean }) {
           title="Privacy summary"
           detail="Private horse data uses account-scoped server authorization"
         />
+        {privacyPolicyUrl ? (
+          <SettingsRow
+            Icon={Shield}
+            title="Privacy policy"
+            value="Website"
+            onPress={() => void Linking.openURL(privacyPolicyUrl).catch(() => undefined)}
+          />
+        ) : null}
         <SettingsRow
           Icon={GraduationCap}
           title="Ralf safety"
@@ -902,10 +941,13 @@ function AccountRouteHeader({ title, onBack }: { title: string; onBack: () => vo
 
 function ConfirmationSheet({
   action,
+  deletionNote,
   onCancel,
   onConfirm
 }: {
   action: ConfirmAction;
+  /** Added to the deletion warning while a store still renews the plan. */
+  deletionNote: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -914,14 +956,16 @@ function ConfirmationSheet({
   // flashed "Schedule account deletion?" every time someone signed out.
   const [shownAction, setShownAction] = useState<NonNullable<ConfirmAction>>(action ?? "signout");
   if (action && action !== shownAction) setShownAction(action);
-  const copy = confirmationCopy[action ?? shownAction];
+  const shown = action ?? shownAction;
+  const copy = confirmationCopy[shown];
+  const body = shown === "delete-account" && deletionNote ? `${copy.body} ${deletionNote}` : copy.body;
   return (
     <Modal visible={Boolean(action)} transparent animationType="fade" onRequestClose={onCancel}>
       <View style={styles.modalRoot}>
         <Pressable accessibilityRole="button" accessibilityLabel="Close confirmation" style={StyleSheet.absoluteFill} onPress={onCancel} />
         <View accessibilityViewIsModal style={styles.sheet}>
           <Text style={styles.sheetTitle}>{copy.title}</Text>
-          <Text style={styles.sheetBody}>{copy.body}</Text>
+          <Text style={styles.sheetBody}>{body}</Text>
           <View style={styles.sheetActions}>
             <Pressable accessibilityRole="button" accessibilityLabel="Cancel" style={styles.sheetCancel} onPress={onCancel}>
               <Text style={styles.sheetCancelText}>Cancel</Text>
