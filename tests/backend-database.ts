@@ -23,6 +23,8 @@ export const openBackendDatabase = async () => {
     create table auth.users (
       id uuid primary key default gen_random_uuid(),
       email text,
+      -- Null until the person confirms the address; the beta door reads it.
+      email_confirmed_at timestamptz,
       raw_user_meta_data jsonb not null default '{}'::jsonb,
       created_at timestamptz not null default now()
     );

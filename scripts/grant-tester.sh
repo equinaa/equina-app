@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Grant an existing Equina account the core rider features.
+# Grant an existing Equina account the core rider features, by hand.
+#
+# The normal way into the beta is Admin -> Beta: invite the email, and once
+# the account exists with that email confirmed it gets every feature that is
+# on globally (docs/EQUINA_FEATURE_FLAG_POLICY.md, "The Beta Door"). Use this
+# script only for what an invite cannot do, such as giving one account these
+# features while they are still off for everyone.
 #
 # The wedge is four capabilities: a horse, its records, the ride journal and
 # Ralf. Account settings comes along because a tester needs to be able to
 # export or delete their own data.
 #
 # The account must already exist -- the person signs up in the app first.
-# Every global flag is off at 0% rollout, so access is per person, on purpose.
+# The five features are per-person overrides, which win over the global flags.
+# The script also invites the account's email, as Admin -> Beta would, or the
+# app would keep it at the beta door.
 #
 #   ./scripts/grant-tester.sh someone@example.com [days]
 #
@@ -25,6 +33,10 @@ begin
   if target is null then
     raise exception 'No account for %. Ask them to sign up first.', '${EMAIL}';
   end if;
+
+  insert into public.beta_invites (email, note)
+  select lower(trim(email)), 'tester access' from auth.users where id = target
+  on conflict (email) do update set revoked_at = null;
 
   foreach flag in array array['horse_management','record_mutations','ride_logging','coach_chat','account_settings']
   loop

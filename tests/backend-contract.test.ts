@@ -303,7 +303,15 @@ assert.match(capabilitiesSource, /clubPublishing: Boolean\(flags\.club_publishin
 assert.match(capabilitiesSource, /listingCreation: Boolean\(flags\.shop_listing_creation && moderationConfigured\)/);
 // Plans go on sale only while they are enforced and RevenueCat can be read
 // and heard from; the app hides the paywall otherwise.
-assert.match(capabilitiesSource, /purchases: Boolean\(flags\.plans && purchasesConfigured\)/);
+assert.match(capabilitiesSource, /purchases: Boolean\(appAccess && flags\.plans && purchasesConfigured\)/);
+// The beta door (202610060003): asked with the rider's session, open with none.
+assert.match(capabilitiesSource, /let appAccess = true;/);
+assert.match(capabilitiesSource, /appAccessForSession\(token\)/);
+assert.match(capabilitiesSource, /^\s+appAccess,$/m);
+const sharedSupabaseSource = readFileSync(join(root, "supabase", "functions", "_shared", "supabase.ts"), "utf8");
+assert.match(sharedSupabaseSource, /createUserClient\(token\);\s+const \{ data, error \} = await client\.rpc\("my_access"\)/);
+const playbackSource = readFileSync(join(root, "supabase", "functions", "academy-playback", "index.ts"), "utf8");
+assert.match(playbackSource, /error\.code === "PT403"\) throw new HttpError\(403, [^)]*"beta_only"\)/);
 assert.match(capabilitiesSource, /purchasesConfigured = Boolean\([\s\S]{0,80}REVENUECAT_SECRET_API_KEY[\s\S]{0,80}REVENUECAT_WEBHOOK_AUTHORIZATION/);
 assert.equal(equinaFeatureFlags.shopTransactions, false);
 assert.equal(equinaFeatureFlags.recordMutations, false);

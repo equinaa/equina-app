@@ -92,8 +92,10 @@ import {
 } from "./features/onboarding/onboarding-draft";
 import { AccountScreen } from "./features/account/AccountScreen";
 import { AuthVerificationScreen } from "./features/account/AuthVerificationScreen";
+import { BetaAccessScreen } from "./features/account/BetaAccessScreen";
 import { PasswordRecoveryScreen } from "./features/account/PasswordRecoveryScreen";
 import { SessionGateScreen } from "./features/account/SessionGateScreen";
+import { showsBetaDoor } from "./features/account/session-capabilities";
 import { socialAuthAvailability } from "./features/account/social-auth";
 import type { AccountMode, AccountRoute } from "./features/account/account-types";
 import { useAccount } from "./features/account/useAccount";
@@ -1045,6 +1047,24 @@ function EquinaApp() {
       accountCreated &&
       !onboardingTransitioning
   });
+  // A signed-in account outside the beta waits at the door (202610060003).
+  const betaDoor = showsBetaDoor(equinaSession.phase, equinaSession.capabilities);
+  // The account that finished onboarding in this run. One that did so while
+  // still outside the beta was offered the plans when none could be sold, so
+  // coming through the door is when it really arrives.
+  const newAccountId = useRef<string | null>(null);
+  const wasAtBetaDoor = useRef(false);
+  const arrivingUserId = equinaSession.session?.user.id;
+  const offerPlansTo = signUpPlanOffer.offerTo;
+  useEffect(() => {
+    if (betaDoor) {
+      wasAtBetaDoor.current = true;
+      return;
+    }
+    if (!wasAtBetaDoor.current) return;
+    wasAtBetaDoor.current = false;
+    if (arrivingUserId && newAccountId.current === arrivingUserId) offerPlansTo(arrivingUserId);
+  }, [arrivingUserId, betaDoor, offerPlansTo]);
   const club = useClub({
     backend: equinaSession.backend,
     enabled:
@@ -1869,7 +1889,10 @@ function EquinaApp() {
     await clearOnboardingDraft();
     // Only here does an account finish onboarding for the first time, which
     // is what makes it new enough for the plan offer.
-    if (snapshot) signUpPlanOffer.offerTo(snapshot.userId);
+    if (snapshot) {
+      newAccountId.current = snapshot.userId;
+      signUpPlanOffer.offerTo(snapshot.userId);
+    }
   };
 
   const completeOnboarding = async () => {
@@ -2266,6 +2289,24 @@ function EquinaApp() {
             }
           }}
           onCancel={() => accountController.signOut()}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (betaDoor) {
+    return (
+      <SafeAreaView style={styles.shell}>
+        <StatusBar barStyle="light-content" />
+        <BetaAccessScreen
+          email={equinaSession.account?.email ?? equinaSession.session?.user.email ?? ""}
+          deletion={equinaSession.account?.deletionRequest}
+          busy={accountController.busy}
+          error={accountController.error}
+          onCheckAgain={equinaSession.refreshCapabilities}
+          onSignOut={() => void accountController.signOut()}
+          onScheduleDeletion={() => accountController.scheduleDeletion()}
+          onCancelDeletion={accountController.cancelDeletion}
         />
       </SafeAreaView>
     );

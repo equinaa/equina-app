@@ -44,6 +44,8 @@ accurate.
 | Admin | Lessons | Create, edit, chapter, upload the video, publish and unpublish Academy lessons | built in `admin/`; needs a staff account with a second factor and the Mux secrets |
 | Admin | Moderation | Restore or remove Club posts and comments that riders reported or the filter hid | built in `admin/`; needs a staff account with a second factor |
 | Admin | Plans | Change what each plan holds, give or take back a plan by email, list who holds one | built in `admin/`; admin role with a second factor |
+| Admin | Beta | Invite riders by email, revoke or invite again, list invites and who signed up; open Equina to everyone at launch, or close it again | built in `admin/`; admin role with a second factor |
+| Account | Beta door | Shown instead of onboarding and the app to a signed-in account outside the beta: check again, sign out, schedule or cancel deletion | real; `capabilities.appAccess` from `my_access()` |
 | Club | Feed | Inspect seeded social content | read-only |
 | Shop buyer | Browse | Search, filter, save, and inspect seeded listings | local prototype/read-only |
 | Shop buyer | Product | Inspect photos, metadata, and preliminary fit inputs | read-only |
@@ -104,6 +106,11 @@ accurate.
 | Export account data | recent authenticated session | `request-data-export` + private Storage | retry; signed link expires | implemented / rollout gated |
 | Clear Ralf history | confirmation | server delete RPC | error preserves history | implemented / rollout gated |
 | Schedule/cancel deletion | connected account; explicit confirmation | deletion Edge Functions + audit | 14-day grace period; cancel before effective date | implemented / worker deployment gated |
+| Check beta access again | signed-in account at the beta door | `backend-capabilities` (`my_access()`) | still outside: says so; unreachable: connection error; let in: onboarding or the app | implemented |
+| Invite a rider to the beta | admin with a second factor | `staff_invite_beta` | email normalized as matched; re-invite clears a revoke; nobody is emailed | implemented / PGlite tests |
+| Revoke a beta invite | admin with a second factor | `staff_revoke_beta` | the account stays and waits at the door; Invite again restores it | implemented / PGlite tests |
+| List beta invites | admin with a second factor | `staff_list_beta_invites` | status Invited, Signed up (confirmed account) or Revoked | implemented / PGlite tests |
+| Open or close Equina to everyone | admin with a second factor; ticked confirmation | `staff_set_public_access` (`public_access` at 100% or 0%) | the launch decision; closing again puts uninvited accounts back at the door | implemented / PGlite tests |
 | Sign out | active session or dev demo | revoke push, global sign-out, clear drafts/cache/channels | returns to onboarding/sign-in | implemented |
 | Send Ralf message | connected coach capability or explicit dev demo | `coach-chat` Edge Function | stable nonce, pending, failed retry, provider typed errors | implemented / provider and rollout gated |
 | Adjust Ralf context | conversation open | `update_coach_conversation` | one save; profile level/discipline remain Account-owned | implemented |
@@ -166,6 +173,7 @@ accurate.
 | Claim | Current truth | Rule |
 | --- | --- | --- |
 | Account created | real only after email OTP and idempotent server handoff | Dev demo remains explicitly labelled and is never a production account |
+| Invited to the beta | real when an un-revoked invite matches the account's confirmed email | Equina sends no invite email; never say "we will let you know" |
 | Account deletion scheduled | real only through the audited Edge Function with a 14-day grace period; `erase_account_data` removes every table holding rider data | Direct Data API insert/update is revoked; worker and audit schedule must be live |
 | Passport/lab uploaded | no file picker or signed upload | Disable mutation and label sample state |
 | Ralf Coach | server-side AI training assistant boundary; production provider not configured here | Keep `coachChat` off until provider, consent, timeout, and device QA pass |

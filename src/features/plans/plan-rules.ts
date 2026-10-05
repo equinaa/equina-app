@@ -17,6 +17,7 @@ export const draftPlanTiers: PlanTier[] = [
  * every limit anyway, so a rider is never locked out by a slow answer.
  */
 export const foundingPlan: PlanState = {
+  access: true,
   enforced: false,
   tier: "free",
   clubAccess: "post",

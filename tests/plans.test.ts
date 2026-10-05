@@ -106,6 +106,12 @@ assert.equal(tierFeatures(draftPlanTiers[1]!)[4]?.text, "One 1-on-1 session with
     { enforced: odd.enforced, tier: odd.tier, clubAccess: odd.clubAccess, status: odd.status, picksLimit: odd.academy.picksLimit },
     { enforced: false, tier: "free", clubAccess: "none", status: undefined, picksLimit: null }
   );
+
+  // Outside the beta the app offers neither plans nor picks. A server from
+  // before the beta door says nothing, and has no door to be outside of.
+  assert.equal(mapPlanState({ access: false }).access, false);
+  assert.equal(mapPlanState({}).access, true);
+  assert.equal(foundingPlan.access, true, "The demo and a plan still loading are never outside the beta.");
 }
 
 console.log("Plan rules passed.");

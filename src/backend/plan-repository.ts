@@ -28,6 +28,8 @@ export const mapPlanState = (raw: unknown): PlanState => {
   const status = row.status;
   const source = row.source;
   return {
+    // A server from before the beta door sends no such field; it has no door.
+    access: row.access !== false,
     enforced: row.enforced === true,
     tier: planKey(row.tier),
     status: status === "trialing" || status === "active" || status === "grace" ? status : undefined,
@@ -46,6 +48,9 @@ export const mapPlanState = (raw: unknown): PlanState => {
 
 /** The code a refused pick carries: the rider has used every pick their plan includes. */
 export const noPicksLeft = "no_picks_left";
+
+/** The code a refusal carries for an account still outside the beta (202610060003). */
+export const betaOnly = "beta_only";
 
 export class PlanRepository {
   // The edge client arrives as a type only: importing it here would pull
@@ -72,6 +77,8 @@ export class PlanRepository {
     if (error) {
       // PT402: PostgREST's 402. The plan is full, which is not a failure.
       if (error.code === "PT402") throw new EquinaBackendError("You have used every lesson pick your plan includes.", noPicksLeft);
+      // PT403: PostgREST's 403. The account is still waiting outside the beta.
+      if (error.code === "PT403") throw new EquinaBackendError("Equina is invite-only for now.", betaOnly);
       throw backendError(error, "This lesson could not be added to your picks.");
     }
     return mapPlanState(data);

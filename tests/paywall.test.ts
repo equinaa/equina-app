@@ -218,7 +218,8 @@ assert.equal(storeAndPlanDisagree(null, plan()), false);
     apiKey: "appl_public",
     privacyPolicyUrl: "https://equina.app/privacy",
     capability: true,
-    enforced: true
+    enforced: true,
+    access: true
   };
   assert.equal(purchasesAvailable(everything), true);
   assert.equal(purchasesAvailable({ ...everything, platform: "android" }), true);
@@ -229,7 +230,8 @@ assert.equal(storeAndPlanDisagree(null, plan()), false);
     ["no RevenueCat key", { apiKey: null }],
     ["no privacy policy", { privacyPolicyUrl: null }],
     ["the server's capability", { capability: false }],
-    ["the founding phase", { enforced: false }]
+    ["the founding phase", { enforced: false }],
+    ["an account outside the beta", { access: false }]
   ];
   for (const [what, change] of missing) {
     assert.equal(purchasesAvailable({ ...everything, ...change }), false, `Nothing is sold without ${what}.`);

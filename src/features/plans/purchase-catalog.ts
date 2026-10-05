@@ -328,7 +328,8 @@ export const renewingStoreOf = (
  * Selling is on only when every part of it is: a signed-in rider on a real
  * account, a phone (never the web), RevenueCat's key for that platform, a
  * privacy policy to link (Apple requires one on the paywall), the server's
- * purchases capability, and plans actually enforced.
+ * purchases capability, plans actually enforced, and an account that is
+ * through the beta door.
  */
 export const purchasesAvailable = (input: {
   connected: boolean;
@@ -338,6 +339,8 @@ export const purchasesAvailable = (input: {
   privacyPolicyUrl: string | null;
   capability: boolean;
   enforced: boolean;
+  /** my_plan().access: the account is through the beta door. */
+  access: boolean;
 }) =>
   input.connected &&
   Boolean(input.userId) &&
@@ -345,7 +348,8 @@ export const purchasesAvailable = (input: {
   Boolean(input.apiKey) &&
   Boolean(input.privacyPolicyUrl) &&
   input.capability &&
-  input.enforced;
+  input.enforced &&
+  input.access;
 
 /**
  * The public SDK key for this platform. A Test Store key (test_) crashes a

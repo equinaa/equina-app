@@ -649,6 +649,54 @@ a {
   content: "”";
 }
 
+/* ---- Beta --------------------------------------------------------------- */
+
+.door-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--separator);
+}
+
+/* A confirmation box: the whole line is the target, at least 44px tall. */
+.check {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 44px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.check input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.row-actions {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---- Sign-in ------------------------------------------------------------ */
 
 .gate {

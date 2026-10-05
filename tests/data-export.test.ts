@@ -71,8 +71,13 @@ const ownReads = [...exportSource.matchAll(/\bown(?:Row)?\(\s*"(\w+)",\s*(?:"(\w
   }));
 const childReads = [...exportSource.matchAll(/\bunder\(\s*"(\w+)",\s*"(\w+)"/g)]
   .map(([, table, column]) => ({ table: table ?? "", by: [column ?? ""], select: "*" }));
-const reads = [...ownReads, ...childReads];
+// Rows that exist before the account does are kept by email: byEmail("table",
+// "columns") reads them by the account's own address.
+const emailReads = [...exportSource.matchAll(/\bbyEmail\(\s*"(\w+)",\s*"([\w,]+)"/g)]
+  .map(([, table, select]) => ({ table: table ?? "", by: ["email"], select: select ?? "*" }));
+const reads = [...ownReads, ...childReads, ...emailReads];
 assert.ok(ownReads.length >= 30 && childReads.length >= 5, "Expected to find the reads of request-data-export.");
+assert.ok(emailReads.some((read) => read.table === "beta_invites"), "Expected the export to read the rider's beta invite.");
 
 // Only the rider's rows: an own read filters on a column that references
 // auth.users, and a nested read on a column that points at its parent table.
@@ -88,6 +93,19 @@ for (const { table, by } of childReads) {
   assert.ok(
     parentColumns.get(table)?.has(by[0] ?? ""),
     `request-data-export reads ${table} by ${by[0]}, which does not point at another table's rows.`
+  );
+}
+// An email read is the account's own address, normalized the way the table
+// stores it, never an address from the request.
+assert.match(
+  exportSource,
+  /const byEmail = [\s\S]{0,200}\.eq\("email", user\.email\.trim\(\)\.toLowerCase\(\)\)/,
+  "request-data-export must read email-keyed rows by the account's own normalized address."
+);
+for (const { table } of emailReads) {
+  await assert.doesNotReject(
+    db.query(`select email from public.${table} limit 0`),
+    `request-data-export reads ${table} by email, but it has no email column.`
   );
 }
 // A column list is only checked when the function runs; a typo would fail

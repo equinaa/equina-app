@@ -43,8 +43,8 @@ Admin → Plans with no migration or release.
 | `plan_tiers` | What each plan holds. Readable by anyone, so the plan screen renders before sign-up. |
 | `plan_subscriptions` | Who holds a paid plan: one row per rider per source (`staff`, `app_store`, `play`, `stripe`). The highest-ranked live one applies, so a plan staff gave and one bought in the store never overwrite each other. A plan lapses at `ends_at`, with nothing running at that moment. |
 | `academy_lesson_picks` | The paid lessons each rider chose. Written only by `pick_academy_lesson`. |
-| `my_plan()` | Everything the app needs in one call: the plan, whether it is applied, picks, Club access and all three plans. |
-| `academy_playback_source` | Refuses a locked lesson with PT402; `academy-playback` turns that into 402 `lesson_locked`. |
+| `my_plan()` | Everything the app needs in one call: the plan, whether it is applied, picks, Club access, all three plans, and `access`: whether the account is through the beta door. |
+| `academy_playback_source` | Refuses a locked lesson with PT402; `academy-playback` turns that into 402 `lesson_locked`. An account outside the beta is refused first, with PT403 (403 `beta_only`). |
 | Club policies | Restrictive policies on posts, comments, reactions, media and memberships, through `private.club_access()`. |
 | `private.ensure_free_coach_credits` | Grants the monthly allowance of the rider's plan, from the day the plan started. |
 | `staff_update_plan_tier`, `staff_set_plan`, `staff_list_plans` | The admin's Plans page. Admin role with a second factor. |
@@ -53,6 +53,13 @@ Admin → Plans with no migration or release.
 
 `plans` is off by default. While it is off every signed-in rider has every lesson and the whole
 Club, and the plan screen says so; the plans only decide Ralf's monthly allowance.
+
+"Every signed-in rider" means every rider through the beta door
+(`docs/EQUINA_FEATURE_FLAG_POLICY.md`). An account outside it gets no flag at all, `plans`
+included: no lesson plays, `pick_academy_lesson` refuses it, its Club access is `none`, and
+`my_plan()` answers `access: false`, so the app offers it neither plans nor picks and nothing is
+sold to it. Once `plans` is on globally, plans apply to every beta member, and to everyone once
+`public_access` opens.
 
 To try Free on one account before anyone else, turn the flag on for that account only:
 
@@ -94,7 +101,8 @@ How a purchase reaches the plan:
 
 The paywall shows only when **all** of these hold: a signed-in rider on iOS or Android (never web
 or the demo), the platform's RevenueCat key, a privacy policy URL, `capabilities.purchases`
-(both server secrets set and `plans` on for that rider) and `my_plan().enforced`.
+(both server secrets set, `plans` on for that rider and the rider through the beta door),
+`my_plan().enforced` and `my_plan().access`.
 
 ### Configuration
 

@@ -58,6 +58,13 @@ Deno.serve(async (request) => {
     // parent ids travel in the URL, so a long list is read in batches.
     const under = (table: string, parent: string, parentIds: string[]) =>
       readInBatches(parentIds, (batch) => selectRows(admin.from(table).select("*").in(parent, batch)));
+    // Rows kept by email rather than by account, because they exist before
+    // the account does: the beta invite. Read by the account's own address,
+    // stored lower-cased and trimmed, without the staff-only note.
+    const byEmail = (table: string, columns: string) =>
+      user.email
+        ? selectRows(admin.from(table).select(columns).eq("email", user.email.trim().toLowerCase()))
+        : Promise.resolve([]);
 
     const horses = own("horses", "owner_id");
     const horseRecords = horses.then((rows) => under("horse_records", "horse_id", idsOf(rows)));
@@ -115,6 +122,7 @@ Deno.serve(async (request) => {
       userSanctions: own("user_sanctions", "user_id"),
       userRoles: own("user_roles", "user_id"),
       featureFlagOverrides: own("feature_flag_overrides", "user_id"),
+      betaInvites: byEmail("beta_invites", "email,invited_at,revoked_at"),
       // The device, without the push token or its hash.
       pushDevices: own(
         "push_devices",

@@ -29,6 +29,10 @@ Deno.serve(async (request) => {
       // answers with the rider's picks and the plans, so this is not an error
       // to show as one.
       if (error.code === "PT402") throw new HttpError(402, "This lesson is not part of your plan.", "lesson_locked");
+      // An account still outside the beta (202610060003). The app shows the
+      // beta door rather than the Academy, so this is the server holding the
+      // line for a client that got past it.
+      if (error.code === "PT403") throw new HttpError(403, "Equina is invite-only for now.", "beta_only");
       throw error;
     }
     const source = (data as Array<{ provider: string; asset_id: string | null; playback_id: string | null; status: string }> | null)?.[0];

@@ -46,6 +46,15 @@ export const featureFlagsForSession = async (token: string): Promise<Record<stri
   return Object.fromEntries((data ?? []).map((entry: { key: string; enabled: boolean }) => [String(entry.key), Boolean(entry.enabled)]));
 };
 
+// Whether a signed-in account is through the beta door (202610060003): invited,
+// or let in by public_access. Asked with the rider's own session.
+export const appAccessForSession = async (token: string): Promise<boolean> => {
+  const client = createUserClient(token);
+  const { data, error } = await client.rpc("my_access");
+  if (error) throw error;
+  return (data as { access?: unknown } | null)?.access === true;
+};
+
 export const requireFeature = async (token: string, key: string): Promise<void> => {
   const flags = await featureFlagsForSession(token);
   if (!flags[key]) throw new HttpError(403, "This feature is not enabled for this account.", "feature_not_enabled");

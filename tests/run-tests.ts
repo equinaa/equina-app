@@ -12,4 +12,5 @@ import "./mux.test";
 import "./data-export.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./paywall.test");
+await import("./beta.test");
 await import("./backend-migrations.test");
