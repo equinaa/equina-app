@@ -100,13 +100,11 @@ grant select, insert, update, delete on public.beta_invites to service_role;
 -- the account has confirmed that email.
 --
 -- The confirmation proves the address is the rider's only while Supabase Auth
--- asks for it. With confirmations off -- as for the TestFlight cohort
--- (supabase/config.toml) -- Auth stamps email_confirmed_at at sign-up and
--- applies an email change at once, so whoever signs up first with an invited
--- address that has no account yet gets in. An address that already has an
--- account is safe: Auth lets no one else sign up with it or move to it. So
--- until confirmations are back on, invite only riders who already have an
--- account (Admin -> Beta says which, and warns while they are off).
+-- asks for it, as the hosted project does. With confirmations off -- as in the
+-- local stack (supabase/config.toml) -- Auth stamps email_confirmed_at at
+-- sign-up and applies an email change at once, so whoever signs up first with
+-- an invited address that has no account yet would get in. Admin -> Beta warns
+-- if Auth's settings ever say confirmations are off.
 create or replace function private.is_beta_member(target_user uuid)
 returns boolean
 language sql

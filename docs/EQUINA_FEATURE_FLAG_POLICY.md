@@ -64,17 +64,14 @@ when `public_access` is on for it: its global rollout at launch, or a per-person
 that lets one account in without an invite.
 
 The confirmation proves the address is the rider's only while Supabase Auth asks for it.
-Email confirmations are off for the TestFlight cohort (`supabase/config.toml`): Auth then
-confirms every address at sign-up and applies an email change at once, so whoever signs
-up first with an invited address that has no account yet gets in, and the real rider can
-no longer sign up with it. An address that already has an account is safe, because Auth
-lets nobody else sign up with it or move to it. So:
-
-- Until confirmations are back on, invite only riders whose account already exists. Admin
-  → Beta shows them as Signed up at once, with the sign-up date; check that the date is
-  theirs. The page warns while Auth's settings say confirmations are off.
-- Turn email confirmations back on (the 6-digit code, with secure email change) before
-  inviting anyone who has not signed up yet.
+The hosted project asks for it: Auth's public settings report `mailer_autoconfirm: false`
+(checked 2026-10-05), and email is the only sign-in method, so inviting an address before
+its owner signs up is safe. Keep it that way. The local stack in `supabase/config.toml` has
+confirmations off for development, and a project configured like that confirms every
+address at sign-up and applies an email change at once: whoever signs up first with an
+invited address that has no account yet would get in. Admin → Beta reads Auth's settings
+and warns if confirmations are ever off; until they are back on, invite only riders whose
+account already exists and check the sign-up date shown next to them.
 
 `account_settings` is exempt so every account holder can export and delete their own data
 while waiting outside. Content that was never behind a flag is closed separately: the
@@ -90,7 +87,7 @@ returns to the foreground, at most once a minute.
 
 **Inviting someone.** Admin → Beta → Invite a rider: the email they sign up with and an
 optional staff note. They are inside as soon as their account exists with that email
-confirmed (read the paragraph above while confirmations are off). Tell them yourself. Revoke puts them back outside (the account stays); Invite
+confirmed. Tell them yourself. Revoke puts them back outside (the account stays); Invite
 again clears the revoke. Sign in with Apple can hide the address behind a relay, which then
 needs its own invite.
 
@@ -100,7 +97,7 @@ door alone: from the moment the migration lands, an override-only tester gets 40
 `beta_only` from Academy playback and picks, an empty Club, and no other rider's profile
 or avatar, and the new app shows them the door. The invite list only exists once the
 migration has run, so invite them right after it, in the same session, before anything
-else. Every one of them already has an account, so this is safe with confirmations off.
+else.
 The emails come from the data, never from the repository:
 
 ```sql
