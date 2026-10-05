@@ -257,6 +257,19 @@ authorization, Storage signed URLs, or Edge networking.
 - Revoke push devices on sign out and invalid provider receipts.
 - Review Ralf safety events through restricted staff tooling before resolving them.
 
+### Staff And The Admin Console
+
+- Staff work in the admin console (`admin/`, its own Vercel project). It holds no
+  secret: it acts with the staff member's own session.
+- A staff power needs a `moderator` or `admin` row in `public.user_roles` and a
+  session verified with an authenticator code (`aal2`). `private.is_staff()` checks
+  both (202610050001); an account with the role but no second factor is a rider.
+- Grant, revoke, and recover staff access with the SQL in `admin/README.md`. Grant
+  roles by hand in the SQL editor only; no client or function writes `user_roles`.
+- Every moderation decision is a row in `moderation_actions` naming the staff
+  member. Lessons are published only through `staff_set_lesson_published`, which
+  refuses a lesson with no length or no finished video.
+
 ## Rollback
 
 1. Disable the affected database rollout flag and compile-time switch first.

@@ -14,6 +14,7 @@ Expo / React Native client (iOS, Android, web) on a Supabase backend (Postgres w
 | Backend | Supabase: Postgres + RLS, Edge Functions (Deno), Storage (all buckets private, signed URLs), Vault, `pg_cron` |
 | AI coach | `supabase/functions/coach-chat` → Anthropic Messages API (Claude). Provider is configured server-side only. |
 | Lesson video | Bunny Stream (HLS). Riders get a signed link that expires, from `supabase/functions/academy-playback`; nothing is public. |
+| Admin | Next.js 16 in [`admin/`](admin/README.md): staff publish lessons and moderate the Club. Its own Vercel project; staff sign in with a password and an authenticator code. |
 | Web hosting | Vercel, auto-deploys `main` |
 | Tests | `tsx` runner; migration and RLS tests run against an isolated in-process Postgres |
 
@@ -73,8 +74,9 @@ src/
   features/          account, coach, messaging, notifications, onboarding, records, ride
   ui/                Design primitives, theme, layout, motion, states
   seed/              Local demo data (demo mode only)
+admin/               Staff console (Next.js), deployed separately — see admin/README.md
 supabase/
-  migrations/        36 versioned migrations — the schema is the source of truth
+  migrations/        Versioned migrations — the schema is the source of truth
   functions/         Edge Functions (one directory each) + _shared/
   templates/         Auth email templates
   config.toml        Project configuration (auth, storage, functions)
@@ -106,6 +108,7 @@ Things worth knowing before you touch it:
 ## Deployment
 
 - **Web:** every merge to `main` builds and deploys on Vercel.
+- **Admin:** a second Vercel project with Root Directory `admin`. Setup and staff accounts: [`admin/README.md`](admin/README.md).
 - **iOS / Android:** dev-client builds only, until the Apple Developer account exists. Release audit and checklist: [`docs/IOS_RELEASE_AUDIT.md`](docs/IOS_RELEASE_AUDIT.md).
 - **Backend:** migrations and functions are promoted with the CLI commands above. There is one Supabase project today; treat it as production.
 

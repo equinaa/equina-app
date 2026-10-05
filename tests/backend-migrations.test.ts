@@ -29,8 +29,16 @@ await db.exec(`
   returns uuid language sql stable set search_path = '' as $$
     select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
   $$;
+  -- The session's claims as PostgREST hands them over. Tests set only what a
+  -- policy reads, e.g. {"aal":"aal2"} for a session with a verified second
+  -- factor.
+  create or replace function auth.jwt()
+  returns jsonb language sql stable set search_path = '' as $$
+    select nullif(current_setting('request.jwt.claims', true), '')::jsonb;
+  $$;
   grant usage on schema auth to anon, authenticated;
   grant execute on function auth.uid() to anon, authenticated;
+  grant execute on function auth.jwt() to anon, authenticated;
 
   create table storage.buckets (
     id text primary key,
@@ -1102,8 +1110,12 @@ await assert.rejects(
   "Watching needs an account."
 );
 
-// Staff preview drafts in the admin through the same rule riders use.
+// Staff preview drafts in the admin through the same rule riders use -- but
+// only once the session has a verified second factor. With the password alone
+// a staff account is a rider account.
 const academyStaff = "10000000-0000-4000-8000-000000000031";
+const secondFactor = (aal: "aal1" | "aal2" | "") =>
+  db.exec(`select set_config('request.jwt.claims', '${aal ? JSON.stringify({ aal }) : ""}', false);`);
 await db.exec(`
   reset role;
   insert into auth.users(id, email, raw_user_meta_data) values ('${academyStaff}', 'staff@equina.test', '{"display_name":"Equina Staff"}');
@@ -1111,10 +1123,20 @@ await db.exec(`
   set role authenticated;
   select set_config('request.jwt.claim.sub', '${academyStaff}', false);
 `);
+await secondFactor("aal1");
+await assert.rejects(
+  db.query("select * from public.academy_playback_source($1)", [draftId]),
+  /Lesson not found/,
+  "A staff password without the second factor must not open drafts."
+);
+const passwordOnlyVideos = await db.query("select status from public.academy_videos");
+assert.deepEqual(passwordOnlyVideos.rows, [], "A staff password without the second factor must not read upload state.");
+await secondFactor("aal2");
 const preview = await db.query("select * from public.academy_playback_source($1)", [draftId]);
 assert.deepEqual(preview.rows, [], "Staff may open a draft; with nothing uploaded there is simply nothing to play yet.");
 const staffVideos = await db.query<{ status: string }>("select status from public.academy_videos");
 assert.deepEqual(staffVideos.rows, [{ status: "ready" }], "Staff see upload state in the admin.");
+await secondFactor("");
 await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 
 // Riders browse the catalogue; they do not edit it. Note the shape of the
@@ -1136,6 +1158,131 @@ const orphans = await db.query<{ chapters: number; progress: number; videos: num
 `, [lessonId]);
 assert.deepEqual(orphans.rows, [{ chapters: 0, progress: 0, videos: 0 }], "A removed lesson leaves nothing behind.");
 
+// --- Admin console: lessons --------------------------------------------------
+
+// Staff write the catalogue from the admin with their own session. Every
+// write below goes through the same grants and policies the console uses.
+const asStaff = async (aal: "aal1" | "aal2") => {
+  await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${academyStaff}', false);`);
+  await secondFactor(aal);
+};
+const adminLesson = async () => (await db.query<{ id: string; published_at: string | null }>(`
+  insert into public.academy_lessons(slug, title, summary, category, discipline, level, access, coach_name)
+  values ('half-halts', 'Half-halts that land', 'Asking for balance without losing the go.', 'Dressage', 'dressage', 'beginner', 'free', 'Equina Academy')
+  returning id, published_at
+`)).rows[0];
+
+await asStaff("aal1");
+await assert.rejects(adminLesson(), /row-level security/, "A staff password alone must not write the catalogue.");
+
+await asStaff("aal2");
+const created = await adminLesson();
+assert.ok(created?.id, "Staff with a second factor create lessons.");
+assert.equal(created?.published_at, null, "A new lesson starts as a draft.");
+const adminLessonId = created?.id as string;
+
+// Publishing is not a column staff write: it goes through the check below.
+await assert.rejects(
+  db.query("update public.academy_lessons set published_at = now() where id = $1", [adminLessonId]),
+  /permission denied/,
+  "published_at moves only through staff_set_lesson_published."
+);
+await assert.rejects(
+  db.query("select public.staff_set_lesson_published($1, true)", [adminLessonId]),
+  /length before publishing/,
+  "A lesson with no length cannot be published: progress is a share of it."
+);
+await db.query("update public.academy_lessons set duration_seconds = 840 where id = $1", [adminLessonId]);
+await assert.rejects(
+  db.query("select public.staff_set_lesson_published($1, true)", [adminLessonId]),
+  /finished video/,
+  "A lesson with no video cannot be published."
+);
+await db.exec(`reset role; insert into public.academy_videos(lesson_id, provider, asset_id) values ('${adminLessonId}', 'bunny', 'a1b2c3d4-0000-4000-8000-00000000abcd');`);
+await asStaff("aal2");
+await assert.rejects(
+  db.query("select public.staff_set_lesson_published($1, true)", [adminLessonId]),
+  /finished video/,
+  "A video still encoding is not a finished video."
+);
+await db.exec(`reset role; update public.academy_videos set status = 'ready' where lesson_id = '${adminLessonId}';`);
+await asStaff("aal2");
+const publishedNow = await db.query<{ stamped: string | null }>("select public.staff_set_lesson_published($1, true) as stamped", [adminLessonId]);
+assert.ok(publishedNow.rows[0]?.stamped, "A lesson with a length and a ready video publishes.");
+
+// Chapters are saved as one set.
+await db.query("select public.staff_save_lesson_chapters($1, $2::jsonb)", [adminLessonId, JSON.stringify([
+  { starts_at_seconds: 0, title: "What a half-halt is for" },
+  { starts_at_seconds: 300, title: "Timing it with the stride" }
+])]);
+await assert.rejects(
+  db.query("select public.staff_save_lesson_chapters($1, $2::jsonb)", [adminLessonId, JSON.stringify([
+    { starts_at_seconds: 0, title: "Kept" },
+    { starts_at_seconds: 900, title: "Past the end" }
+  ])]),
+  /after the lesson ends/,
+  "A chapter cannot start after the lesson ends."
+);
+await assert.rejects(
+  db.query("select public.staff_save_lesson_chapters($1, $2::jsonb)", [adminLessonId, JSON.stringify([
+    { starts_at_seconds: 60, title: "Twice" },
+    { starts_at_seconds: 60, title: "Twice again" }
+  ])]),
+  /duplicate key/,
+  "Two chapters cannot start at the same second."
+);
+const savedChapters = await db.query<{ title: string }>(
+  "select title from public.academy_chapters where lesson_id = $1 order by starts_at_seconds", [adminLessonId]
+);
+assert.deepEqual(savedChapters.rows.map((row) => row.title), ["What a half-halt is for", "Timing it with the stride"],
+  "A refused save must leave the chapters as they were.");
+
+// Riders now see it, chapters and all.
+await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+const riderSees = await db.query<{ chapters: number }>(`
+  select (select count(*)::int from public.academy_chapters where lesson_id = $1) as chapters
+  from public.academy_lessons where id = $1
+`, [adminLessonId]);
+assert.deepEqual(riderSees.rows, [{ chapters: 2 }], "A published lesson and its chapters reach riders.");
+await assert.rejects(
+  db.query("select public.staff_set_lesson_published($1, false)", [adminLessonId]),
+  /Staff access required/,
+  "Riders cannot unpublish lessons."
+);
+await assert.rejects(
+  db.query("select public.staff_save_lesson_chapters($1, '[]'::jsonb)", [adminLessonId]),
+  /Staff access required/,
+  "Riders cannot rewrite chapters."
+);
+
+// Deleting is for drafts: riders may already have progress on a published one.
+await asStaff("aal2");
+await db.query("delete from public.academy_lessons where id = $1", [adminLessonId]);
+await db.exec("reset role;");
+assert.equal((await db.query("select id from public.academy_lessons where id = $1", [adminLessonId])).rows.length, 1,
+  "A published lesson must not be deletable.");
+await asStaff("aal2");
+assert.equal((await db.query<{ stamped: string | null }>(
+  "select public.staff_set_lesson_published($1, false) as stamped", [adminLessonId]
+)).rows[0]?.stamped, null, "Unpublishing returns the lesson to draft.");
+await db.query("delete from public.academy_lessons where id = $1", [adminLessonId]);
+await db.exec("reset role;");
+assert.equal((await db.query("select id from public.academy_lessons where id = $1", [adminLessonId])).rows.length, 0,
+  "A draft can be deleted.");
+
+// Signed-out visitors cannot reach any staff function.
+await db.exec("set role anon; select set_config('request.jwt.claim.sub', '', false);");
+for (const call of [
+  "select public.staff_set_lesson_published(gen_random_uuid(), true)",
+  "select public.staff_save_lesson_chapters(gen_random_uuid(), '[]'::jsonb)",
+  "select * from public.staff_moderation_queue()",
+  "select public.staff_moderate_content('post', gen_random_uuid(), 'remove')"
+]) {
+  await assert.rejects(db.query(call), /permission denied/, `anon must not call: ${call}`);
+}
+await secondFactor("");
+await db.exec("reset role;");
+
 // --- Client write grants ----------------------------------------------------
 
 await db.exec("reset role;");
@@ -1147,9 +1294,14 @@ await db.exec("reset role;");
 // clients may write to it. 202610020004 is where this list comes from.
 type ClientWrites = { insert?: string[] | "table"; update?: string[] | "table"; delete?: true };
 const staffManaged: ClientWrites = { insert: "table", update: "table", delete: true };
+// Written by staff from the admin console (admin/), not by the app. Publishing
+// is the column left out: it goes through staff_set_lesson_published.
+const lessonColumns = ["slug", "title", "summary", "category", "discipline", "level", "access", "duration_seconds",
+  "coach_name", "coach_title", "poster_path", "position"];
+const adminWrittenTables = new Set(["academy_lessons"]);
 const clientWrites: Record<string, ClientWrites> = {
   academy_chapters: staffManaged,
-  academy_lessons: staffManaged,
+  academy_lessons: { insert: lessonColumns, update: lessonColumns, delete: true },
   academy_progress: {
     insert: ["user_id", "lesson_id", "position_seconds", "completed_at", "last_seen_at"],
     update: ["user_id", "lesson_id", "position_seconds", "completed_at", "last_seen_at"],
@@ -1328,7 +1480,7 @@ for (const fileName of readdirSync(backendDirectory).filter((name) => name.endsW
 }
 assert.deepEqual(ungrantedWrites, [], "Every column the app writes directly must be granted to authenticated.");
 const clientWrittenTables = Object.entries(clientWrites)
-  .filter(([, writes]) => Array.isArray(writes.insert) || Array.isArray(writes.update))
+  .filter(([table, writes]) => !adminWrittenTables.has(table) && (Array.isArray(writes.insert) || Array.isArray(writes.update)))
   .map(([table]) => table);
 assert.deepEqual([...writtenTables].sort(), clientWrittenTables.sort(),
   "Column grants must match tables the app actually writes; drop a grant when its last writer goes.");
@@ -1495,6 +1647,106 @@ await asRider(riderA);
 const blockerPost = await db.query("select id from public.club_posts where author_id = $1", [riderC]);
 assert.equal(blockerPost.rows.length, 0, "A blocked rider must not see the blocker's posts either.");
 await db.exec("reset role;");
+
+// --- Admin console: moderation queue -----------------------------------------
+
+type QueueItem = { content_type: string; content_id: string; status: string; open_reports: number; reasons: string[]; author_name: string };
+const queue = async () => (await db.query<QueueItem>(
+  "select content_type, content_id, status::text as status, open_reports, reasons, author_name from public.staff_moderation_queue()"
+)).rows;
+const queued = async (id: string | undefined) => (await queue()).find((item) => item.content_id === id);
+
+await asRider(riderA);
+await assert.rejects(queue(), /Staff access required/, "Riders must not read the moderation queue.");
+await asStaff("aal1");
+await assert.rejects(queue(), /Staff access required/, "A staff password alone must not read the moderation queue.");
+await assert.rejects(
+  db.query("select public.staff_moderate_content('post', $1, 'restore')", [openPost?.id]),
+  /Staff access required/,
+  "A staff password alone must not moderate."
+);
+
+await asStaff("aal2");
+const reportedItem = await queued(openPost?.id);
+assert.deepEqual(
+  reportedItem && { status: reportedItem.status, open_reports: reportedItem.open_reports, reasons: reportedItem.reasons, author: reportedItem.author_name },
+  { status: "hidden", open_reports: 3, reasons: ["spam"], author: "Rider C" },
+  "A post hidden by three reports waits for staff, with who wrote it and why it was reported."
+);
+assert.equal((await queued(filteredPost?.id))?.open_reports, 0, "A post the filter hid waits for staff too.");
+assert.equal(await queued(openComment?.id), undefined, "A visible comment nobody reported is not queued.");
+
+await assert.rejects(
+  db.query("select public.staff_moderate_content('post', $1, 'ban')", [openPost?.id]),
+  /restore or remove/
+);
+await assert.rejects(
+  db.query("select public.staff_moderate_content('post', gen_random_uuid(), 'remove')"),
+  /no longer exists/
+);
+
+// Restoring settles the reports, and only new reports count from then on.
+await db.query("select public.staff_moderate_content('post', $1, 'restore', 'Poles are a training aid, not spam.')", [openPost?.id]);
+await db.exec("reset role;");
+assert.equal(await statusOf("club_posts", openPost?.id ?? ""), "visible", "Restoring puts the post back in the feed.");
+const settled = await db.query<{ status: string }>(
+  "select distinct status::text as status from public.content_reports where post_id = $1", [openPost?.id]
+);
+assert.deepEqual(settled.rows, [{ status: "dismissed" }], "Restoring dismisses the reports it answered.");
+const restoreRecord = await db.query<{ action: string; moderator_id: string; notes: string }>(
+  "select action, moderator_id, notes from public.moderation_actions where target_id = $1", [openPost?.id]
+);
+assert.deepEqual(restoreRecord.rows, [{ action: "approve", moderator_id: academyStaff, notes: "Poles are a training aid, not spam." }],
+  "Every decision records who made it.");
+
+// Rider D reported it before; that report was answered, so they may again.
+await asRider(riderD);
+await db.query("insert into public.content_reports(reporter_id, post_id, reason) values ($1, $2, 'harassment')", [riderD, openPost?.id]);
+await db.exec("reset role;");
+assert.equal(await statusOf("club_posts", openPost?.id ?? ""), "visible",
+  "Reports staff already answered must not count toward hiding the post again.");
+await asStaff("aal2");
+assert.deepEqual((await queued(openPost?.id))?.open_reports, 1, "A new report brings the post back to the queue.");
+
+// Removing keeps it hidden and takes it off the queue for good.
+await db.query("select public.staff_moderate_content('post', $1, 'remove')", [openPost?.id]);
+await db.query("select public.staff_moderate_content('post', $1, 'remove')", [filteredPost?.id]);
+await db.query("select public.staff_moderate_content('comment', $1, 'remove')", [openComment?.id]);
+assert.equal(await queued(openPost?.id), undefined, "A removed post leaves the queue.");
+assert.equal(await queued(filteredPost?.id), undefined, "A filtered post staff confirmed leaves the queue.");
+await db.exec("reset role;");
+assert.deepEqual(
+  [await statusOf("club_posts", openPost?.id ?? ""), await statusOf("club_posts", filteredPost?.id ?? ""), await statusOf("club_comments", openComment?.id ?? "")],
+  ["hidden", "hidden", "hidden"],
+  "Removed content stays out of the feed."
+);
+assert.deepEqual(
+  (await db.query<{ status: string }>(
+    "select status::text as status from public.content_reports where post_id = $1 and reporter_id = $2 order by created_at", [openPost?.id, riderD]
+  )).rows,
+  [{ status: "dismissed" }, { status: "actioned" }],
+  "Removing actions the reports it answered and leaves earlier decisions as they were."
+);
+
+// Feature flags are an admin power and need the second factor like the rest.
+await db.exec(`reset role; insert into public.user_roles(user_id, role) values ('${academyStaff}', 'admin');`);
+await asStaff("aal1");
+await db.query("update public.app_feature_flags set note = 'Changed with a password' where key = 'academy_progress'");
+await db.exec("reset role;");
+assert.notEqual(
+  (await db.query<{ note: string }>("select note from public.app_feature_flags where key = 'academy_progress'")).rows[0]?.note,
+  "Changed with a password",
+  "An admin password alone must not change flags."
+);
+await asStaff("aal2");
+await db.query("update public.app_feature_flags set note = 'Changed with a second factor' where key = 'academy_progress'");
+await secondFactor("");
+await db.exec("reset role;");
+assert.equal(
+  (await db.query<{ note: string }>("select note from public.app_feature_flags where key = 'academy_progress'")).rows[0]?.note,
+  "Changed with a second factor",
+  "An admin session with a second factor changes flags."
+);
 
 // Account erasure. Production soft-deletes the auth user (orders and other
 // legal records still point at it), so nothing cascades from auth.users:
