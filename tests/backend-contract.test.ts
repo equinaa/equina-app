@@ -51,7 +51,8 @@ const functionNames = [
   "process-storage-cleanup", "process-content-moderation", "moderate-report", "lift-sanction"
   , "coach-chat", "request-data-export", "schedule-account-deletion", "cancel-account-deletion",
   "process-account-deletions", "process-data-export-cleanup", "register-push-device",
-  "revoke-push-device", "process-notification-outbox", "academy-playback", "academy-video", "mux-webhook"
+  "revoke-push-device", "process-notification-outbox", "academy-playback", "academy-video", "mux-webhook",
+  "revenuecat-webhook", "sync-purchases"
 ];
 for (const name of functionNames) {
   assert.ok(existsSync(join(root, "supabase", "functions", name, "index.ts")), `${name} Edge Function must exist.`);
@@ -64,6 +65,8 @@ const mobileSource = readdirSync(join(root, "src", "backend"))
 assert.doesNotMatch(mobileSource, /SUPABASE_SERVICE_ROLE_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET/);
 assert.doesNotMatch(mobileSource, /EQUINA_AI_API_KEY|ACCOUNT_AUTOMATION_SECRET|NOTIFICATION_AUTOMATION_SECRET|BUNNY_STREAM_TOKEN_KEY/);
 assert.doesNotMatch(mobileSource, /MUX_TOKEN_SECRET|MUX_SIGNING_KEY_PRIVATE|MUX_WEBHOOK_SECRET/);
+// The app holds only RevenueCat's public SDK keys (EXPO_PUBLIC_REVENUECAT_*).
+assert.doesNotMatch(mobileSource, /REVENUECAT_SECRET_API_KEY|REVENUECAT_WEBHOOK_AUTHORIZATION/);
 
 // Staff powers need a second factor in edge functions too: requireStaff reads
 // it from the session token, so every call must hand the token over.
@@ -176,6 +179,45 @@ const envExample = readFileSync(join(root, ".env.example"), "utf8");
 assert.match(authConfig, /\[functions\.mux-webhook\]\s*verify_jwt = false/, "mux-webhook verifies Mux's signature, not a JWT.");
 assert.match(readFileSync(join(root, "supabase", "functions", "mux-webhook", "index.ts"), "utf8"), /verifyMuxSignature/,
   "mux-webhook must check the Mux signature before reading the event.");
+// RevenueCat can only send a fixed Authorization header, so that header is the
+// webhook's whole defence: it is checked before the body is read, before the
+// service role is reached for, and before RevenueCat is asked anything.
+assert.match(authConfig, /\[functions\.revenuecat-webhook\]\s*verify_jwt = false/,
+  "revenuecat-webhook checks RevenueCat's Authorization value, not a JWT.");
+{
+  const functionsDir = join(root, "supabase", "functions");
+  const webhookSource = readFileSync(join(functionsDir, "revenuecat-webhook", "index.ts"), "utf8");
+  const syncSource = readFileSync(join(functionsDir, "sync-purchases", "index.ts"), "utf8");
+  const sharedSources = ["revenuecat.ts", "revenuecat-sync.ts"].map((name) => readFileSync(join(functionsDir, "_shared", name), "utf8"));
+
+  const authorizationCheck = webhookSource.indexOf('sameSecret(request.headers.get("authorization")');
+  assert.ok(authorizationCheck > 0, "revenuecat-webhook must compare the Authorization header with sameSecret.");
+  assert.match(webhookSource, /REVENUECAT_WEBHOOK_AUTHORIZATION/);
+  for (const later of ["request.text()", "request.json()", "purchaseSettings()", "createAdminClient()", "reconcileRiderPurchases("]) {
+    const position = webhookSource.indexOf(later);
+    assert.ok(position === -1 || position > authorizationCheck, `revenuecat-webhook must check Authorization before ${later}.`);
+  }
+  assert.match(webhookSource, /HttpError\(401, "[^"]+", "invalid_authorization"\)/);
+
+  // sync-purchases reconciles the caller and only the caller: the rider comes
+  // from the session, never from the request.
+  assert.match(syncSource, /const \{ user \} = await requireUser\(request\)/);
+  assert.match(syncSource, /reconcileRiderPurchases\(createAdminClient\(\), user\.id,/);
+  assert.ok(syncSource.indexOf("requireUser(request)") < syncSource.indexOf("reconcileRiderPurchases("));
+  assert.doesNotMatch(syncSource, /readJson|request\.json\(\)|request\.text\(\)/, "sync-purchases takes no input.");
+  assert.doesNotMatch(authConfig, /\[functions\.sync-purchases\]/, "sync-purchases keeps Supabase's JWT check.");
+
+  // The secret key, the webhook value, a rider's purchases: none of it is logged.
+  for (const source of [webhookSource, syncSource, ...sharedSources]) {
+    assert.doesNotMatch(source, /console\.\w+\(/, "RevenueCat code must not log.");
+  }
+  // A plan staff gave is the admin's to change, never a store's.
+  assert.match(sharedSources[1] ?? "", /\.in\("source", \[\.\.\.storeSources\]\)/);
+  // A plan RevenueCat holds but did not place in a store must not end the
+  // store rows it may be.
+  assert.match(sharedSources[1] ?? "", /keepUnnamed: holdsUnplacedPlan\(subscriber, now, options\)/);
+  assert.doesNotMatch(sharedSources[0] ?? "", /"staff"/, "The store mapping must have no way to name a staff row.");
+}
 if (/^enable_confirmations\s*=\s*false/m.test(authConfig)) {
   assert.match(envExample, /^EXPO_PUBLIC_ENABLE_APPLE_AUTH=false$/m,
     "Apple sign-in must stay off while email confirmations are off.");
@@ -259,6 +301,10 @@ assert.equal(equinaFeatureFlags.clubPublishing, false);
 const capabilitiesSource = readFileSync(join(root, "supabase", "functions", "backend-capabilities", "index.ts"), "utf8");
 assert.match(capabilitiesSource, /clubPublishing: Boolean\(flags\.club_publishing\),/);
 assert.match(capabilitiesSource, /listingCreation: Boolean\(flags\.shop_listing_creation && moderationConfigured\)/);
+// Plans go on sale only while they are enforced and RevenueCat can be read
+// and heard from; the app hides the paywall otherwise.
+assert.match(capabilitiesSource, /purchases: Boolean\(flags\.plans && purchasesConfigured\)/);
+assert.match(capabilitiesSource, /purchasesConfigured = Boolean\([\s\S]{0,80}REVENUECAT_SECRET_API_KEY[\s\S]{0,80}REVENUECAT_WEBHOOK_AUTHORIZATION/);
 assert.equal(equinaFeatureFlags.shopTransactions, false);
 assert.equal(equinaFeatureFlags.recordMutations, false);
 

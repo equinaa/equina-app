@@ -2100,6 +2100,22 @@ await asStaff("aal2");
 await db.query("select public.staff_update_plan_tier('free', 'Free', 2, 'none', 15, 0, 0, 0)");
 await secondFactor("");
 
+// A store plan's month of Ralf credits lasts the month, not just the period
+// the store billed: during a 7-day trial ends_at is day 7, and capping the
+// credits there left new subscribers with none after the trial (202610060002).
+await db.exec(`
+  reset role;
+  insert into public.plan_subscriptions(user_id, source, tier, status, started_at, trial_ends_at, ends_at)
+  values ('${riderB}', 'app_store', 'mid', 'trialing', now(), now() + interval '7 days', now() + interval '7 days');
+`);
+await spend(riderB, "20000000-0000-4000-8000-0000000000e1");
+const trialLots = await db.query<{ source: string; outlives_trial: boolean; granted: number }>(
+  "select source, expires_at > now() + interval '20 days' as outlives_trial, granted from public.coach_credit_lots where user_id = $1",
+  [riderB]
+);
+assert.deepEqual(trialLots.rows, [{ source: "app_store", outlives_trial: true, granted: 100 }],
+  "A trial's credits last the allowance month, so they are still there when the trial converts.");
+
 // For the erasure below: rider A's own plan and pick, and a plan rider A gave
 // someone else, as if rider A had been staff.
 await db.exec(`

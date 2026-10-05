@@ -1,19 +1,27 @@
 import { StyleSheet, Text, View } from "react-native";
-import { Check, Minus } from "lucide-react-native";
 import type { PlanState } from "../../backend";
 import { equinaTheme } from "../../ui/theme/theme";
-import { picksLeft, planStatusLine, tierFeatures, tierOf } from "./plan-rules";
+import { Paywall } from "./Paywall";
+import { PlanCard } from "./PlanCard";
+import { picksLeft, planStatusLine, tierOf } from "./plan-rules";
+import type { PurchasesController } from "./usePurchases";
+
+const creditsNote =
+  "One Ralf credit is one message; a message with a photo is three. The Equina team arranges coach sessions and " +
+  "event tickets with you.";
 
 /**
- * The rider's plan and the three plans side by side. Nothing here sells yet:
- * subscriptions open with the App Store release, and until the plans flag is
- * on every rider has everything.
+ * The rider's plan and the three plans side by side. While purchases are
+ * unavailable -- no RevenueCat key, no privacy policy, plans not enforced, or
+ * the web -- nothing here sells, and the footer says subscriptions open with
+ * the App Store release.
  */
-export function PlanScreen({ plan }: { plan: PlanState }) {
+export function PlanScreen({ plan, purchases }: { plan: PlanState; purchases?: PurchasesController }) {
   const current = tierOf(plan);
   const left = picksLeft(plan);
   const trialDays = [...new Set(plan.tiers.filter((tier) => tier.trialDays > 0).map((tier) => tier.trialDays))];
   const paidNames = plan.tiers.filter((tier) => tier.key !== "free").map((tier) => tier.name).join(" and ");
+  const selling = Boolean(purchases?.available);
 
   return (
     <View style={styles.body}>
@@ -28,51 +36,35 @@ export function PlanScreen({ plan }: { plan: PlanState }) {
         ) : null}
       </View>
 
-      {!plan.enforced ? (
-        <Text style={styles.lead}>These are the plans for when subscriptions open.</Text>
-      ) : null}
+      {selling && purchases ? (
+        <>
+          <Paywall plan={plan} purchases={purchases} tiers={plan.tiers} />
+          <Text style={styles.footerText}>{creditsNote}</Text>
+        </>
+      ) : (
+        <>
+          {!plan.enforced ? (
+            <Text style={styles.lead}>These are the plans for when subscriptions open.</Text>
+          ) : null}
 
-      {plan.tiers.map((tier) => {
-        const mine = tier.key === plan.tier;
-        return (
-          <View key={tier.key} testID={`plan-card-${tier.key}`} style={[styles.card, mine && styles.cardMine]}>
-            <View style={styles.cardHead}>
-              <Text style={styles.cardName}>{tier.name}</Text>
-              {mine ? (
-                <Text style={styles.badge}>Your plan</Text>
-              ) : tier.trialDays > 0 ? (
-                <Text style={styles.trial}>{tier.trialDays}-day free trial</Text>
-              ) : null}
-            </View>
-            <View style={styles.features}>
-              {tierFeatures(tier).map((feature) => (
-                <View
-                  key={feature.text}
-                  accessible
-                  accessibilityLabel={`${feature.included ? "Included" : "Not included"}: ${feature.text}`}
-                  style={styles.feature}
-                >
-                  {feature.included ? (
-                    <Check size={15} color={equinaTheme.colors.brass} strokeWidth={2.2} />
-                  ) : (
-                    <Minus size={15} color={equinaTheme.text.tertiary} strokeWidth={2} />
-                  )}
-                  <Text style={[styles.featureText, !feature.included && styles.featureOff]}>{feature.text}</Text>
-                </View>
-              ))}
-            </View>
+          {plan.tiers.map((tier) => (
+            <PlanCard
+              key={tier.key}
+              tier={tier}
+              mine={tier.key === plan.tier}
+              pill={tier.trialDays > 0 ? `${tier.trialDays}-day free trial` : null}
+            />
+          ))}
+
+          <View style={styles.footer}>
+            <Text style={styles.footerTitle}>Subscriptions open with the App Store release</Text>
+            <Text style={styles.footerText}>
+              {paidNames && trialDays.length === 1 ? `${paidNames} start with a ${trialDays[0]}-day free trial. ` : ""}
+              {creditsNote}
+            </Text>
           </View>
-        );
-      })}
-
-      <View style={styles.footer}>
-        <Text style={styles.footerTitle}>Subscriptions open with the App Store release</Text>
-        <Text style={styles.footerText}>
-          {paidNames && trialDays.length === 1 ? `${paidNames} start with a ${trialDays[0]}-day free trial. ` : ""}
-          One Ralf credit is one message; a message with a photo is three. The Equina team arranges coach sessions and
-          event tickets with you.
-        </Text>
-      </View>
+        </>
+      )}
     </View>
   );
 }
@@ -111,62 +103,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     fontWeight: "400"
-  },
-  card: {
-    gap: 14,
-    padding: 18,
-    borderRadius: equinaTheme.radius.card,
-    backgroundColor: equinaTheme.surfaces.raised
-  },
-  cardMine: {
-    borderWidth: 1,
-    borderColor: equinaTheme.colors.brass
-  },
-  cardHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12
-  },
-  cardName: {
-    ...equinaTheme.typography.title,
-    color: equinaTheme.text.primary
-  },
-  badge: {
-    ...equinaTheme.typography.label,
-    overflow: "hidden",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    color: equinaTheme.colors.ink,
-    backgroundColor: equinaTheme.colors.brass
-  },
-  trial: {
-    ...equinaTheme.typography.label,
-    overflow: "hidden",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    color: equinaTheme.colors.brass,
-    backgroundColor: equinaTheme.material.selected
-  },
-  features: {
-    gap: 10
-  },
-  feature: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10
-  },
-  featureText: {
-    flex: 1,
-    color: equinaTheme.text.primary,
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: "400"
-  },
-  featureOff: {
-    color: equinaTheme.text.tertiary
   },
   footer: {
     gap: 6,

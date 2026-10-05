@@ -28,6 +28,7 @@ export class EquinaBackend {
 
   constructor() {
     const client = getSupabaseClient();
+    this.edge = new EdgeClient(client);
     this.account = new AccountRepository(client);
     this.auth = new AuthRepository(client, forgetStoredSession);
     this.coach = new CoachRepository(client);
@@ -37,8 +38,7 @@ export class EquinaBackend {
     this.club = new ClubRepository(client);
     this.marketplace = new MarketplaceRepository(client);
     this.notifications = new NotificationRepository(client);
-    this.plans = new PlanRepository(client);
-    this.edge = new EdgeClient(client);
+    this.plans = new PlanRepository(client, this.edge);
   }
 
   async connect(): Promise<{ session: Session | null; capabilities: BackendCapabilities }> {
