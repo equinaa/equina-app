@@ -5,4 +5,5 @@ import "./ride-stats.test";
 import "./sign-in.test";
 import "./club.test";
 import "./academy.test";
+import "./admin.test";
 await import("./backend-migrations.test");

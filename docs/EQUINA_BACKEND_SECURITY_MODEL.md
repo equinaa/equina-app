@@ -100,6 +100,14 @@ state, or guaranteed delivery.
   columns are server-owned.
 - Checkout reservation, payment transitions, upload completion, moderation, and
   cleanup remain server-owned from previous sprints.
+- Staff powers require a second factor. `private.is_staff()` and the admin feature
+  flag policy hold only for a session whose JWT carries `aal: aal2`, so a leaked
+  staff password alone opens nothing (202610050001). The admin console uses the
+  publishable key and the staff member's session; it never holds the service role.
+- Lesson publication, chapter sets, and Club moderation decisions go through
+  `staff_*` security-definer functions that check `is_staff()` first. A lesson's
+  `published_at` has no client grant, and only drafts can be deleted, so riders'
+  progress on a published lesson is never deleted with it.
 
 ## Retention Contract
 

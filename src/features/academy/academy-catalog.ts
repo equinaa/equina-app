@@ -41,7 +41,10 @@ export type AcademyLessonView = {
 export const academyCredit = "Equina Academy";
 export const allLevelsLabel = "All levels";
 
-const knownTopics = ["Dressage", "Jumping", "Care", "Mindset"];
+// The topics the Academy filters by. The admin offers exactly these when staff
+// file a lesson (admin/src/lib/lessons.ts); tests/admin.test.ts keeps the two
+// lists equal.
+export const knownTopics = ["Dressage", "Jumping", "Care", "Mindset"];
 
 const levelLabels: Record<string, AcademyRiderLevel> = {
   beginner: "Beginner",
