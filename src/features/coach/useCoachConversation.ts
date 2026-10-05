@@ -65,12 +65,16 @@ export function useCoachConversation({
   mode,
   backend,
   enabled,
-  context
+  context,
+  resumeLatest = true
 }: {
   mode: AccountMode;
   backend: EquinaBackend | null;
   enabled: boolean;
   context: CoachConversationContext;
+  /** False when Ralf opens with a question of its own: the saved conversation
+   *  loading late would otherwise replace the one that question starts. */
+  resumeLatest?: boolean;
 }) {
   const [conversations, setConversations] = useState<CoachConversationRecord[]>([]);
   const [activeConversationId, setActiveConversationId] = useState("");
@@ -87,9 +91,10 @@ export function useCoachConversation({
   );
   const contextRef = useRef(context);
   contextRef.current = context;
+  const resumeLatestRef = useRef(resumeLatest);
 
   useEffect(() => {
-    if (mode !== "demo") return;
+    if (mode !== "demo" || !resumeLatestRef.current) return;
     let active = true;
     void AsyncStorage.getItem(demoStorageKey).then((raw) => {
       if (!active || !raw) return;
@@ -130,7 +135,7 @@ export function useCoachConversation({
     try {
       const next = await backend.coach.conversations();
       setConversations(next);
-      if (!activeConversationId && next[0]) {
+      if (resumeLatestRef.current && !activeConversationId && next[0]) {
         await loadConversation(next[0].id);
       }
     } catch {

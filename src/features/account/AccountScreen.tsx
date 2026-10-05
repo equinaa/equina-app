@@ -27,7 +27,8 @@ import {
   SlidersHorizontal,
   Trash2,
   UserRound,
-  UsersRound
+  UsersRound,
+  X
 } from "lucide-react-native";
 import type {
   AccountDeletionRequestRecord,
@@ -44,6 +45,7 @@ import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { SettingsGroup } from "../../ui/settings/SettingsGroup";
 import { SettingsRow } from "../../ui/settings/SettingsRow";
 import { equinaTheme } from "../../ui/theme/theme";
+import { trainingFocusByDiscipline } from "../coach/coach-types";
 import type { AccountMode, AccountRoute } from "./account-types";
 
 const disciplines: Array<{ value: Discipline; label: string }> = [
@@ -64,10 +66,18 @@ const labelFor = (value?: string) => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
+const focusOptionsFor = (discipline: Discipline, current?: string) => {
+  const options = [...trainingFocusByDiscipline[labelFor(discipline) as keyof typeof trainingFocusByDiscipline] ?? []];
+  // A focus saved before the lists existed stays choosable rather than vanishing.
+  if (current && !options.includes(current)) options.push(current);
+  return options.map((value) => ({ value, label: value }));
+};
+
 type ConfirmAction = "signout" | "coach-history" | "delete-account" | null;
 
 export function AccountScreen({
   mode,
+  marketplaceOpen,
   snapshot,
   horseName,
   busy,
@@ -77,6 +87,7 @@ export function AccountScreen({
   onSaveProfile,
   onUploadAvatar,
   onSavePreferences,
+  onSaveTrainingProfile,
   onSaveNotifications,
   onLoadBlocked,
   onUnblock,
@@ -85,9 +96,11 @@ export function AccountScreen({
   onScheduleDeletion,
   onCancelDeletion,
   onSignOut,
-  onNestedChange
+  onClose
 }: {
   mode: AccountMode;
+  /** Buying, selling or messaging is on, so its settings mean something. */
+  marketplaceOpen: boolean;
   snapshot: AccountSnapshot;
   horseName: string;
   busy: string;
@@ -104,6 +117,11 @@ export function AccountScreen({
   onSavePreferences: (
     patch: Partial<Omit<UserPreferencesRecord, "userId" | "version" | "updatedAt">>
   ) => Promise<void>;
+  onSaveTrainingProfile: (input: {
+    discipline: Discipline;
+    skillLevel: NonNullable<ProfileRecord["skillLevel"]>;
+    focus: string;
+  }) => Promise<void>;
   onSaveNotifications: (
     patch: Partial<Omit<NotificationPreferencesRecord, "userId" | "updatedAt">>
   ) => Promise<void>;
@@ -114,7 +132,8 @@ export function AccountScreen({
   onScheduleDeletion: (reason?: string) => Promise<AccountDeletionRequestRecord | null>;
   onCancelDeletion: () => Promise<void>;
   onSignOut: () => Promise<void> | void;
-  onNestedChange: (nested: boolean) => void;
+  /** Account opens over a tab; this goes back to it. */
+  onClose: () => void;
 }) {
   const [route, setRoute] = useState<AccountRoute>("root");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
@@ -123,15 +142,6 @@ export function AccountScreen({
   useEffect(() => {
     if (route === "blocked") void onLoadBlocked();
   }, [onLoadBlocked, route]);
-
-  useEffect(() => {
-    onNestedChange(route !== "root");
-  }, [onNestedChange, route]);
-
-  useEffect(
-    () => () => onNestedChange(false),
-    [onNestedChange]
-  );
 
   const navigate = (next: AccountRoute) => {
     selectionHaptic();
@@ -165,7 +175,21 @@ export function AccountScreen({
     <View style={styles.screen}>
       {route !== "root" ? (
         <AccountRouteHeader title={routeTitle(route)} onBack={() => navigate("root")} />
-      ) : null}
+      ) : (
+        <View style={styles.rootHeader}>
+          <Text accessibilityRole="header" style={styles.rootTitle}>Account</Text>
+          <MotionPressable
+            testID="account-close"
+            accessibilityRole="button"
+            accessibilityLabel="Close account"
+            hitSlop={4}
+            style={styles.closeButton}
+            onPress={onClose}
+          >
+            <X size={20} color={equinaTheme.text.primary} />
+          </MotionPressable>
+        </View>
+      )}
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       {busy ? (
         <View style={styles.busyLine}>
@@ -177,6 +201,7 @@ export function AccountScreen({
       {route === "root" ? (
         <AccountRoot
           mode={mode}
+          marketplaceOpen={marketplaceOpen}
           snapshot={snapshot}
           horseName={horseName}
           onNavigate={navigate}
@@ -191,22 +216,25 @@ export function AccountScreen({
           onUploadAvatar={onUploadAvatar}
         />
       ) : route === "personalization" ? (
-        <PersonalizationSettings
+        <TrainingProfileSettings
           snapshot={snapshot}
-          disabled={busy === "preferences"}
-          onSave={onSavePreferences}
+          saving={busy === "training"}
+          onSave={onSaveTrainingProfile}
+          onSaved={() => navigate("root")}
         />
       ) : route === "notifications" ? (
         <NotificationSettings
           values={snapshot.notifications}
           disabled={busy === "notifications"}
           demo={mode === "demo"}
+          marketplaceOpen={marketplaceOpen}
           onSave={onSaveNotifications}
         />
       ) : route === "privacy" ? (
         <PrivacySettings
           snapshot={snapshot}
           mode={mode}
+          marketplaceOpen={marketplaceOpen}
           disabled={Boolean(busy)}
           exportReady={Boolean(exportReady)}
           onSave={onSavePreferences}
@@ -231,7 +259,7 @@ export function AccountScreen({
           onUnblock={onUnblock}
         />
       ) : (
-        <HelpAndLegal />
+        <HelpAndLegal marketplaceOpen={marketplaceOpen} />
       )}
 
       <ConfirmationSheet
@@ -245,6 +273,7 @@ export function AccountScreen({
 
 function AccountRoot({
   mode,
+  marketplaceOpen,
   snapshot,
   horseName,
   onNavigate,
@@ -257,7 +286,12 @@ function AccountRoot({
   onNavigate: (route: AccountRoute) => void;
   onOpenHorse: () => void;
   onSignOut: () => void;
+  marketplaceOpen: boolean;
 }) {
+  const notifications = snapshot.notifications;
+  const notificationSummary = marketplaceOpen
+    ? notifications.humanMessages ? "Messages on" : "Quiet"
+    : notifications.horseReminders || notifications.academyReminders ? "Reminders on" : "Quiet";
   const initials = snapshot.profile.displayName.trim().split(/\s+/)
     .slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("") || "EQ";
   return (
@@ -301,7 +335,7 @@ function AccountRoot({
       <SettingsGroup title="Your Equina">
         <SettingsRow
           Icon={SlidersHorizontal}
-          title="Personalization"
+          title="Training profile"
           value={`${labelFor(snapshot.profile.discipline)} · ${labelFor(snapshot.profile.skillLevel)}`}
           testID="account-open-personalization"
           onPress={() => onNavigate("personalization")}
@@ -309,7 +343,7 @@ function AccountRoot({
         <SettingsRow
           Icon={Bell}
           title="Notifications"
-          value={snapshot.notifications.humanMessages ? "Messages on" : "Quiet"}
+          value={notificationSummary}
           testID="account-open-notifications"
           onPress={() => onNavigate("notifications")}
         />
@@ -369,8 +403,6 @@ function ProfileEditor({
   onUploadAvatar: (asset: UploadAsset) => Promise<void>;
 }) {
   const [name, setName] = useState(snapshot.profile.displayName);
-  const [discipline, setDiscipline] = useState<Discipline>(snapshot.profile.discipline ?? "jumping");
-  const [level, setLevel] = useState<NonNullable<ProfileRecord["skillLevel"]>>(snapshot.profile.skillLevel ?? "intermediate");
   const initials = name.trim().slice(0, 2).toUpperCase() || "EQ";
 
   const pickAvatar = async () => {
@@ -422,9 +454,6 @@ function ProfileEditor({
         />
       </View>
 
-      <ChoiceSection title="Discipline" options={disciplines} value={discipline} onChange={setDiscipline} />
-      <ChoiceSection title="Level" options={levels} value={level} onChange={setLevel} />
-
       <MotionPressable
         testID="account-profile-save"
         accessibilityRole="button"
@@ -435,8 +464,8 @@ function ProfileEditor({
         onPress={() => void onSave({
           displayName: name,
           locale: snapshot.profile.locale,
-          discipline,
-          skillLevel: level
+          discipline: snapshot.profile.discipline ?? "jumping",
+          skillLevel: snapshot.profile.skillLevel ?? "intermediate"
         })}
       >
         <Text style={styles.primaryButtonText}>{saving ? "Saving..." : "Save profile"}</Text>
@@ -465,10 +494,11 @@ function ChoiceSection<T extends string>({
           return (
             <Pressable
               key={option.value}
+              testID={`account-choice-${option.value.toLowerCase().replace(/\s+/g, "-")}`}
               accessibilityRole="radio"
               accessibilityLabel={option.label}
               accessibilityState={{ selected }}
-              style={[styles.choice, selected && styles.choiceSelected]}
+              style={[styles.choice, options.length === 3 && styles.choiceThird, selected && styles.choiceSelected]}
               onPress={() => {
                 selectionHaptic();
                 onChange(option.value);
@@ -483,51 +513,62 @@ function ChoiceSection<T extends string>({
   );
 }
 
-function PersonalizationSettings({
+// How the rider rides and what they are working on. Academy and Ralf read
+// all three, so they live together rather than across two screens.
+function TrainingProfileSettings({
   snapshot,
-  disabled,
-  onSave
+  saving,
+  onSave,
+  onSaved
 }: {
   snapshot: AccountSnapshot;
-  disabled: boolean;
-  onSave: (
-    patch: Partial<Omit<UserPreferencesRecord, "userId" | "version" | "updatedAt">>
-  ) => Promise<void>;
+  saving: boolean;
+  onSave: (input: {
+    discipline: Discipline;
+    skillLevel: NonNullable<ProfileRecord["skillLevel"]>;
+    focus: string;
+  }) => Promise<void>;
+  onSaved: () => void;
 }) {
-  const [focus, setFocus] = useState(snapshot.preferences.academyFocus ?? "Rhythm");
+  const [discipline, setDiscipline] = useState<Discipline>(snapshot.profile.discipline ?? "jumping");
+  const [level, setLevel] = useState<NonNullable<ProfileRecord["skillLevel"]>>(snapshot.profile.skillLevel ?? "intermediate");
+  const savedFocus = snapshot.preferences.academyFocus;
+  const [focus, setFocus] = useState(savedFocus ?? "");
+  const focusOptions = focusOptionsFor(discipline, discipline === snapshot.profile.discipline ? savedFocus : undefined);
+  const focusChosen = focusOptions.some((option) => option.value === focus);
+
+  const changeDiscipline = (next: Discipline) => {
+    setDiscipline(next);
+    // Each discipline has its own focuses; a focus from another would not apply.
+    const nextOptions = focusOptionsFor(next);
+    if (!nextOptions.some((option) => option.value === focus)) setFocus(nextOptions[0]?.value ?? "");
+  };
+
+  const save = async () => {
+    try {
+      await onSave({ discipline, skillLevel: level, focus });
+      onSaved();
+    } catch {
+      // The error line at the top of Account says what failed; the choices stay.
+    }
+  };
+
   return (
     <View style={styles.routeBody}>
-      <Text style={styles.routeLead}>Academy and Ralf use this as your default training direction. You can still change it for one conversation.</Text>
-      <View style={styles.field}>
-        <Text style={styles.fieldLabel}>Current focus</Text>
-        <TextInput
-          testID="account-academy-focus"
-          accessibilityLabel="Current Academy focus"
-          value={focus}
-          onChangeText={setFocus}
-          maxLength={80}
-          placeholder="Rhythm"
-          placeholderTextColor={equinaTheme.text.tertiary}
-          style={styles.input}
-        />
-      </View>
-      <SettingsGroup title="Learning profile">
-        <SettingsRow title="Discipline" value={labelFor(snapshot.preferences.academyDiscipline ?? snapshot.profile.discipline)} />
-        <SettingsRow title="Level" value={labelFor(snapshot.preferences.academyLevel ?? snapshot.profile.skillLevel)} />
-      </SettingsGroup>
+      <Text style={styles.routeLead}>Your Academy path and Ralf's answers start from these. You can still change the focus for one conversation with Ralf.</Text>
+      <ChoiceSection title="Discipline" options={disciplines} value={discipline} onChange={changeDiscipline} />
+      <ChoiceSection title="Level" options={levels} value={level} onChange={setLevel} />
+      <ChoiceSection title="Current focus" options={focusOptions} value={focus} onChange={setFocus} />
       <MotionPressable
         testID="account-personalization-save"
         accessibilityRole="button"
-        accessibilityLabel="Save personalization"
-        disabled={disabled || !focus.trim()}
-        style={[styles.primaryButton, (disabled || !focus.trim()) && styles.disabledButton]}
-        onPress={() => void onSave({
-          academyFocus: focus.trim(),
-          academyDiscipline: snapshot.profile.discipline,
-          academyLevel: snapshot.profile.skillLevel
-        })}
+        accessibilityLabel="Save training profile"
+        accessibilityState={{ disabled: saving || !focusChosen }}
+        disabled={saving || !focusChosen}
+        style={[styles.primaryButton, (saving || !focusChosen) && styles.disabledButton]}
+        onPress={() => void save()}
       >
-        <Text style={styles.primaryButtonText}>Save personalization</Text>
+        <Text style={styles.primaryButtonText}>{saving ? "Saving..." : "Save training profile"}</Text>
       </MotionPressable>
     </View>
   );
@@ -537,11 +578,13 @@ function NotificationSettings({
   values,
   disabled,
   demo,
+  marketplaceOpen,
   onSave
 }: {
   values: NotificationPreferencesRecord;
   disabled: boolean;
   demo: boolean;
+  marketplaceOpen: boolean;
   onSave: (
     patch: Partial<Omit<NotificationPreferencesRecord, "userId" | "updatedAt">>
   ) => Promise<void>;
@@ -554,20 +597,24 @@ function NotificationSettings({
           : "Equina asks for system permission only when you turn on a notification category."}
       </Text>
       <SettingsGroup title="Notify me about">
-        <SettingsRow
-          title="Messages"
-          detail="Buyer and seller replies"
-          switchValue={values.humanMessages}
-          disabled={disabled}
-          onToggle={(humanMessages) => void onSave({ humanMessages })}
-        />
-        <SettingsRow
-          title="Order changes"
-          detail="Shipping, inspection, and disputes"
-          switchValue={values.orderChanges}
-          disabled={disabled}
-          onToggle={(orderChanges) => void onSave({ orderChanges })}
-        />
+        {marketplaceOpen ? (
+          <>
+            <SettingsRow
+              title="Messages"
+              detail="Buyer and seller replies"
+              switchValue={values.humanMessages}
+              disabled={disabled}
+              onToggle={(humanMessages) => void onSave({ humanMessages })}
+            />
+            <SettingsRow
+              title="Order changes"
+              detail="Shipping, inspection, and disputes"
+              switchValue={values.orderChanges}
+              disabled={disabled}
+              onToggle={(orderChanges) => void onSave({ orderChanges })}
+            />
+          </>
+        ) : null}
         <SettingsRow
           title="Horse reminders"
           detail="Records and care you schedule"
@@ -583,15 +630,17 @@ function NotificationSettings({
           onToggle={(academyReminders) => void onSave({ academyReminders })}
         />
       </SettingsGroup>
-      <SettingsGroup title="Privacy">
-        <SettingsRow
-          title="Message previews"
-          detail="Off keeps message text out of push payloads"
-          switchValue={values.messagePreviews}
-          disabled={disabled}
-          onToggle={(messagePreviews) => void onSave({ messagePreviews })}
-        />
-      </SettingsGroup>
+      {marketplaceOpen ? (
+        <SettingsGroup title="Privacy">
+          <SettingsRow
+            title="Message previews"
+            detail="Off keeps message text out of push payloads"
+            switchValue={values.messagePreviews}
+            disabled={disabled}
+            onToggle={(messagePreviews) => void onSave({ messagePreviews })}
+          />
+        </SettingsGroup>
+      ) : null}
       <Text style={styles.footnote}>Equina never puts horse health notes, AI prompts, payment data, or email in a push notification.</Text>
     </View>
   );
@@ -600,6 +649,7 @@ function NotificationSettings({
 function PrivacySettings({
   snapshot,
   mode,
+  marketplaceOpen,
   disabled,
   exportReady,
   onSave,
@@ -609,6 +659,7 @@ function PrivacySettings({
 }: {
   snapshot: AccountSnapshot;
   mode: AccountMode;
+  marketplaceOpen: boolean;
   disabled: boolean;
   exportReady: boolean;
   onSave: (
@@ -668,7 +719,9 @@ function PrivacySettings({
           onPress={onClearHistory}
         />
       </SettingsGroup>
-      <Text style={styles.footnote}>Marketplace messages are server-readable for fraud, safety, and dispute review. Equina does not claim end-to-end encryption.</Text>
+      {marketplaceOpen ? (
+        <Text style={styles.footnote}>Marketplace messages are server-readable for fraud, safety, and dispute review. Equina does not claim end-to-end encryption.</Text>
+      ) : null}
     </View>
   );
 }
@@ -699,7 +752,7 @@ function SecuritySettings({
         <SettingsRow
           Icon={LockKeyhole}
           title="Sign-in method"
-          value={mode === "demo" ? "Demo" : "Email code"}
+          value={mode === "demo" ? "Demo" : "Email"}
         />
       </SettingsGroup>
 
@@ -770,10 +823,14 @@ function BlockedAccounts({
   );
 }
 
-function HelpAndLegal() {
+function HelpAndLegal({ marketplaceOpen }: { marketplaceOpen: boolean }) {
   return (
     <View style={styles.routeBody}>
-      <Text style={styles.routeLead}>Equina is training guidance, organization, education, community, and protected marketplace infrastructure. It is not veterinary diagnosis.</Text>
+      <Text style={styles.routeLead}>
+        {marketplaceOpen
+          ? "Equina is training guidance, organization, education, community, and protected marketplace infrastructure. It is not veterinary diagnosis."
+          : "Equina is training guidance, organization, education, and community. It is not veterinary diagnosis."}
+      </Text>
       <SettingsGroup title="Support">
         <SettingsRow
           Icon={MessageCircle}
@@ -794,7 +851,6 @@ function HelpAndLegal() {
           detail="Guidance only; health concerns escalate to a professional"
         />
       </SettingsGroup>
-      <Text style={styles.footnote}>Production store release still requires final published privacy policy and terms URLs in the release configuration.</Text>
     </View>
   );
 }
@@ -862,7 +918,7 @@ const confirmationCopy: Record<NonNullable<ConfirmAction>, { title: string; body
 const routeTitle = (route: AccountRoute) => ({
   root: "Account",
   profile: "Edit profile",
-  personalization: "Personalization",
+  personalization: "Training profile",
   notifications: "Notifications",
   privacy: "Privacy and Ralf",
   security: "Security",
@@ -874,6 +930,24 @@ const styles = StyleSheet.create({
   screen: {
     gap: 24,
     paddingBottom: 32
+  },
+  rootHeader: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  rootTitle: {
+    ...equinaTheme.typography.title,
+    color: equinaTheme.text.primary
+  },
+  closeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.material.quiet
   },
   identity: {
     flexDirection: "row",
@@ -949,7 +1023,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   error: {
-    color: equinaTheme.colors.danger,
+    color: equinaTheme.colorRole.criticalOnDark,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: "400",
@@ -1044,7 +1118,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   choice: {
-    minWidth: 88,
+    flexBasis: "47%",
     minHeight: 44,
     flexGrow: 1,
     alignItems: "center",
@@ -1052,6 +1126,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: equinaTheme.surfaces.raised,
     paddingHorizontal: 12
+  },
+  choiceThird: {
+    flexBasis: "30%"
   },
   choiceSelected: {
     backgroundColor: equinaTheme.colors.brass
@@ -1093,7 +1170,7 @@ const styles = StyleSheet.create({
     backgroundColor: equinaTheme.surfaces.raised
   },
   deletionTitle: {
-    color: equinaTheme.colors.danger,
+    color: equinaTheme.colorRole.criticalOnDark,
     fontSize: 16,
     lineHeight: 21,
     fontWeight: "600"

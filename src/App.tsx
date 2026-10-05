@@ -97,8 +97,9 @@ import { socialAuthAvailability } from "./features/account/social-auth";
 import type { AccountMode } from "./features/account/account-types";
 import { useAccount } from "./features/account/useAccount";
 import { useEquinaSession } from "./features/account/useEquinaSession";
-import { CoachScreen } from "./features/coach/CoachScreen";
-import { clearDemoCoachHistory, useCoachConversation } from "./features/coach/useCoachConversation";
+import { RalfScreen } from "./features/coach/CoachScreen";
+import { trainingFocusByDiscipline, type CoachConversationContext } from "./features/coach/coach-types";
+import { clearDemoCoachHistory } from "./features/coach/useCoachConversation";
 import { ShopConversationScreen } from "./features/messaging/ShopConversationScreen";
 import { ShopThreadList } from "./features/messaging/ShopThreadList";
 import { useConnectedShopCatalog } from "./features/messaging/useConnectedShopCatalog";
@@ -169,7 +170,9 @@ type ShopMessage = {
   text: string;
   sentAt: string;
 };
-type AcademyMode = "home" | "directory" | "video" | "ai";
+// The Academy is one page and the lesson it opens. Ralf, who used to be its
+// third tab, opens from every tab now (see openRalf).
+type AcademyMode = "home" | "video";
 const academyTopics = ["All", "Dressage", "Jumping", "Care", "Mindset"] as const;
 type AcademyTopic = (typeof academyTopics)[number];
 type CoachDiscipline = OnboardingDiscipline;
@@ -203,15 +206,9 @@ type AcademyState = {
   mode: AcademyMode;
   selectedLessonId: string;
 };
-type CoachState = {
-  discipline: CoachDiscipline;
-  goal: string;
-  load: string;
-  style: string;
-  onboarded: boolean;
-  messages: ChatMessage[];
-};
-type StableView = "overview" | "nutrition" | "health" | "docs";
+// Care is the schedule and the health records together, so each record has one
+// home. Nutrition stays out until a horse has a real feeding plan to show.
+type StableView = "overview" | "care" | "docs" | "nutrition";
 type NutritionMealId = "morning" | "pre-ride" | "evening";
 type NutritionState = {
   completedMeals: NutritionMealId[];
@@ -290,13 +287,26 @@ function HorseshoeIcon({
   );
 }
 
-const tabs: Array<{ id: Tab; label: string; Icon: typeof Store | typeof HorseshoeIcon }> = [
+type DockTab = { id: Tab; label: string; Icon: typeof Store | typeof HorseshoeIcon };
+
+// The rider's own work comes first: the day, the horse, learning, then other
+// riders. The Shop is built but its buying, selling and messaging are switched
+// off, so its tab only joins the dock once one of them is on.
+const coreTabs: DockTab[] = [
   { id: "home", label: "Home", Icon: House },
   { id: "stable", label: "Horse", Icon: HorseshoeIcon },
-  { id: "community", label: "Club", Icon: MessageCircle },
   { id: "assistant", label: "Academy", Icon: BookOpen },
-  { id: "gear", label: "Shop", Icon: ShoppingBag }
+  { id: "community", label: "Club", Icon: MessageCircle }
 ];
+const shopTab: DockTab = { id: "gear", label: "Shop", Icon: ShoppingBag };
+const tabTitles: Record<Tab, string> = {
+  home: "Home",
+  stable: "Horse",
+  assistant: "Academy",
+  community: "Club",
+  gear: "Shop",
+  profile: "Account"
+};
 
 const nightTheme = {
   bg: equinaTheme.surfaceRole.canvas,
@@ -369,14 +379,7 @@ const defaultCoachGoal = "Transitions";
 const defaultCoachLoad = "Normal week";
 const defaultCoachStyle = "Calm";
 const coachDisciplines: CoachDiscipline[] = ["Dressage", "Jumping", "Eventing", "Trail"];
-const coachGoalsByDiscipline: Record<CoachDiscipline, string[]> = {
-  Dressage: [defaultCoachGoal, "Contact", "Suppleness"],
-  Jumping: ["Rhythm", "Lines", "Confidence"],
-  Eventing: ["Balance", "Fitness", "Recovery"],
-  Trail: ["Relaxation", "Fitness", "Confidence"]
-};
-const coachLoads = ["Light week", defaultCoachLoad, "Heavy week"];
-const coachStyles = [defaultCoachStyle, "Direct", "Detailed"];
+const coachGoalsByDiscipline: Record<CoachDiscipline, readonly string[]> = trainingFocusByDiscipline;
 const riderLevels: readonly RiderLevel[] = ["Beginner", "Intermediate", "Advanced", "Pro"];
 const onboardingGoals: readonly RiderGoal[] = ["Daily training", "Competition", "Horse care", "Learn faster"];
 const ridingFrequencies = ["2 rides/week", "3-4 rides/week", "5+ rides/week"] as const;
@@ -407,19 +410,13 @@ const horseRideFeels = ["Calm warm-up", "Extra energy", "Needs quiet aids"] as c
 const carePriorities = ["Training plan", "Recovery", "Vet records", "Gear fit"] as const;
 const appPriorities = ["Ride plan", "Health records", "Lessons", "Club", "Shop"] as const;
 const homeFriendStories = [
-  { initials: "M", name: "Mara", horse: "Atlas", status: "Riding", accent: "#D8A94A" },
-  { initials: "S", name: "Sofia", horse: "Nero", status: "Streak", accent: "#315B4D" },
-  { initials: "N", name: "Noor", horse: "Vega", status: "Lesson", accent: "#8C6A3E" }
+  { initials: "M", name: "Mara", horse: "Atlas", status: "Riding", accent: equinaTheme.colors.brass },
+  { initials: "S", name: "Sofia", horse: "Nero", status: "Streak", accent: equinaTheme.colorRole.positive },
+  { initials: "N", name: "Noor", horse: "Vega", status: "Lesson", accent: equinaTheme.colors.pine }
 ];
 const homeFeedItems = [
   { rider: "Mara", horse: "Atlas", title: "Clean changes", body: "42 min dressage · changes logged.", tag: "12m" },
   { rider: "Sofia", horse: "Nero", title: "New streak", body: "3 days in a row · gymnastic line done.", tag: "1h" }
-];
-const communityStories = [
-  { name: "Ilinca", initials: "I", image: equinaImages.profile, label: "Your ride", live: false },
-  { name: "Mara", initials: "M", image: equinaImages.dressage, label: "Flatwork", live: true },
-  { name: "Sofia", initials: "S", image: equinaImages.jumpingClub, label: "Jump line", live: false },
-  { name: "Elena", initials: "E", image: equinaImages.stable, label: "Coach", live: true }
 ];
 const communityFeedMedia = [equinaImages.jumpingClub, equinaImages.dressage, equinaImages.stable];
 const homeMoodOptions: Array<{
@@ -589,9 +586,9 @@ const academyImageFor = (topic: string, discipline?: string) =>
   (discipline === "eventing" ? equinaImages.eventing : discipline === "trail" ? equinaImages.trail : equinaImages.profile);
 
 const academyPaths = [
-  { title: "Dressage base", body: "Contact, rhythm, transitions", progress: 0, lessons: "4 lessons", accent: "#183B32" },
-  { title: "Jumping calm", body: "Lines, rhythm, confidence", progress: 0, lessons: "3 lessons", accent: "#8C6A3E" },
-  { title: "Care basics", body: "Recovery, saddle marks, checks", progress: 0, lessons: "3 lessons", accent: "#A7813D" }
+  { title: "Dressage base", body: "Contact, rhythm, transitions", progress: 0, lessons: "4 lessons", accent: equinaTheme.colors.pine },
+  { title: "Jumping calm", body: "Lines, rhythm, confidence", progress: 0, lessons: "3 lessons", accent: equinaTheme.colors.pine },
+  { title: "Care basics", body: "Recovery, saddle marks, checks", progress: 0, lessons: "3 lessons", accent: equinaTheme.colorRole.positive }
 ];
 
 const levelGuidance: Record<
@@ -845,7 +842,10 @@ function EquinaApp() {
   const [onboardingCarePriority, setOnboardingCarePriority] = useState<(typeof carePriorities)[number]>("Training plan");
   const [onboardingAppPriority, setOnboardingAppPriority] = useState<(typeof appPriorities)[number]>("Ride plan");
   const [tab, setTab] = useState<Tab>("home");
-  const [accountNested, setAccountNested] = useState(false);
+  // Account opens over the tab the rider was on, and closing it goes back there.
+  const [accountReturnTab, setAccountReturnTab] = useState<Tab>("home");
+  // Ralf opens over whichever tab asked for him, with that tab's question.
+  const [ralfOpen, setRalfOpen] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState(api.store.listings[0]?.id ?? "");
   const [message, setMessage] = useState("");
   const [marketSearch, setMarketSearch] = useState("");
@@ -955,6 +955,8 @@ function EquinaApp() {
     setCoachOnboarded(false);
     setAcademyProgress(0);
     setAcademyMode("home");
+    setRalfOpen(false);
+    setAccountReturnTab("home");
     setTab("home");
   };
   const accountController = useAccount({
@@ -1017,6 +1019,18 @@ function EquinaApp() {
   const clubSharing = accountMode === "connected"
     ? equinaSession.capabilities.clubPublishing
     : equinaFeatureFlags.clubPublishing;
+  // A connected account needs the server to open a part of the marketplace;
+  // demo mode follows this build's switches.
+  const marketplaceOpen = accountMode === "connected"
+    ? equinaSession.capabilities.checkout ||
+      equinaSession.capabilities.listingCreation ||
+      equinaSession.capabilities.messaging
+    : equinaFeatureFlags.shopTransactions ||
+      equinaFeatureFlags.shopListingCreation ||
+      equinaFeatureFlags.shopMessaging;
+  const dockTabs = marketplaceOpen ? [...coreTabs, shopTab] : coreTabs;
+  // Every "Ask Ralf" disappears with him, so none of them leads to a dead end.
+  const ralfAvailable = accountMode === "demo" || equinaSession.capabilities.coachChat;
   const latestRideEntry = ridePersistence ? rideJournal.latestEntry : null;
   const clubRideShare: ClubRideShare | undefined = latestRideEntry
     ? {
@@ -1104,14 +1118,6 @@ function EquinaApp() {
       : academyProgress,
     mode: academyMode,
     selectedLessonId: selectedAcademyLessonId
-  };
-  const coachState: CoachState = {
-    discipline: coachDiscipline,
-    goal: coachGoal,
-    load: coachLoad,
-    style: coachStyle,
-    onboarded: coachOnboarded,
-    messages: coachMessages
   };
   const postRideLesson = recommendedLessonFor(academyLessons, riderContext, academyFocus);
   const postRideRecommendation: RideRecommendation | undefined = postRideLesson
@@ -1243,6 +1249,24 @@ function EquinaApp() {
     horseRecords.loaded,
     horseRecords.selectedHorse
   ]);
+
+  // The training profile saved in Account is where the Academy path and Ralf
+  // start from. Before, the saved focus was stored and then never used.
+  // A connected account reads only what the server returned; its placeholder
+  // snapshot, shown while loading, would otherwise set a focus nobody chose.
+  const trainingSnapshot = accountMode === "connected" ? equinaSession.account : accountController.snapshot;
+  const savedFocus = trainingSnapshot?.preferences.academyFocus;
+  const savedDiscipline = trainingSnapshot?.profile.discipline;
+  const savedLevel = trainingSnapshot?.profile.skillLevel;
+  useEffect(() => {
+    if (savedFocus) setCoachGoal(savedFocus);
+  }, [savedFocus]);
+  useEffect(() => {
+    if (savedDiscipline) setOnboardingDiscipline(toCoachDiscipline(savedDiscipline));
+  }, [savedDiscipline]);
+  useEffect(() => {
+    if (savedLevel) setOnboardingLevel(toRiderLevel(savedLevel));
+  }, [savedLevel]);
 
   useEffect(() => {
     if (effectiveListings[0] && !effectiveListings.some((listing) => listing.id === selectedListingId)) {
@@ -1390,10 +1414,29 @@ function EquinaApp() {
     );
   };
 
-  const openAssistant = () => {
+  // A prompt arrives already asked, the way the place it came from put it.
+  const openRalf = (prompt?: string) => {
+    if (!ralfAvailable) return;
+    void Haptics.selectionAsync().catch(() => undefined);
     setLastRideRecapVisible(false);
-    setTab("assistant");
-    refresh(`${equinaCoach.name} is ready.`);
+    if (prompt) setPendingCoachPrompt(prompt);
+    setRalfOpen(true);
+    refresh("");
+  };
+
+  const closeRalf = () => {
+    setPendingCoachPrompt("");
+    setRalfOpen(false);
+  };
+
+  const openAccount = () => {
+    if (tab !== "profile") setAccountReturnTab(tab);
+    setRalfOpen(false);
+    setTab("profile");
+  };
+
+  const closeAccount = () => {
+    setTab(accountReturnTab === "profile" ? "home" : accountReturnTab);
   };
 
   // Finishing a preview lesson only moves the preview's bar. A real lesson is
@@ -1418,15 +1461,13 @@ function EquinaApp() {
 
   const openPostRideLesson = () => {
     setLastRideRecapVisible(false);
-    if (postRideLesson) {
-      setSelectedAcademyLessonId(postRideLesson.id);
-      setAcademyMode("video");
-    } else {
+    if (!postRideLesson) {
       // No lesson to continue with yet, so the ride goes to Ralf instead.
-      setPendingCoachPrompt("Review last ride");
-      setCoachOnboarded(true);
-      setAcademyMode("ai");
+      openRalf("Review last ride");
+      return;
     }
+    setSelectedAcademyLessonId(postRideLesson.id);
+    setAcademyMode("video");
     setTab("assistant");
     refresh("");
   };
@@ -1435,11 +1476,6 @@ function EquinaApp() {
     setLastRideRecapVisible(false);
     setTab("home");
     refresh("");
-  };
-
-  const updateCoachDiscipline = (value: CoachDiscipline) => {
-    setCoachDiscipline(value);
-    setCoachGoal(coachGoalsByDiscipline[value][0] ?? defaultCoachGoal);
   };
 
   const openCommunity = () => {
@@ -1588,13 +1624,8 @@ function EquinaApp() {
   };
 
   const askRalfAboutListing = (listing: Listing) => {
-    const prompt = `Screen the fit and buying risk for ${listing.brand} ${listing.model ?? listing.category}`;
     setSelectedListingId(listing.id);
-    setPendingCoachPrompt(prompt);
-    setCoachOnboarded(true);
-    setAcademyMode("ai");
-    setTab("assistant");
-    refresh("");
+    openRalf(`Screen the fit and buying risk for ${listing.brand} ${listing.model ?? listing.category}`);
   };
 
   const createConciergeListing = () => {
@@ -2093,8 +2124,8 @@ function EquinaApp() {
   };
 
   const contentKey = [
-    tab,
-    tab === "assistant" ? `${academyMode}-${coachOnboarded ? "chat" : "setup"}` : "",
+    ralfOpen ? "ralf" : tab,
+    tab === "assistant" ? academyMode : "",
     tab === "gear" ? `${shopMode}-${shopBuyerView}-${shopSellerView}-${shopOpenedListingId}` : ""
   ].join("-");
   // A conversation fills the viewport and scrolls its own message list. The
@@ -2103,8 +2134,20 @@ function EquinaApp() {
   // edge, and with page scrolling disabled there was no way to reach it.
   // Measuring the viewport gives the conversation a definite height to live in.
   const [contentViewportHeight, setContentViewportHeight] = useState(0);
+
+  // The Shop tab can close under a rider who is on it (a demo ending in a
+  // real account, a switch turned off); they land on Home, not on a tab the
+  // dock no longer shows.
+  useEffect(() => {
+    if (!marketplaceOpen && tab === "gear") setTab("home");
+  }, [marketplaceOpen, tab]);
+
+  useEffect(() => {
+    if (!ralfAvailable && ralfOpen) setRalfOpen(false);
+  }, [ralfAvailable, ralfOpen]);
+
   const immersiveConversation =
-    (tab === "assistant" && academyMode === "ai") ||
+    ralfOpen ||
     (tab === "gear" && (
       (shopMode === "browse" && shopBuyerView === "conversation") ||
       (shopMode === "sell" && shopSellerView === "conversation")
@@ -2114,17 +2157,21 @@ function EquinaApp() {
       (shopMode === "browse" && shopBuyerView !== "browse") ||
       (shopMode === "sell" && shopSellerView !== "dashboard")
     );
-  const academyNestedTask =
-    tab === "assistant" && (academyMode === "video" || academyMode === "ai");
-  const accountNestedTask = tab === "profile" && accountNested;
-  const focusedTask = shopNestedTask || academyNestedTask || accountNestedTask;
-  const hideGlobalHeader = focusedTask || tab === "profile";
-  const headerTitle =
-    tab === "home"
-      ? "Home"
-      : tab === "profile"
-        ? riderDisplayName
-        : tabs.find((item) => item.id === tab)?.label ?? "Equina";
+  const academyNestedTask = tab === "assistant" && academyMode === "video";
+  // Account and Ralf each take the whole screen with their own way out, so
+  // neither shows the dock or the tab header.
+  const accountOpen = tab === "profile";
+  const focusedTask = ralfOpen || accountOpen || shopNestedTask || academyNestedTask;
+  const hideGlobalHeader = focusedTask;
+  const headerTitle = tabTitles[tab];
+  const coachContext: CoachConversationContext = {
+    selectedHorseId: accountController.snapshot.primaryHorse?.id,
+    hasHorse: horseState.hasHorse,
+    horseName: horseState.name,
+    focus: coachGoal,
+    load: coachLoad,
+    style: coachStyle
+  };
 
   if (equinaSession.phase === "restoring") {
     return (
@@ -2200,7 +2247,9 @@ function EquinaApp() {
                 horseName={rideHorseName}
                 image={disciplineVisuals[onboardingDiscipline].club}
                 session={lastRide}
+                saved={ridePersistence}
                 recommendation={postRideRecommendation}
+                ralfAvailable={ralfAvailable}
                 shared={sharedRide}
                 sharingEnabled={clubSharing}
                 onMoodChange={updateDailyMood}
@@ -2213,16 +2262,19 @@ function EquinaApp() {
         {tab !== "home" && !hideGlobalHeader && (
           <View style={styles.header}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.brand}>{headerTitle}</Text>
-            <Pressable
-              testID="profile-button"
-              accessibilityRole="button"
-              accessibilityLabel="Open profile"
-              hitSlop={6}
-              style={({ pressed }) => [styles.profileDot, pressed && styles.tabItemPressed]}
-              onPress={() => setTab("profile")}
-            >
-              <Text style={styles.profileDotText}>{riderMonogram}</Text>
-            </Pressable>
+            <View style={styles.headerActions}>
+              {ralfAvailable ? <RalfButton onPress={() => openRalf()} /> : null}
+              <Pressable
+                testID="profile-button"
+                accessibilityRole="button"
+                accessibilityLabel="Open account"
+                hitSlop={6}
+                style={({ pressed }) => [styles.profileDot, pressed && styles.tabItemPressed]}
+                onPress={openAccount}
+              >
+                <Text style={styles.profileDotText}>{riderMonogram}</Text>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -2251,7 +2303,25 @@ function EquinaApp() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {tab === "home" && (
+            {ralfOpen ? (
+              <RalfScreen
+                mode={accountMode}
+                backend={equinaSession.backend}
+                enabled={ralfAvailable}
+                context={coachContext}
+                queuedPrompt={pendingCoachPrompt}
+                onQueuedPromptConsumed={() => setPendingCoachPrompt("")}
+                suggestions={coachPromptsFor(riderContext, horseState)}
+                focusOptions={coachGoalsByDiscipline[onboardingDiscipline]}
+                onBack={closeRalf}
+                onContextChange={(next) => {
+                  setCoachGoal(next.focus);
+                  setCoachLoad(next.load);
+                  setCoachStyle(next.style);
+                }}
+              />
+            ) : null}
+            {!ralfOpen && tab === "home" && (
               <HomeScreen
                 horse={horseState}
                 rideEntries={ridePersistence ? rideJournal.entries : []}
@@ -2266,13 +2336,13 @@ function EquinaApp() {
                 horsePhoto={onboardingHorsePhoto}
                 onToggleRide={startRide}
                 onLogCare={logCare}
-                onOpenAssistant={openAssistant}
+                onOpenRalf={ralfAvailable ? openRalf : undefined}
                 onOpenCommunity={openCommunity}
-                onOpenProfile={() => setTab("profile")}
+                onOpenProfile={openAccount}
                 onShareRide={() => shareRide(false)}
               />
             )}
-            {tab === "gear" && (
+            {!ralfOpen && tab === "gear" && (
               <GearScreen
                 backend={equinaSession.backend}
                 accountMode={accountMode}
@@ -2319,12 +2389,12 @@ function EquinaApp() {
                 onBuy={buySelected}
                 onToggleSave={toggleSavedListing}
                 onFitCheck={requestFitCheck}
-                onAskCoach={askRalfAboutListing}
+                onAskCoach={ralfAvailable ? askRalfAboutListing : undefined}
                 onAcceptOrder={acceptOrder}
                 onDispute={openDispute}
               />
             )}
-            {tab === "stable" && (
+            {!ralfOpen && tab === "stable" && (
               <StableScreen
                 connected={accountMode === "connected"}
                 recordsController={horseRecords}
@@ -2338,25 +2408,20 @@ function EquinaApp() {
                 horseHeight={onboardingHorseHeight}
                 nutrition={nutritionState}
                 lastRide={lastRide}
-                careLogged={careLogged}
-                onOpenAssistant={openAssistant}
+                // No horse has a real feeding plan yet; the sample plan stays
+                // out of the tab rather than reading as advice.
+                nutritionAvailable={false}
+                onOpenRalf={ralfAvailable ? openRalf : undefined}
                 onToggleNutritionMeal={toggleNutritionMeal}
                 onLogNutritionWater={logNutritionWater}
               />
             )}
-            {tab === "assistant" && (
-              <AssistantScreen
-                backend={equinaSession.backend}
-                accountMode={accountMode}
-                coachEnabled={accountMode === "demo" || equinaSession.capabilities.coachChat}
-                selectedHorseId={accountController.snapshot.primaryHorse?.id}
-                queuedCoachPrompt={pendingCoachPrompt}
-                onQueuedCoachPromptConsumed={() => setPendingCoachPrompt("")}
-                listing={selectedListing}
+            {!ralfOpen && tab === "assistant" && (
+              <AcademyScreen
                 horse={horseState}
                 rider={riderContext}
                 academy={academyState}
-                coach={coachState}
+                coachGoal={coachGoal}
                 lessons={academyLessons}
                 catalogReady={academyCatalogReady}
                 playbackLink={academyLive.playbackLink}
@@ -2364,16 +2429,12 @@ function EquinaApp() {
                   void academyLive.recordProgress(lessonId, positionSeconds, completed);
                 }}
                 onLessonComplete={completeAcademyLesson}
-                onExit={() => setTab("home")}
                 onAcademyModeChange={navigateAcademy}
                 onAcademyLessonOpen={openAcademyLesson}
-                onDisciplineChange={updateCoachDiscipline}
-                onGoalChange={setCoachGoal}
-                onLoadChange={setCoachLoad}
-                onCoachStyleChange={setCoachStyle}
+                onOpenRalf={ralfAvailable ? openRalf : undefined}
               />
             )}
-            {tab === "community" && accountMode === "connected" && (
+            {!ralfOpen && tab === "community" && accountMode === "connected" && (
               <ClubScreen
                 club={club}
                 canPost={equinaSession.capabilities.clubPublishing}
@@ -2386,7 +2447,7 @@ function EquinaApp() {
                 onNotice={refresh}
               />
             )}
-            {tab === "community" && accountMode !== "connected" && (
+            {!ralfOpen && tab === "community" && accountMode !== "connected" && (
               <CommunityScreen
                 // Seeded posts carry invented authors. A connected rider must
                 // never be shown a community that does not exist.
@@ -2414,9 +2475,10 @@ function EquinaApp() {
                 onShareRide={shareRide}
               />
             )}
-            {tab === "profile" && (
+            {!ralfOpen && tab === "profile" && (
               <AccountScreen
                 mode={accountMode}
+                marketplaceOpen={marketplaceOpen}
                 snapshot={accountController.snapshot}
                 horseName={(accountController.snapshot.primaryHorse?.name ?? primaryHorseName) || "No horse yet"}
                 busy={accountController.busy}
@@ -2426,6 +2488,7 @@ function EquinaApp() {
                 onSaveProfile={accountController.saveProfile}
                 onUploadAvatar={accountController.uploadAvatar}
                 onSavePreferences={accountController.savePreferences}
+                onSaveTrainingProfile={accountController.saveTrainingProfile}
                 onSaveNotifications={async (patch) => {
                   await accountController.saveNotifications(patch);
                   if (patch.humanMessages === true) await pushRegistration.register();
@@ -2438,13 +2501,13 @@ function EquinaApp() {
                 onScheduleDeletion={accountController.scheduleDeletion}
                 onCancelDeletion={accountController.cancelDeletion}
                 onSignOut={accountController.signOut}
-                onNestedChange={setAccountNested}
+                onClose={closeAccount}
               />
             )}
           </ScrollView>
         </Animated.View>
 
-        {!focusedTask && <TabDock activeTab={tab} onChange={setTab} />}
+        {!focusedTask && <TabDock tabs={dockTabs} activeTab={tab} onChange={setTab} />}
               </>
             )}
           </Animated.View>
@@ -2594,7 +2657,33 @@ function EquinaApp() {
   );
 }
 
-function TabDock({ activeTab, onChange }: { activeTab: Tab; onChange: (tab: Tab) => void }) {
+// Ralf in a tab's header: a word, not just an icon, because riders look for
+// him by name.
+function RalfButton({ onPress }: { onPress: () => void }) {
+  return (
+    <MotionPressable
+      testID="ralf-button"
+      accessibilityRole="button"
+      accessibilityLabel={`Ask ${equinaCoach.name}`}
+      hitSlop={4}
+      onPress={onPress}
+      style={styles.ralfButton}
+    >
+      <Sparkles size={16} color={equinaTheme.colors.brass} strokeWidth={1.9} />
+      <Text style={styles.ralfButtonText}>{equinaCoach.name}</Text>
+    </MotionPressable>
+  );
+}
+
+function TabDock({
+  tabs,
+  activeTab,
+  onChange
+}: {
+  tabs: readonly DockTab[];
+  activeTab: Tab;
+  onChange: (tab: Tab) => void;
+}) {
   const [reduceTransparency, setReduceTransparency] = useState(false);
   const reduceDockMotion = useReducedMotion();
   const nativeLiquidGlass =
@@ -2870,7 +2959,7 @@ function HomeScreen({
   horsePhoto,
   onToggleRide,
   onLogCare,
-  onOpenAssistant,
+  onOpenRalf,
   onOpenCommunity,
   onOpenProfile,
   onShareRide
@@ -2888,7 +2977,8 @@ function HomeScreen({
   horsePhoto: string;
   onToggleRide: () => void;
   onLogCare: () => void;
-  onOpenAssistant: () => void;
+  /** Absent while Ralf is switched off for this account. */
+  onOpenRalf?: (prompt?: string) => void;
   onOpenCommunity: () => void;
   onOpenProfile: () => void;
   onShareRide: () => void;
@@ -3080,8 +3170,8 @@ function HomeScreen({
 
   const handleNextPress = () => {
     void Haptics.selectionAsync().catch(() => undefined);
-    if (recapVisible) {
-      onOpenAssistant();
+    if (recapVisible && onOpenRalf) {
+      onOpenRalf("Review last ride");
     } else {
       onLogCare();
     }
@@ -3100,21 +3190,24 @@ function HomeScreen({
     <View style={[styles.screen, styles.homeScreen]}>
       <View style={styles.homeTopBar}>
         <View style={styles.homeGreetingCopy}>
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82} style={styles.homeGreeting}>{greeting}, {riderFirstName}</Text>
+          <Text numberOfLines={2} style={styles.homeGreeting}>{greeting}, {riderFirstName}</Text>
           <Text style={styles.homeGreetingMeta}>
             {horse.hasHorse ? horse.name : discipline} · {frequency.toLowerCase()}
           </Text>
         </View>
-        <Pressable
-          testID="profile-button"
-          accessibilityRole="button"
-          accessibilityLabel="Open profile"
-          hitSlop={6}
-          style={({ pressed }) => [styles.homeProfileButton, pressed && styles.tabItemPressed]}
-          onPress={onOpenProfile}
-        >
-          <Text style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          {onOpenRalf ? <RalfButton onPress={() => onOpenRalf()} /> : null}
+          <Pressable
+            testID="profile-button"
+            accessibilityRole="button"
+            accessibilityLabel="Open account"
+            hitSlop={6}
+            style={({ pressed }) => [styles.homeProfileButton, pressed && styles.tabItemPressed]}
+            onPress={onOpenProfile}
+          >
+            <Text style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
+          </Pressable>
+        </View>
       </View>
 
       <Animated.View style={[styles.homeStage, viewportHeight < 720 && styles.homeStageCompact, heroStyle]}>
@@ -3177,13 +3270,17 @@ function HomeScreen({
       </Animated.View>
 
       <Animated.View style={[styles.homeDetails, detailsStyle]}>
-        <RideSummaryCard
-          summary={rideSummary}
-          period={summaryPeriod}
-          onPeriodChange={setSummaryPeriod}
-          lifetimeRides={horse.sessionCount}
-          lastRideOn={lastRideDay}
-        />
+        {/* An empty journal on day one only repeats what the ride button
+            already says. It appears with the first saved ride. */}
+        {rideEntries.length > 0 ? (
+          <RideSummaryCard
+            summary={rideSummary}
+            period={summaryPeriod}
+            onPeriodChange={setSummaryPeriod}
+            lifetimeRides={horse.sessionCount}
+            lastRideOn={lastRideDay}
+          />
+        ) : null}
 
         <View style={styles.homeSectionTopline}>
           <Text style={styles.homeSectionTitle}>Up next</Text>
@@ -3201,13 +3298,15 @@ function HomeScreen({
               {recapVisible ? (
                 <Bot size={21} strokeWidth={1.9} color={equinaTheme.colors.brass} />
               ) : (
-                <Stethoscope size={21} strokeWidth={1.9} color={horse.careLogged ? "#6C9E7C" : equinaTheme.colors.brass} />
+                horse.careLogged
+                  ? <Check size={21} strokeWidth={2.1} color={equinaTheme.text.secondary} />
+                  : <Stethoscope size={21} strokeWidth={1.9} color={equinaTheme.colors.brass} />
               )}
             </View>
             <View style={styles.homeBriefingCopy}>
               <Text style={styles.homeBriefingKicker}>{nextKicker}</Text>
               <Text numberOfLines={1} style={styles.homeBriefingTitle}>{nextTitle}</Text>
-              <Text numberOfLines={1} style={styles.homeBriefingBody}>{nextBody}</Text>
+              <Text numberOfLines={2} style={styles.homeBriefingBody}>{nextBody}</Text>
             </View>
             <ChevronRight size={17} color={nightTheme.faint} />
           </Pressable>
@@ -3221,21 +3320,19 @@ function HomeScreen({
             style={({ pressed }) => [styles.homeSocialRow, pressed && styles.homeAgendaRowPressed]}
             onPress={handleSocialPress}
           >
-            <View style={styles.homeSocialAvatars}>
-              {communityStories.slice(1, 4).map((story, index) => (
-                <Image key={story.name} source={{ uri: story.image }} style={[styles.homeSocialAvatar, index > 0 && styles.homeSocialAvatarOverlap]} />
-              ))}
+            <View style={styles.homeBriefingIcon}>
+              <MessageCircle size={21} strokeWidth={1.9} color={equinaTheme.colors.brass} />
             </View>
             <View style={styles.homeSocialCopy}>
               <Text numberOfLines={1} style={styles.homeSocialTitle}>
                 {shareOpportunity && equinaFeatureFlags.clubPublishing
                   ? horse.hasHorse ? `Share ${horse.name}'s ride` : "Share your ride"
-                  : sharedRide ? "Your ride is in Club" : "See your circle"}
+                  : sharedRide ? "Your ride is in Club" : "See what riders share"}
               </Text>
               <Text numberOfLines={1} style={styles.homeSocialBody}>
                 {shareOpportunity && equinaFeatureFlags.clubPublishing
                   ? "One tap, then back to your day"
-                  : "Read from riders you follow"}
+                  : "Rides and tips from your Club"}
               </Text>
             </View>
             {shareOpportunity && equinaFeatureFlags.clubPublishing ? <SendHorizontal size={17} color={equinaTheme.colors.brass} /> : <ChevronRight size={17} color={nightTheme.faint} />}
@@ -3332,7 +3429,8 @@ function GearScreen({
   onBuy: (listing: Listing) => boolean;
   onToggleSave: (listing: Listing) => void;
   onFitCheck: (listing: Listing) => void;
-  onAskCoach: (listing: Listing) => void;
+  /** Absent while Ralf is switched off for this account. */
+  onAskCoach?: (listing: Listing) => void;
   onAcceptOrder: (order: Order) => void;
   onDispute: (order: Order) => void;
 }) {
@@ -3526,10 +3624,6 @@ function GearScreen({
                   style={[styles.searchInput, webTextInputReset]}
                 />
               </View>
-              <Pressable testID="shop-sell-shortcut" accessibilityRole="button" accessibilityLabel="Open seller preview" style={({ pressed }) => [styles.sellMiniButton, pressed && styles.pressed]} onPress={() => changeMode("sell")}>
-                <Plus size={17} color={equinaTheme.colors.ivory} />
-                <Text style={styles.sellMiniText}>Seller</Text>
-              </Pressable>
             </View>
 
             <View style={styles.shopAccountLinks}>
@@ -3672,7 +3766,7 @@ function GearScreen({
             listing={openedListing}
             horse={horseFitContext}
             onBack={() => onBuyerViewChange("product")}
-            onAskCoach={() => onAskCoach(openedListing)}
+            onAskCoach={onAskCoach ? () => onAskCoach(openedListing) : undefined}
           />
         ) : buyerView === "protection" ? (
           <ShopProtectionPage onBack={() => onBuyerViewChange("product")} />
@@ -4203,7 +4297,7 @@ function ShopFitPage({
   listing: Listing;
   horse: HorseFitContext;
   onBack: () => void;
-  onAskCoach: () => void;
+  onAskCoach?: () => void;
 }) {
   const fitScreening = getFitScreening(listing, horse);
   return (
@@ -4232,14 +4326,24 @@ function ShopFitPage({
         <MarketTrustPill Icon={ShieldCheck} title="Escalate" body="Final check with a qualified saddler" last />
       </View>
 
-      <MotionPressable testID="shop-fit-ask-ralf" accessibilityRole="button" accessibilityLabel={`Ask ${equinaCoach.name} about this item`} style={styles.shopFitCoachButton} onPress={onAskCoach}>
-        <View style={styles.coachMiniMark}><Text style={styles.coachMiniMarkText}>R</Text></View>
-        <View style={styles.shopDetailFitCopy}>
-          <Text style={styles.shopFitCoachTitle}>Ask {equinaCoach.name}</Text>
-          <Text style={styles.shopFitCoachBody}>Turn these details into the next seller questions</Text>
-        </View>
-        <ChevronRight size={17} color={equinaTheme.colors.ink} />
-      </MotionPressable>
+      {/* A quiet row like every other "Ask Ralf": the page's one decision is
+          whether to buy, not whether to talk to Ralf. */}
+      {onAskCoach ? (
+        <Pressable
+          testID="shop-fit-ask-ralf"
+          accessibilityRole="button"
+          accessibilityLabel={`Ask ${equinaCoach.name} about this item`}
+          style={({ pressed }) => [styles.academyPersonalAction, pressed && styles.pressed]}
+          onPress={onAskCoach}
+        >
+          <Sparkles size={18} color={equinaTheme.colors.brass} />
+          <View style={styles.academyPersonalActionCopy}>
+            <Text style={styles.academyPersonalActionTitle}>Ask {equinaCoach.name}</Text>
+            <Text numberOfLines={1} style={styles.academyPersonalActionBody}>Turn these details into questions for the seller</Text>
+          </View>
+          <ChevronRight size={16} color={nightTheme.faint} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -4329,8 +4433,8 @@ function StableScreen({
   horseHeight,
   nutrition,
   lastRide,
-  careLogged,
-  onOpenAssistant,
+  nutritionAvailable,
+  onOpenRalf,
   onToggleNutritionMeal,
   onLogNutritionWater
 }: {
@@ -4346,8 +4450,10 @@ function StableScreen({
   horseHeight: string;
   nutrition: NutritionState;
   lastRide: RideSession | null;
-  careLogged: boolean;
-  onOpenAssistant: () => void;
+  /** Only a horse with a real feeding plan gets a Nutrition view. */
+  nutritionAvailable: boolean;
+  /** Absent while Ralf is switched off for this account. */
+  onOpenRalf?: (prompt?: string) => void;
   onToggleNutritionMeal: (mealId: NutritionMealId) => void;
   onLogNutritionWater: () => void;
 }) {
@@ -4389,12 +4495,9 @@ function StableScreen({
     ? String(Math.max(0, new Date().getFullYear() - Number(selectedHorse.birthDate.slice(0, 4))))
     : horseAge;
   const savedRecordCount = connected ? records.length : 0;
-  const passportCount = records.filter((record) => record.recordType === "passport").length;
-  const medCheckCount = records.filter((record) =>
-    ["vet", "vaccination", "dental", "farrier"].includes(record.recordType)
-  ).length;
-  const labReportCount = records.filter((record) => record.recordType === "lab").length;
-  const healthStatus = medCheckCount > 0 || labReportCount > 0 ? "Timeline connected" : "No health records yet";
+  const healthRecords = records.filter((record) =>
+    ["vet", "lab", "vaccination", "dental", "farrier", "care"].includes(record.recordType)
+  );
   const { completedMeals, waterLiters } = nutrition;
   const waterGoal = stableWaterGoal;
   const hydrationComplete = waterLiters >= waterGoal;
@@ -4741,9 +4844,11 @@ function StableScreen({
 
         <View style={styles.stableViewSwitch}>
           <StableViewTab label="Overview" active={view === "overview"} onPress={() => openView("overview")} />
-          <StableViewTab label="Nutrition" active={view === "nutrition"} onPress={() => openView("nutrition")} />
-          <StableViewTab label="Health" active={view === "health"} onPress={() => openView("health")} />
-          <StableViewTab label="Docs" active={view === "docs"} onPress={() => openView("docs")} />
+          <StableViewTab label="Care" active={view === "care"} onPress={() => openView("care")} />
+          {nutritionAvailable ? (
+            <StableViewTab label="Nutrition" active={view === "nutrition"} onPress={() => openView("nutrition")} />
+          ) : null}
+          <StableViewTab label="Documents" active={view === "docs"} onPress={() => openView("docs")} />
         </View>
 
         <Animated.View style={[styles.stableViewBody, viewMotion]}>
@@ -4758,10 +4863,6 @@ function StableScreen({
                     <Text style={styles.stableLatestRideKicker}>Latest ride · {rideDurationLabel(lastRide.elapsedSeconds)}</Text>
                     <Text style={styles.stableLatestRideTitle}>{lastRide.focus}</Text>
                     <Text style={styles.stableLatestRideBody}>{lastRide.discipline} · {lastRide.mood.toLowerCase()} · {lastRide.completedPhases}/{lastRide.totalPhases} phases</Text>
-                  </View>
-                  <View style={styles.stableLatestRideStatus}>
-                    <View style={[styles.stableLatestRideDot, careLogged && styles.stableLatestRideDotDone]} />
-                    <Text style={styles.stableLatestRideStatusText}>{careLogged ? "Care done" : "Care due"}</Text>
                   </View>
                 </View>
               )}
@@ -4779,31 +4880,25 @@ function StableScreen({
                 </View>
               </View>
 
-              <SectionTitle title="Records" action={`${savedRecordCount} saved`} />
-              <View style={styles.stableRecordList}>
-                <StableQuickRecord
-                  Icon={FileText}
-                  label="Passport"
-                  meta={passportCount ? `${passportCount} stored` : "Add document"}
-                  active={passportCount > 0}
-                  disabled={!canMutateRecords}
-                  onPress={() => openRecordEditor("passport")}
-                />
-                <StableQuickRecord
+              <View style={styles.documentStack}>
+                <DocumentRow
                   Icon={Stethoscope}
-                  label="Vet"
-                  meta={medCheckCount ? `${medCheckCount} records` : "Add check"}
-                  active={medCheckCount > 0}
-                  disabled={!canMutateRecords}
-                  onPress={() => openRecordEditor("vet")}
+                  title="Care"
+                  body={careSchedule.length
+                    ? `${careSchedule.length} tracked · ${healthRecords.length} health ${healthRecords.length === 1 ? "record" : "records"}`
+                    : healthRecords.length
+                      ? `${healthRecords.length} health ${healthRecords.length === 1 ? "record" : "records"}`
+                      : "Farrier, vaccinations, vet and dental"}
+                  status=""
+                  onPress={() => openView("care")}
                 />
-                <StableQuickRecord
-                  Icon={Activity}
-                  label="Labs"
-                  meta={labReportCount ? `${labReportCount} files` : "Add result"}
-                  active={labReportCount > 0}
-                  disabled={!canMutateRecords}
-                  onPress={() => openRecordEditor("lab")}
+                <DocumentRow
+                  Icon={FileText}
+                  title="Documents"
+                  body={savedRecordCount ? `${savedRecordCount} private ${savedRecordCount === 1 ? "record" : "records"}` : "Passport, vet notes and lab results"}
+                  status=""
+                  last
+                  onPress={() => openView("docs")}
                 />
               </View>
 
@@ -4831,64 +4926,81 @@ function StableScreen({
             </>
           )}
 
-          {view === "health" && (
+          {view === "care" && (
             <>
-              <SectionTitle
-                title="Care schedule"
-                action={careSchedule.length ? `${careSchedule.length} tracked` : "none yet"}
-              />
-              <CareSchedule
-                schedule={careSchedule}
-                horseNames={horseNames}
-                showHorse={horses.length > 1}
-                onLogDone={canMutateRecords ? (item) => void logCareDone(item) : undefined}
-                onAddDueDate={canMutateRecords ? () => openRecordEditor("farrier") : undefined}
-                busy={Boolean(saving)}
-              />
-
-              <View style={styles.stableHealthCard}>
-                <View style={styles.stableHealthIcon}>
-                  <HeartPulse size={21} color={equinaTheme.colors.ivory} />
+              {careSchedule.length === 0 && healthRecords.length === 0 ? (
+                <View style={styles.stableCareEmpty}>
+                  <Text style={styles.stableCareEmptyTitle}>Nothing tracked yet</Text>
+                  <Text style={styles.stableCareEmptyBody}>
+                    Farrier, vaccination, dental and vet records appear here, and the next visit is scheduled from the day the last one happened.
+                  </Text>
+                  {canMutateRecords ? (
+                    <MotionPressable
+                      testID="stable-add-care"
+                      accessibilityRole="button"
+                      accessibilityLabel="Add a care record"
+                      style={styles.stablePrimaryAction}
+                      onPress={() => openRecordEditor("farrier")}
+                    >
+                      <Text style={styles.stablePrimaryActionText}>Add a care record</Text>
+                      <Plus size={18} color={equinaTheme.colors.ink} />
+                    </MotionPressable>
+                  ) : null}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.stableHealthKicker}>Health journal</Text>
-                  <Text style={styles.stableHealthTitle}>{healthStatus}</Text>
-                  <Text style={styles.stableHealthBody}>Vet, lab, vaccination, dental, and recovery records stay in one private timeline.</Text>
-                </View>
-              </View>
+              ) : (
+                <>
+                  {careSchedule.length > 0 ? (
+                    <>
+                      <SectionTitle title="Coming up" action={`${careSchedule.length} tracked`} />
+                      <CareSchedule
+                        schedule={careSchedule}
+                        horseNames={horseNames}
+                        showHorse={horses.length > 1}
+                        onLogDone={canMutateRecords ? (item) => void logCareDone(item) : undefined}
+                        onAddDueDate={canMutateRecords ? () => openRecordEditor("farrier") : undefined}
+                        busy={Boolean(saving)}
+                      />
+                    </>
+                  ) : null}
 
-              <SectionTitle title="Health timeline" action={`${medCheckCount + labReportCount} records`} />
-              <View style={styles.documentStack}>
-                {records.filter((record) =>
-                  ["vet", "lab", "vaccination", "dental", "farrier", "care"].includes(record.recordType)
-                ).map((record, index, healthRecords) => (
-                  <DocumentRow
-                    key={record.id}
-                    Icon={record.recordType === "lab" ? Activity : record.recordType === "care" ? HeartPulse : Stethoscope}
-                    title={record.title}
-                    body={`${record.occurredOn}${record.notes ? ` · ${record.notes}` : ""}`}
-                    status={record.status}
-                    last={index === healthRecords.length - 1}
-                    onPress={() => openRecordEditor(record.recordType, record)}
-                  />
-                ))}
-                {medCheckCount + labReportCount === 0 ? (
-                  <DocumentRow
-                    Icon={Stethoscope}
-                    title="Add the first health record"
-                    body="Vet check, lab result, vaccination, dental, or farrier."
-                    status={canMutateRecords ? "add" : "read only"}
-                    last
-                    disabled={!canMutateRecords}
-                    onPress={() => openRecordEditor("vet")}
-                  />
-                ) : null}
-              </View>
-              <Pressable accessibilityRole="button" style={styles.stableCoachLink} onPress={onOpenAssistant}>
-                <HeartPulse size={17} color={equinaTheme.colors.brass} />
-                <Text style={styles.stableCoachLinkText}>Ask {equinaCoach.name} how to structure an observation</Text>
-                <ChevronRight size={16} color={equinaTheme.text.tertiary} />
-              </Pressable>
+                  <SectionTitle title="Health records" action={`${healthRecords.length}`} />
+                  <View style={styles.documentStack}>
+                    {healthRecords.map((record, index) => (
+                      <DocumentRow
+                        key={record.id}
+                        Icon={record.recordType === "lab" ? Activity : record.recordType === "care" ? HeartPulse : Stethoscope}
+                        title={record.title}
+                        body={`${record.occurredOn}${record.notes ? ` · ${record.notes}` : ""}`}
+                        status={record.status}
+                        last={index === healthRecords.length - 1 && !canMutateRecords}
+                        onPress={() => openRecordEditor(record.recordType, record)}
+                      />
+                    ))}
+                    {canMutateRecords ? (
+                      <DocumentRow
+                        Icon={Plus}
+                        title="Add a health record"
+                        body="Vet check, lab result, vaccination, dental or farrier"
+                        status="Add"
+                        last
+                        onPress={() => openRecordEditor("vet")}
+                      />
+                    ) : null}
+                  </View>
+                </>
+              )}
+
+              {onOpenRalf ? (
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.stableCoachLink}
+                  onPress={() => onOpenRalf(`Help me write down a health observation about ${resolvedName}`)}
+                >
+                  <Sparkles size={17} color={equinaTheme.colors.brass} />
+                  <Text style={styles.stableCoachLinkText}>Ask {equinaCoach.name} how to write down an observation</Text>
+                  <ChevronRight size={16} color={equinaTheme.text.tertiary} />
+                </Pressable>
+              ) : null}
             </>
           )}
 
@@ -4910,7 +5022,7 @@ function StableScreen({
 
                 <View style={styles.nutritionHydrationTop}>
                   <View style={styles.nutritionHydrationLabel}>
-                    <Droplets size={17} color="#8CCFB7" />
+                    <Droplets size={17} color={equinaTheme.colors.brass} />
                     <View>
                       <Text style={styles.nutritionHydrationTitle}>Hydration</Text>
                       <Text style={styles.nutritionHydrationBody}>{waterLiters} of {waterGoal} L logged</Text>
@@ -4959,7 +5071,7 @@ function StableScreen({
               </View>
 
               <View style={styles.nutritionWorkloadNote}>
-                <Activity size={18} color="#8CCFB7" />
+                <Activity size={18} color={equinaTheme.colors.brass} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.nutritionWorkloadTitle}>After today's ride</Text>
                   <Text style={styles.nutritionWorkloadBody}>If {resolvedName} sweats, log water first and follow the electrolyte amount already agreed with your vet or nutritionist.</Text>
@@ -4987,7 +5099,11 @@ function StableScreen({
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.stableDocsTitle}>Documents</Text>
-                  <Text style={styles.stableDocsBody}>{savedRecordCount} private records for care, travel, and review.</Text>
+                  <Text style={styles.stableDocsBody}>
+                    {savedRecordCount
+                      ? `${savedRecordCount} private ${savedRecordCount === 1 ? "record" : "records"} for care, travel, and review.`
+                      : "Private records for care, travel, and review."}
+                  </Text>
                 </View>
                 {canMutateRecords ? (
                   <EquinaIconButton
@@ -5018,9 +5134,11 @@ function StableScreen({
                 {records.length === 0 ? (
                   <DocumentRow
                     Icon={FileText}
-                    title="No records yet"
-                    body="Add a passport, vet note, lab result, or care record."
-                    status={canMutateRecords ? "add" : "read only"}
+                    title="No documents yet"
+                    body={canMutateRecords
+                      ? "Add a passport, vet note, lab result or care record."
+                      : "Passports, vet notes and lab results you save will appear here."}
+                    status={canMutateRecords ? "Add" : ""}
                     last
                     disabled={!canMutateRecords}
                     onPress={() => openRecordEditor("passport")}
@@ -5123,185 +5241,57 @@ function StableMetric({ value, label }: { value: string; label: string }) {
   );
 }
 
-function StableQuickRecord({
-  Icon,
-  label,
-  meta,
-  active,
-  disabled = false,
-  onPress
-}: {
-  Icon: typeof Store;
-  label: string;
-  meta: string;
-  active: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <MotionPressable
-      testID={`stable-record-${label.toLowerCase()}`}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}, ${meta}`}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      style={[styles.stableQuickRecord, active && styles.stableQuickRecordActive]}
-      onPress={onPress}
-    >
-      <View style={styles.stableQuickRecordIcon}>
-        <Icon size={20} strokeWidth={1.9} color={active ? "#6C9E7C" : equinaTheme.colors.brass} />
-      </View>
-      <View style={styles.stableQuickRecordBody}>
-        <Text style={styles.stableQuickRecordLabel}>{label}</Text>
-        <Text style={styles.stableQuickRecordMeta}>{meta}</Text>
-      </View>
-      {disabled ? (
-        <Text style={styles.stableQuickRecordReadOnly}>Preview</Text>
-      ) : (
-        <ChevronRight size={16} color={nightTheme.faint} />
-      )}
-    </MotionPressable>
-  );
-}
-
-function CoachIdentity({ subtitle, compact = false }: { subtitle: string; compact?: boolean }) {
-  return (
-    <View style={styles.coachIdentity}>
-      <View style={[styles.ralfAvatar, compact && styles.ralfAvatarCompact]}>
-        <Text style={[styles.ralfAvatarText, compact && styles.ralfAvatarTextCompact]}>R</Text>
-        <View style={styles.coachVerifiedBadge}>
-          <Check size={9} color={equinaTheme.colors.ink} strokeWidth={2.5} />
-        </View>
-      </View>
-      <View style={styles.coachIdentityCopy}>
-        <View style={styles.coachIdentityNameRow}>
-          <Text style={styles.coachIdentityName}>{equinaCoach.name}</Text>
-          <View style={styles.guideLiveDot} />
-        </View>
-        <Text numberOfLines={1} style={styles.coachIdentityRole}>{equinaCoach.role} · {subtitle}</Text>
-      </View>
-    </View>
-  );
-}
-
-function AssistantScreen({
-  backend,
-  accountMode,
-  coachEnabled,
-  selectedHorseId,
-  queuedCoachPrompt,
-  onQueuedCoachPromptConsumed,
-  listing,
+function AcademyScreen({
   horse,
   rider,
   academy,
-  coach,
+  coachGoal,
   lessons,
   catalogReady,
   playbackLink,
   onLessonProgress,
   onLessonComplete,
-  onExit,
   onAcademyModeChange,
   onAcademyLessonOpen,
-  onDisciplineChange,
-  onGoalChange,
-  onLoadChange,
-  onCoachStyleChange
+  onOpenRalf
 }: {
-  backend: EquinaBackend | null;
-  accountMode: AccountMode;
-  coachEnabled: boolean;
-  selectedHorseId?: string;
-  queuedCoachPrompt: string;
-  onQueuedCoachPromptConsumed: () => void;
-  listing?: Listing;
   horse: HorseState;
   rider: RiderContext;
   academy: AcademyState;
-  coach: CoachState;
+  coachGoal: string;
   lessons: AcademyLessonView[];
   /** False only while a connected account's catalogue is still loading. */
   catalogReady: boolean;
   playbackLink: (lessonId: string) => Promise<AcademyPlaybackLink>;
   onLessonProgress: (lessonId: string, positionSeconds: number, completed: boolean) => void;
   onLessonComplete: (lessonId: string, positionSeconds: number) => void;
-  /** Leaves the Academy for the home tab. */
-  onExit: () => void;
   onAcademyModeChange: (mode: AcademyMode) => void;
   onAcademyLessonOpen: (lessonId: string) => void;
-  onDisciplineChange: (value: CoachDiscipline) => void;
-  onGoalChange: (value: string) => void;
-  onLoadChange: (value: string) => void;
-  onCoachStyleChange: (value: string) => void;
+  /** Absent while Ralf is switched off for this account. */
+  onOpenRalf?: (prompt?: string) => void;
 }) {
-  const [draft, setDraft] = useState("");
-  const [guideEditing, setGuideEditing] = useState(false);
-  const [chatInputFocused, setChatInputFocused] = useState(false);
   const reduceAcademyMotion = useReducedMotion();
   const academyMotion = useRef(new Animated.Value(1)).current;
-  const messageScrollRef = useRef<ScrollView>(null);
   const guidance = levelGuidance[rider.level];
-  const academyFocus = horse.lastRide?.mood === "Tender" ? "Recovery" : coach.goal;
-  const academyLearningPath = useMemo(
+  const academyFocus = horse.lastRide?.mood === "Tender" ? "Recovery" : coachGoal;
+  const learningPath = useMemo(
     () => academyPathFor(lessons, rider, academyFocus),
     [academyFocus, lessons, rider.discipline, rider.goal, rider.level]
   );
-  const recommendedLesson = academyLearningPath[0];
-  const nextPathLessons = academyLearningPath.slice(1, 3);
-  const quickPrompts = coachPromptsFor(rider, horse);
-  const selectedAcademyLesson = lessons.find((lesson) => lesson.id === academy.selectedLessonId) ?? recommendedLesson;
-  // No published lesson is a normal state, not a broken one: until the first
-  // lesson arrives the Academy is Ralf. While the catalogue is still loading,
-  // nothing is shown rather than a lesson that may not exist.
+  const currentLesson = learningPath[0];
+  const laterLessons = learningPath.slice(1);
+  const selectedLesson = lessons.find((lesson) => lesson.id === academy.selectedLessonId) ?? currentLesson;
+  // No published lesson is a normal state, not a broken one. While the
+  // catalogue is still loading, nothing is shown rather than a lesson that
+  // may not exist.
   const catalogEmpty = catalogReady && lessons.length === 0;
   const catalogPending = !catalogReady && lessons.length === 0;
-  const visibleMode: AcademyMode = catalogEmpty ? "ai" : academy.mode;
-  const coachContext = {
-    selectedHorseId,
-    hasHorse: horse.hasHorse,
-    horseName: horse.name,
-    focus: coach.goal,
-    load: coach.load,
-    style: coach.style
-  };
-  const coachConversation = useCoachConversation({
-    mode: accountMode,
-    backend,
-    enabled: coachEnabled,
-    context: coachContext
-  });
-  const coachConversationActive = visibleMode === "ai";
-  const hasGuideUserMessage = coachConversation.messages.some((message) => message.role === "user");
-  const coachCanSend = draft.trim().length > 0 && !coachConversation.sending;
   const rideLabel = `${horse.sessionCount} ${horse.sessionCount === 1 ? "ride" : "rides"}`;
   const recommendationReason = horse.sessionCount > 0
     ? `After ${rideLabel}, your next focus is ${academyFocus.toLowerCase()}. Use this lesson before your next session.`
     : `Start with ${academyFocus.toLowerCase()}. This lesson gives you one clear idea for your first session.`;
-  const guideStarters = [
-    {
-      Icon: CalendarCheck,
-      title: guidance.quickPlan,
-      body: `${coach.goal} · ${coach.load}`,
-      prompt: guidance.quickPlan
-    },
-    {
-      Icon: Activity,
-      title: "Review the last ride",
-      body: horse.lastRide
-        ? `${rideDurationLabel(horse.lastRide.elapsedSeconds)} · ${horse.lastRide.mood.toLowerCase()}`
-        : horse.hasHorse ? `${rideLabel} logged for ${horse.name}` : `${rideLabel} in your journal`,
-      prompt: "Review last ride"
-    },
-    ...(recommendedLesson
-      ? [{
-          Icon: PlayCircle,
-          title: `Understand ${recommendedLesson.title}`,
-          body: `Turn the lesson into one exercise`,
-          prompt: `Explain the exercise in ${recommendedLesson.title}`
-        }]
-      : [])
-  ];
+  const lessonQuestion = (lesson: AcademyLessonView) =>
+    `Explain how ${lesson.title} should shape ${horse.hasHorse ? `${horse.name}'s` : "my"} next ride`;
 
   useEffect(() => {
     if (reduceAcademyMotion) {
@@ -5315,431 +5305,186 @@ function AssistantScreen({
       easing: Easing.out(Easing.cubic),
       useNativeDriver: Platform.OS !== "web"
     }).start();
-  }, [visibleMode, academyMotion, reduceAcademyMotion]);
+  }, [academy.mode, academyMotion, reduceAcademyMotion]);
 
-  // Settle on Ralf while there are no lessons, so the first lesson to arrive
-  // does not pull a rider out of a conversation.
-  useEffect(() => {
-    if (catalogEmpty && academy.mode !== "ai") onAcademyModeChange("ai");
-  }, [academy.mode, catalogEmpty]);
-
-  useEffect(() => {
-    if (visibleMode !== "ai" || !queuedCoachPrompt) return;
-    onQueuedCoachPromptConsumed();
-    void coachConversation.send(queuedCoachPrompt);
-  }, [visibleMode, queuedCoachPrompt]);
-
-  const changeAcademyMode = (mode: AcademyMode) => {
-    if (mode === academy.mode) return;
-    void Haptics.selectionAsync().catch(() => undefined);
-    onAcademyModeChange(mode);
-  };
-
-  const openAcademyLesson = (lesson: AcademyLessonView) => {
+  const openLesson = (lesson: AcademyLessonView) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     onAcademyLessonOpen(lesson.id);
   };
 
-  const sendMessage = (text: string) => {
-    const prompt = text.trim();
-    if (!prompt) return;
-    setDraft("");
-    void coachConversation.send(prompt);
-  };
+  const motionStyle = [
+    styles.academyModeContent,
+    { opacity: academyMotion },
+    Platform.OS !== "web" && !reduceAcademyMotion && {
+      transform: [
+        {
+          translateY: academyMotion.interpolate({
+            inputRange: [0, 1],
+            outputRange: [6, 0]
+          })
+        }
+      ]
+    }
+  ];
 
-  const startCoach = (starterPrompt?: string) => {
-    setGuideEditing(false);
-    if (starterPrompt) void coachConversation.send(starterPrompt);
-  };
+  if (catalogPending) {
+    return (
+      <View testID="academy-loading" style={styles.academyCatalogLoading}>
+        <ActivityIndicator color={nightTheme.muted} />
+      </View>
+    );
+  }
 
-  const openGuideWithPrompt = (prompt: string) => {
-    changeAcademyMode("ai");
-    void coachConversation.send(prompt);
-  };
+  if (academy.mode === "video" && selectedLesson) {
+    return (
+      <Animated.View style={motionStyle}>
+        <AcademyVideoPage
+          lessons={lessons}
+          lesson={selectedLesson}
+          progress={academy.progress}
+          rider={rider}
+          focus={academyFocus}
+          playbackLink={playbackLink}
+          onProgress={onLessonProgress}
+          onBack={() => onAcademyModeChange("home")}
+          onComplete={onLessonComplete}
+          onOpenLesson={openLesson}
+          onOpenGuide={onOpenRalf ? () => onOpenRalf(lessonQuestion(selectedLesson)) : undefined}
+        />
+      </Animated.View>
+    );
+  }
+
+  if (catalogEmpty || !currentLesson) {
+    return (
+      <View testID="academy-empty" style={styles.academyEmptyCatalog}>
+        <Text style={styles.academyPersonalTitle}>The first lessons are on their way.</Text>
+        <Text style={styles.academyPersonalBody}>
+          Lessons from Equina coaches appear here as soon as they are published.
+          {onOpenRalf ? " Until then, Ralf can plan your next ride." : ""}
+        </Text>
+        {onOpenRalf ? (
+          <MotionPressable
+            testID="academy-empty-ralf"
+            accessibilityRole="button"
+            accessibilityLabel={`Ask ${equinaCoach.name} to plan your next ride`}
+            style={styles.academyEmptyAction}
+            onPress={() => onOpenRalf(levelGuidance[rider.level].quickPlan)}
+          >
+            <Sparkles size={17} color={equinaTheme.colors.ink} />
+            <Text style={styles.academyEmptyActionText}>Plan my next ride with Ralf</Text>
+          </MotionPressable>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
-    <View style={[styles.academyScreen, coachConversationActive && styles.academyScreenImmersive]}>
-      {visibleMode !== "video" && !coachConversationActive && !catalogPending && (
-        <View style={styles.academySwitch}>
-          <Pressable
-            testID="academy-mode-watch"
-            accessibilityRole="tab"
-            accessibilityState={{ selected: visibleMode === "home" }}
-            style={[styles.academySwitchItem, visibleMode === "home" && styles.academySwitchItemActive]}
-            onPress={() => changeAcademyMode("home")}
-          >
-            <Text style={[styles.academySwitchText, visibleMode === "home" && styles.academySwitchTextActive]}>For you</Text>
-          </Pressable>
-          <Pressable
-            testID="academy-mode-directory"
-            accessibilityRole="tab"
-            accessibilityState={{ selected: visibleMode === "directory" }}
-            style={[styles.academySwitchItem, visibleMode === "directory" && styles.academySwitchItemActive]}
-            onPress={() => changeAcademyMode("directory")}
-          >
-            <Text style={[styles.academySwitchText, visibleMode === "directory" && styles.academySwitchTextActive]}>Lessons</Text>
-          </Pressable>
-          <Pressable
-            testID="academy-mode-ai"
-            accessibilityRole="tab"
-            accessibilityState={{ selected: academy.mode === "ai" }}
-            style={[styles.academySwitchItem, academy.mode === "ai" && styles.academySwitchItemActive]}
-            onPress={() => changeAcademyMode("ai")}
-          >
-            <Text style={[styles.academySwitchText, academy.mode === "ai" && styles.academySwitchTextActive]}>Coach</Text>
-          </Pressable>
+    <Animated.View style={motionStyle}>
+      <View style={styles.personalAcademyHome}>
+        <View style={styles.academyPersonalIntro}>
+          <Text style={styles.academyPersonalEyebrow}>
+            {horse.hasHorse ? `${rider.name} + ${horse.name}` : rider.name} · {rider.level} {rider.discipline.toLowerCase()}
+          </Text>
+          <Text style={styles.academyPersonalTitle}>{guidance.headline}</Text>
+          <Text style={styles.academyPersonalBody}>{recommendationReason}</Text>
         </View>
-      )}
 
-      <Animated.View
-        style={[
-          styles.academyModeContent,
-          coachConversationActive && styles.academyModeContentImmersive,
-          {
-            opacity: academyMotion
-          },
-          Platform.OS !== "web" && !reduceAcademyMotion && {
-            transform: [
-              {
-                translateY: academyMotion.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [6, 0]
-                })
-              }
-            ]
-          }
-        ]}
-      >
-        {catalogPending && visibleMode !== "ai" ? (
-          <View testID="academy-loading" style={styles.academyCatalogLoading}>
-            <ActivityIndicator color={nightTheme.muted} />
-          </View>
-        ) : visibleMode === "home" && recommendedLesson ? (
-          <View style={styles.personalAcademyHome}>
-            <View style={styles.academyPersonalIntro}>
-              <View style={styles.academyPersonalMetaRow}>
-                <Text style={styles.academyPersonalEyebrow}>
-                  {horse.hasHorse ? `${rider.name} + ${horse.name}` : `${rider.name} · rider profile`} · {rider.level} {rider.discipline.toLowerCase()}
-                </Text>
-                <Text style={styles.academyPersonalProgress}>{academy.progress}%</Text>
-              </View>
-              <Text style={styles.academyPersonalTitle}>{guidance.headline}</Text>
-              <Text style={styles.academyPersonalBody}>{recommendationReason}</Text>
-            </View>
-
-            <Pressable
-              testID="academy-open-recommended"
-              accessibilityRole="button"
-              accessibilityLabel={`Open recommended lesson ${recommendedLesson.title}`}
-              style={({ pressed }) => [styles.academyRecommendation, pressed && styles.pressed]}
-              onPress={() => openAcademyLesson(recommendedLesson)}
-            >
-              <Image source={{ uri: recommendedLesson.image }} style={styles.academyRecommendationImage} resizeMode="cover" />
-              <LinearGradient
-                colors={["rgba(8,7,6,0.30)", "rgba(8,7,6,0.90)"]}
-                locations={[0.15, 1]}
-                style={styles.academyRecommendationScrim}
-              />
-              <View style={styles.academyRecommendationTop}>
-                <Text style={styles.academyRecommendationKicker}>{academy.progress > 0 ? "Continue learning" : "Selected for you"}</Text>
-                {recommendedLesson.duration ? (
-                  <Text style={styles.academyRecommendationDuration}>{recommendedLesson.duration}</Text>
-                ) : null}
-              </View>
-              <View style={styles.academyRecommendationContent}>
-                <Text style={styles.academyRecommendationReason}>Next for your {academyFocus.toLowerCase()}</Text>
-                <Text style={styles.academyRecommendationTitle}>{recommendedLesson.title}</Text>
-                <View style={styles.academyRecommendationFooter}>
-                  <Text style={styles.academyRecommendationCoach}>{recommendedLesson.coach}</Text>
-                  <View style={styles.academyRecommendationPlay}>
-                    <Play size={16} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} strokeWidth={1.8} />
-                  </View>
-                </View>
-              </View>
-              <View style={styles.academyRecommendationProgress}>
-                <View style={[styles.academyRecommendationProgressFill, { width: `${academy.progress}%` }]} />
-              </View>
-            </Pressable>
-
-            <View style={styles.academyPathSection}>
-              <View style={styles.academyPathSectionHeader}>
-                <View>
-                  <Text style={styles.academyPathSectionTitle}>After this</Text>
-                  <Text style={styles.academyPathSectionMeta}>Two steps, chosen for your level</Text>
-                </View>
-                <Pressable
-                  testID="academy-open-directory"
-                  accessibilityRole="button"
-                  accessibilityLabel="Open all lessons"
-                  style={({ pressed }) => [styles.academyPathViewAll, pressed && styles.pressed]}
-                  onPress={() => changeAcademyMode("directory")}
-                >
-                  <Text style={styles.academyPathViewAllText}>View all</Text>
-                  <ChevronRight size={14} color={equinaTheme.colors.brass} />
-                </Pressable>
-              </View>
-              <View style={styles.academyPathList}>
-                {nextPathLessons.map((lesson, index) => (
-                  <Pressable
-                    key={lesson.id}
-                    testID={`academy-path-lesson-${index + 1}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open lesson ${lesson.title}`}
-                    style={({ pressed }) => [styles.academyPathRow, pressed && styles.pressed]}
-                    onPress={() => openAcademyLesson(lesson)}
-                  >
-                    <Text style={styles.academyPathIndex}>0{index + 2}</Text>
-                    <View style={styles.academyPathRowCopy}>
-                      <Text numberOfLines={1} style={styles.academyPathRowTitle}>{lesson.title}</Text>
-                      <Text style={styles.academyPathRowMeta}>{metaLine(lesson.coach, lesson.duration)}</Text>
-                    </View>
-                    <ChevronRight size={16} color={nightTheme.faint} />
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-
-            <Pressable
-              testID="academy-open-ai"
-              accessibilityRole="button"
-              accessibilityLabel={`Ask ${equinaCoach.name} about this lesson`}
-              style={({ pressed }) => [styles.academyPersonalAction, pressed && styles.pressed]}
-              onPress={() => openGuideWithPrompt(
-                `Explain how ${recommendedLesson.title} should shape ${horse.hasHorse ? `${horse.name}'s` : "my"} next ride`
-              )}
-            >
-              <Sparkles size={18} color={equinaTheme.colors.brass} />
-              <View style={styles.academyPersonalActionCopy}>
-                <Text style={styles.academyPersonalActionTitle}>Ask {equinaCoach.name} about this lesson</Text>
-                <Text numberOfLines={1} style={styles.academyPersonalActionBody}>
-                  Apply it to {horse.hasHorse ? `${horse.name}'s` : "your"} next ride
-                </Text>
-              </View>
-              <ChevronRight size={16} color={nightTheme.faint} />
-            </Pressable>
-          </View>
-        ) : visibleMode === "directory" ? (
-          <AcademyDirectory lessons={lessons} rider={rider} focus={academyFocus} onOpenLesson={openAcademyLesson} />
-        ) : visibleMode === "video" && selectedAcademyLesson ? (
-          <AcademyVideoPage
-            lessons={lessons}
-            lesson={selectedAcademyLesson}
-            progress={academy.progress}
-            rider={rider}
-            focus={academyFocus}
-            playbackLink={playbackLink}
-            onProgress={onLessonProgress}
-            onBack={() => changeAcademyMode("directory")}
-            onComplete={onLessonComplete}
-            onOpenLesson={openAcademyLesson}
-            onOpenGuide={() => openGuideWithPrompt(
-              `Explain how ${selectedAcademyLesson.title} should shape ${horse.hasHorse ? `${horse.name}'s` : "my"} next ride`
-            )}
+        <Pressable
+          testID="academy-open-recommended"
+          accessibilityRole="button"
+          accessibilityLabel={`Open lesson ${currentLesson.title}`}
+          style={({ pressed }) => [styles.academyRecommendation, pressed && styles.pressed]}
+          onPress={() => openLesson(currentLesson)}
+        >
+          <Image source={{ uri: currentLesson.image }} style={styles.academyRecommendationImage} resizeMode="cover" />
+          <LinearGradient
+            colors={["rgba(8,7,6,0.30)", "rgba(8,7,6,0.90)"]}
+            locations={[0.15, 1]}
+            style={styles.academyRecommendationScrim}
           />
-        ) : visibleMode === "ai" ? (
-          <CoachScreen
-            context={coachContext}
-            controller={coachConversation}
-            // The conversation hides the tab bar, so with no lessons to go
-            // back to, back has to leave the Academy rather than vanish.
-            onBack={catalogEmpty ? onExit : () => changeAcademyMode("home")}
-            backLabel={catalogEmpty ? "Back to home" : undefined}
-            onContextChange={(next) => {
-              onGoalChange(next.focus);
-              onLoadChange(next.load);
-              onCoachStyleChange(next.style);
-            }}
-          />
-        ) : !coach.onboarded || guideEditing ? (
-          <View style={styles.guideSetup}>
-            <View style={styles.guideSetupIntro}>
-              <CoachIdentity subtitle={horse.hasHorse ? `with ${rider.name} + ${horse.name}` : `with ${rider.name} · rider profile`} />
-              <Text style={styles.guideSetupTitle}>{guideEditing ? "Adjust our riding context." : "What should we work on?"}</Text>
-              <Text style={styles.guideSetupBody}>{guideEditing ? "These choices shape Ralf's next answer, not your rider profile." : `${equinaCoach.name} already knows your level, focus, and recent rides. Start with what matters today.`}</Text>
-            </View>
-
-            <View style={styles.guideProfileBand}>
-              <View style={styles.guideProfileColumn}>
-                <Text style={styles.guideProfileLabel}>Rider</Text>
-                <Text style={styles.guideProfileValue}>{rider.level} · {coach.discipline}</Text>
-              </View>
-              <View style={styles.guideProfileDivider} />
-              <View style={styles.guideProfileColumn}>
-                <Text style={styles.guideProfileLabel}>{horse.hasHorse ? horse.name : "Rider journal"}</Text>
-                <Text style={styles.guideProfileValue}>{horse.sessionCount} rides · {rider.frequency}</Text>
-              </View>
-            </View>
-
-            {guideEditing ? (
-              <View style={styles.guideContextEditor}>
-                <GuideSegment
-                  title="Today's focus"
-                  options={coachGoalsByDiscipline[coach.discipline]}
-                  value={coach.goal}
-                  onChange={onGoalChange}
-                />
-                <GuideSegment
-                  title="This week's load"
-                  options={coachLoads}
-                  value={coach.load}
-                  onChange={onLoadChange}
-                />
-              </View>
-            ) : (
-              <View style={styles.guideStarterList}>
-                {guideStarters.map(({ Icon, title, body, prompt }, index) => (
-                  <Pressable
-                    key={title}
-                    testID={`guide-starter-${index + 1}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={title}
-                    style={({ pressed }) => [styles.guideStarterRow, index < guideStarters.length - 1 && styles.guideStarterRowBorder, pressed && styles.pressed]}
-                    onPress={() => startCoach(prompt)}
-                  >
-                    <Icon size={19} color={equinaTheme.colors.brass} />
-                    <View style={styles.guideStarterCopy}>
-                      <Text style={styles.guideStarterTitle}>{title}</Text>
-                      <Text numberOfLines={1} style={styles.guideStarterBody}>{body}</Text>
-                    </View>
-                    <ChevronRight size={16} color={nightTheme.faint} />
-                  </Pressable>
-                ))}
-              </View>
-            )}
-
-            <Text style={styles.guideSetupNote}>Training guidance only. Health concerns always escalate to a coach or vet.</Text>
-            <MotionPressable
-              testID="ai-onboarding-start"
-              accessibilityRole="button"
-              accessibilityLabel={guideEditing ? "Save coach context" : `Start with ${equinaCoach.name}`}
-              pressedScale={0.975}
-              style={styles.guideStartButton}
-              onPress={() => startCoach()}
-            >
-              <Text style={styles.guideStartText}>{guideEditing ? "Save context" : `Start with ${equinaCoach.name}`}</Text>
-              <ChevronRight size={17} color={equinaTheme.colors.ink} />
-            </MotionPressable>
+          <View style={styles.academyRecommendationTop}>
+            <Text style={styles.academyRecommendationKicker}>
+              {academy.progress > 0 ? "Continue learning" : "Start here"}
+            </Text>
+            {currentLesson.duration ? (
+              <Text style={styles.academyRecommendationDuration}>{currentLesson.duration}</Text>
+            ) : null}
           </View>
-        ) : (
-          <KeyboardAvoidingView
-            style={styles.guideChat}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
+          <View style={styles.academyRecommendationContent}>
+            <Text style={styles.academyRecommendationReason}>Lesson 1 of {learningPath.length} · {academyFocus}</Text>
+            <Text style={styles.academyRecommendationTitle}>{currentLesson.title}</Text>
+            <View style={styles.academyRecommendationFooter}>
+              <Text style={styles.academyRecommendationCoach}>{currentLesson.coach}</Text>
+              <View style={styles.academyRecommendationPlay}>
+                <Play size={16} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} strokeWidth={1.8} />
+              </View>
+            </View>
+          </View>
+        </Pressable>
+
+        <View style={styles.academyPathSection}>
+          <View style={styles.academyPathSectionHeader}>
+            <View style={styles.academyPathSectionCopy}>
+              <Text style={styles.academyPathSectionTitle}>Your path</Text>
+              <Text style={styles.academyPathSectionMeta}>
+                {learningPath.length} {learningPath.length === 1 ? "lesson" : "lessons"} for your level · {academy.progress}% done
+              </Text>
+            </View>
+          </View>
+          <View
+            accessibilityRole="progressbar"
+            accessibilityLabel="Path progress"
+            accessibilityValue={{ min: 0, max: 100, now: academy.progress }}
+            style={styles.academyPathTrack}
           >
-            <View style={styles.guideChatHeader}>
-              <MotionPressable
-                testID="ai-chat-back"
-                accessibilityRole="button"
-                accessibilityLabel="Back to Academy"
-                style={styles.guideChatBack}
-                onPress={() => changeAcademyMode("home")}
-              >
-                <ChevronLeft size={21} color={nightTheme.text} />
-              </MotionPressable>
-              <CoachIdentity compact subtitle={horse.hasHorse ? `${academyFocus} with ${horse.name}` : `${academyFocus} · rider profile`} />
-              <EquinaIconButton
-                Icon={SlidersHorizontal}
-                testID="ai-context-edit"
-                label="Adjust coach context"
-                iconColor={nightTheme.muted}
-                iconSize={18}
-                style={styles.guideAdjustButton}
-                onPress={() => {
-                  setGuideEditing(true);
-                }}
-              />
-            </View>
-
-            <ScrollView
-              ref={messageScrollRef}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-              showsVerticalScrollIndicator={false}
-              style={styles.guideMessageScroller}
-              contentContainerStyle={styles.guideMessageStack}
-              onContentSizeChange={() => messageScrollRef.current?.scrollToEnd({ animated: !reduceAcademyMotion })}
-            >
-              {coach.messages.map((message) => (
-                <View key={message.id} style={[styles.guideMessageRow, message.role === "user" && styles.guideMessageRowUser]}>
-                  {message.role === "assistant" && (
-                    <View style={styles.guideMessageAvatar}>
-                      <Text style={styles.guideMessageAvatarText}>R</Text>
-                    </View>
-                  )}
-                  <View style={[styles.guideMessageBubble, message.role === "user" ? styles.guideMessageUser : styles.guideMessageAssistant]}>
-                    {message.role === "assistant" && message.label && (
-                      <View accessibilityLabel={`${message.label}${message.confidence === "low" ? ", limited profile data" : ""}`} style={styles.messageMetaRow}>
-                        <Text style={styles.messageLabel}>{equinaCoach.name}</Text>
-                        {message.confidence === "low" && <Text style={styles.messageConfidence}>Limited data</Text>}
-                      </View>
-                    )}
-                    <Text style={[styles.guideMessageText, message.role === "user" && styles.guideMessageTextUser]}>{message.text}</Text>
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-
-            <View style={styles.guideComposerDock}>
-              {!hasGuideUserMessage && !chatInputFocused && (
-                <View style={styles.guideSuggestions}>
-                  <Text style={styles.guideSuggestionsLabel}>Try asking</Text>
-                  <ScrollView
-                    horizontal
-                    keyboardShouldPersistTaps="handled"
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.guidePromptList}
-                  >
-                    {quickPrompts.map((prompt, index) => (
-                      <Pressable
-                        key={prompt}
-                        testID={`ai-quick-prompt-${index + 1}`}
-                        accessibilityRole="button"
-                        accessibilityLabel={prompt}
-                        style={({ pressed }) => [styles.guidePrompt, pressed && styles.pressed]}
-                        onPress={() => sendMessage(prompt)}
-                      >
-                        <Text numberOfLines={1} style={styles.guidePromptText}>{prompt}</Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-
-              <ConversationGlassSurface
-                style={[styles.guideComposer, chatInputFocused && styles.guideComposerFocused]}
-                contentStyle={styles.guideComposerContent}
-              >
-                <TextInput
-                  testID="ai-chat-input"
-                  accessibilityLabel={`Message ${equinaCoach.name} about ${horse.name}`}
-                  value={draft}
-                  onChangeText={setDraft}
-                  onFocus={() => setChatInputFocused(true)}
-                  onBlur={() => setChatInputFocused(false)}
-                  onSubmitEditing={() => sendMessage(draft)}
-                  placeholder={`Ask ${equinaCoach.name} about ${horse.name}`}
-                  placeholderTextColor={nightTheme.faint}
-                  returnKeyType="send"
-                  style={[styles.guideInput, webTextInputReset]}
-                  multiline
-                />
-                <MotionPressable
-                  testID="ai-chat-send"
+            <View style={[styles.academyPathFill, { width: `${academy.progress}%` }]} />
+          </View>
+          {laterLessons.length > 0 ? (
+            <View style={styles.academyPathList}>
+              {laterLessons.map((lesson, index) => (
+                <Pressable
+                  key={lesson.id}
+                  testID={`academy-path-lesson-${index + 2}`}
                   accessibilityRole="button"
-                  accessibilityLabel="Send message"
-                  accessibilityState={{ disabled: !coachCanSend }}
-                  disabled={!coachCanSend}
-                  pressedScale={0.94}
-                  style={[styles.guideSendButton, coachCanSend && styles.guideSendButtonReady]}
-                  onPress={() => sendMessage(draft)}
+                  accessibilityLabel={`Open lesson ${index + 2} of ${learningPath.length}, ${lesson.title}`}
+                  style={({ pressed }) => [styles.academyPathRow, pressed && styles.pressed]}
+                  onPress={() => openLesson(lesson)}
                 >
-                  <SendHorizontal size={18} color={coachCanSend ? equinaTheme.colors.ink : nightTheme.faint} />
-                </MotionPressable>
-              </ConversationGlassSurface>
+                  <Text style={styles.academyPathIndex}>{String(index + 2).padStart(2, "0")}</Text>
+                  <View style={styles.academyPathRowCopy}>
+                    <Text numberOfLines={1} style={styles.academyPathRowTitle}>{lesson.title}</Text>
+                    <Text style={styles.academyPathRowMeta}>{metaLine(lesson.coach, lesson.duration)}</Text>
+                  </View>
+                  <ChevronRight size={16} color={nightTheme.faint} />
+                </Pressable>
+              ))}
             </View>
-          </KeyboardAvoidingView>
-        )}
-      </Animated.View>
-    </View>
+          ) : null}
+        </View>
+
+        {onOpenRalf ? (
+          <Pressable
+            testID="academy-open-ai"
+            accessibilityRole="button"
+            accessibilityLabel={`Ask ${equinaCoach.name} about ${currentLesson.title}`}
+            style={({ pressed }) => [styles.academyPersonalAction, pressed && styles.pressed]}
+            onPress={() => onOpenRalf(lessonQuestion(currentLesson))}
+          >
+            <Sparkles size={18} color={equinaTheme.colors.brass} />
+            <View style={styles.academyPersonalActionCopy}>
+              <Text style={styles.academyPersonalActionTitle}>Ask {equinaCoach.name} about {currentLesson.title}</Text>
+              <Text numberOfLines={1} style={styles.academyPersonalActionBody}>
+                Apply it to {horse.hasHorse ? `${horse.name}'s` : "your"} next ride
+              </Text>
+            </View>
+            <ChevronRight size={16} color={nightTheme.faint} />
+          </Pressable>
+        ) : null}
+
+        <AcademyLessonList lessons={lessons} rider={rider} focus={academyFocus} onOpenLesson={openLesson} />
+      </View>
+    </Animated.View>
   );
 }
 
@@ -5770,7 +5515,9 @@ function AcademyPathCard({
   );
 }
 
-function AcademyDirectory({
+// Every published lesson, searchable. The page above already features the
+// rider's next lesson, so nothing here is featured again.
+function AcademyLessonList({
   lessons,
   rider,
   focus,
@@ -5802,23 +5549,21 @@ function AcademyDirectory({
   return (
     <View style={styles.academyDirectoryScreen}>
       <View style={styles.academyDirectoryHeader}>
-        <View>
-          <Text style={styles.homeKicker}>{rider.level} · {rider.discipline}</Text>
-          <Text style={styles.academyDirectoryHeading}>Lessons for you</Text>
-          <Text style={styles.academyDirectorySubhead}>Ordered around {focus.toLowerCase()} and your current level.</Text>
-        </View>
-        <Text style={styles.academyDirectoryCountText}>{visibleLessons.length} {visibleLessons.length === 1 ? "lesson" : "lessons"}</Text>
+        <Text style={styles.academyPathSectionTitle}>All lessons</Text>
+        <Text style={styles.academyDirectoryCountText}>
+          {visibleLessons.length} of {lessons.length}
+        </Text>
       </View>
 
       <View style={styles.academySearchShell}>
-        <Search size={17} color="#8B8578" />
+        <Search size={17} color={equinaTheme.text.tertiary} />
         <TextInput
           testID="academy-search-input"
           accessibilityLabel="Search lessons and coaches"
           value={query}
           onChangeText={setQuery}
           placeholder="Search lessons and coaches"
-          placeholderTextColor="#8B8578"
+          placeholderTextColor={equinaTheme.text.tertiary}
           returnKeyType="search"
           style={[styles.academySearchInput, webTextInputReset]}
         />
@@ -5851,32 +5596,15 @@ function AcademyDirectory({
       </ScrollView>
 
       {visibleLessons.length > 0 ? (
-        <View style={styles.academyDirectoryResults}>
-          <AcademyLessonCard
-            lesson={visibleLessons[0]!}
-            featured
-            featuredLabel={query.trim() || topic !== "All" ? "Top result" : "Best match"}
-            matchReason={query.trim() || topic !== "All" ? metaLine(visibleLessons[0]!.level, visibleLessons[0]!.coachTitle) : `${rider.level} · ${focus}`}
-            onPress={() => onOpenLesson(visibleLessons[0]!)}
-          />
-          {visibleLessons.length > 1 && (
-            <View style={styles.academyMoreLessons}>
-              <View style={styles.academyMoreLessonsHeader}>
-                <Text style={styles.academyMoreLessonsTitle}>More for you</Text>
-                <Text style={styles.academyMoreLessonsCount}>{visibleLessons.length - 1}</Text>
-              </View>
-              <View style={styles.academyLessonStack}>
-                {visibleLessons.slice(1).map((lesson) => (
-                  <AcademyLessonCard
-                    key={lesson.id}
-                    lesson={lesson}
-                    featured={false}
-                    onPress={() => onOpenLesson(lesson)}
-                  />
-                ))}
-              </View>
-            </View>
-          )}
+        <View style={styles.academyLessonStack}>
+          {visibleLessons.map((lesson) => (
+            <AcademyLessonCard
+              key={lesson.id}
+              lesson={lesson}
+              featured={false}
+              onPress={() => onOpenLesson(lesson)}
+            />
+          ))}
         </View>
       ) : (
         <View style={styles.academyEmptyState}>
@@ -5912,7 +5640,8 @@ function AcademyVideoPage({
   onBack: () => void;
   onComplete: (lessonId: string, positionSeconds: number) => void;
   onOpenLesson: (lesson: AcademyLessonView) => void;
-  onOpenGuide: () => void;
+  /** Absent while Ralf is switched off for this account. */
+  onOpenGuide?: () => void;
 }) {
   const [videoReady, setVideoReady] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
@@ -5935,20 +5664,30 @@ function AcademyVideoPage({
     if (videoStarted && videoPhase === "ready") videoPlayer.play();
   }, [videoPhase, videoPlayer, videoStarted]);
 
+  // A chapter starts playback at its mark. A mark past the end of what the
+  // player holds (the short preview clip) just starts the video.
+  const playChapter = (seconds: number) => {
+    void Haptics.selectionAsync().catch(() => undefined);
+    const length = videoPlayer.duration;
+    if (!length || seconds < length) videoPlayer.currentTime = seconds;
+    setVideoStarted(true);
+    if (videoPhase === "ready") videoPlayer.play();
+  };
+
   return (
     <View style={styles.academyVideoPage}>
       <View style={styles.academyVideoTopRow}>
         <Pressable
           testID="academy-video-back"
           accessibilityRole="button"
-          accessibilityLabel="Back to lessons"
+          accessibilityLabel="Back to Academy"
           style={({ pressed }) => [styles.academyBackButton, pressed && styles.pressed]}
           onPress={onBack}
         >
           <ChevronLeft size={17} color={nightTheme.text} />
-          <Text style={styles.academyBackText}>Lessons</Text>
+          <Text style={styles.academyBackText}>Academy</Text>
         </Pressable>
-        <Text style={styles.academyVideoPosition}>{pathPosition >= 0 ? `Lesson ${lessonPosition + 1} of ${learningPath.length}` : "Single lesson"}</Text>
+        <Text style={styles.academyVideoPosition}>{pathPosition >= 0 ? `Lesson ${lessonPosition + 1} of ${learningPath.length}` : "Outside your path"}</Text>
       </View>
 
       <View style={styles.academyVideoFrame}>
@@ -6023,30 +5762,53 @@ function AcademyVideoPage({
         <Text style={styles.academyVideoCoach}>{metaLine(lesson.coach, lesson.coachTitle)}</Text>
         <Text style={styles.academyVideoSummary}>{lesson.summary}</Text>
 
-        <View style={styles.academyVideoProgressBlock}>
-          <View style={styles.academyVideoProgressTop}>
-            <Text style={styles.academyVideoProgressLabel}>Path progress</Text>
-            <Text style={styles.academyVideoProgressValue}>{progress}%</Text>
+        {lesson.chapters.length > 0 ? (
+          <View style={styles.academyChapterList}>
+            <Text style={styles.academyChapterHeading}>Chapters</Text>
+            {lesson.chapters.map((chapter, index) => (
+              <AcademyChapterRow
+                key={`${chapter.seconds}-${chapter.title}`}
+                chapter={chapter}
+                last={index === lesson.chapters.length - 1}
+                onPress={() => playChapter(chapter.seconds)}
+              />
+            ))}
           </View>
-          <View style={styles.homeProgressTrack}>
-            <View style={[styles.homeProgressFill, { width: `${progress}%` }]} />
-          </View>
-        </View>
+        ) : null}
 
-        <Pressable
-          testID="academy-video-guide"
-          accessibilityRole="button"
-          accessibilityLabel={`Ask ${equinaCoach.name} about ${lesson.title}`}
-          style={({ pressed }) => [styles.academyVideoGuideAction, pressed && styles.pressed]}
-          onPress={onOpenGuide}
-        >
-          <Sparkles size={17} color={equinaTheme.colors.brass} />
-          <View style={styles.academyVideoGuideCopy}>
-            <Text style={styles.academyVideoGuideTitle}>Ask {equinaCoach.name} about this lesson</Text>
-            <Text numberOfLines={1} style={styles.academyVideoGuideBody}>Turn it into one exercise for your next ride</Text>
+        {pathPosition >= 0 ? (
+          <View style={styles.academyVideoProgressBlock}>
+            <View style={styles.academyVideoProgressTop}>
+              <Text style={styles.academyVideoProgressLabel}>Your path</Text>
+              <Text style={styles.academyVideoProgressValue}>{progress}% done</Text>
+            </View>
+            <View
+              accessibilityRole="progressbar"
+              accessibilityLabel="Path progress"
+              accessibilityValue={{ min: 0, max: 100, now: progress }}
+              style={styles.academyPathTrack}
+            >
+              <View style={[styles.academyPathFill, { width: `${progress}%` }]} />
+            </View>
           </View>
-          <ChevronRight size={16} color={nightTheme.faint} />
-        </Pressable>
+        ) : null}
+
+        {onOpenGuide ? (
+          <Pressable
+            testID="academy-video-guide"
+            accessibilityRole="button"
+            accessibilityLabel={`Ask ${equinaCoach.name} about ${lesson.title}`}
+            style={({ pressed }) => [styles.academyVideoGuideAction, pressed && styles.pressed]}
+            onPress={onOpenGuide}
+          >
+            <Sparkles size={17} color={equinaTheme.colors.brass} />
+            <View style={styles.academyVideoGuideCopy}>
+              <Text style={styles.academyVideoGuideTitle}>Ask {equinaCoach.name} about this lesson</Text>
+              <Text numberOfLines={1} style={styles.academyVideoGuideBody}>Turn it into one exercise for your next ride</Text>
+            </View>
+            <ChevronRight size={16} color={nightTheme.faint} />
+          </Pressable>
+        ) : null}
 
         <MotionPressable
           testID="academy-video-complete"
@@ -6067,7 +5829,7 @@ function AcademyVideoPage({
           <Check size={19} color={equinaTheme.colors.ink} strokeWidth={2.4} />
           <View style={styles.academyLessonCompleteCopy}>
             <Text style={styles.academyLessonCompleteTitle}>Complete lesson</Text>
-            <Text numberOfLines={1} style={styles.academyLessonCompleteMeta}>{nextLesson ? `Next: ${nextLesson.title}` : "Return to your path"}</Text>
+            <Text numberOfLines={1} style={styles.academyLessonCompleteMeta}>{nextLesson ? `Next: ${nextLesson.title}` : "Back to the Academy"}</Text>
           </View>
           <ChevronRight size={17} color={equinaTheme.colors.ink} />
         </MotionPressable>
@@ -6076,13 +5838,26 @@ function AcademyVideoPage({
   );
 }
 
-function AcademyChapterRow({ chapter }: { chapter: { time: string; title: string } }) {
+function AcademyChapterRow({
+  chapter,
+  last,
+  onPress
+}: {
+  chapter: { time: string; title: string };
+  last: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={styles.academyChapterRow}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Play from ${chapter.time}, ${chapter.title}`}
+      style={({ pressed }) => [styles.academyChapterRow, !last && styles.academyChapterRowDivider, pressed && styles.pressed]}
+      onPress={onPress}
+    >
       <Text style={styles.academyChapterTime}>{chapter.time}</Text>
-      <Text style={styles.academyChapterTitle}>{chapter.title}</Text>
-      <PlayCircle size={16} color="#8B8578" />
-    </View>
+      <Text numberOfLines={2} style={styles.academyChapterTitle}>{chapter.title}</Text>
+      <PlayCircle size={18} color={equinaTheme.colors.brass} />
+    </Pressable>
   );
 }
 
@@ -6181,48 +5956,8 @@ function AcademyLessonCard({
         <Text numberOfLines={1} style={styles.academyLessonMeta}>{metaLine(lesson.coach, lesson.duration)}</Text>
         <Text numberOfLines={1} style={styles.academyLessonSummary}>{lesson.summary}</Text>
       </View>
-      <ChevronRight size={17} color="#8B8578" />
+      <ChevronRight size={17} color={nightTheme.faint} />
     </Pressable>
-  );
-}
-
-function GuideSegment({
-  title,
-  options,
-  value,
-  onChange
-}: {
-  title: string;
-  options: string[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <View style={styles.guideSegmentBlock}>
-      <Text style={styles.guideSegmentTitle}>{title}</Text>
-      <View style={styles.guideSegmentControl} accessibilityRole="radiogroup">
-        {options.map((option) => {
-          const selected = option === value;
-          return (
-            <Pressable
-              key={option}
-              testID={`guide-option-${option.toLowerCase().replace(/\s+/g, "-")}`}
-              accessibilityRole="radio"
-              accessibilityLabel={option}
-              accessibilityState={{ checked: selected }}
-              style={({ pressed }) => [
-                styles.guideSegmentOption,
-                selected && styles.guideSegmentOptionActive,
-                pressed && styles.pressed
-              ]}
-              onPress={() => onChange(option)}
-            >
-              <Text numberOfLines={2} style={[styles.guideSegmentText, selected && styles.guideSegmentTextActive]}>{option}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
   );
 }
 
@@ -6311,41 +6046,21 @@ function CommunityScreen({
 
   return (
     <Animated.View style={[styles.screen, feedMotion]}>
-      <View style={styles.communityTopBar}>
-        <Text style={styles.communityTitle}>At the barn</Text>
-        {equinaFeatureFlags.clubPublishing ? (
-          <Pressable
-            testID="share-ride"
-            accessibilityRole="button"
-            accessibilityLabel={sharedRide ? "Ride already posted" : "Share ride"}
-            style={({ pressed }) => [styles.communityShareMini, sharedRide && styles.communityShareMiniDone, pressed && styles.homePressLift]}
-            onPress={onShareRide}
-          >
-            {sharedRide ? <CheckCircle2 size={16} color={nightTheme.text} /> : <Plus size={18} color={nightTheme.text} />}
-            <Text style={styles.communityShareMiniText}>{sharedRide ? "Posted" : "Share"}</Text>
-          </Pressable>
-        ) : (
-          <View
-            testID="share-ride"
-            accessibilityLabel="Club publishing preview"
-            style={styles.communityPreviewStatus}
-          >
-            <LockKeyhole size={13} color={equinaTheme.text.tertiary} />
-            <Text style={styles.communityPreviewStatusText}>Preview</Text>
-          </View>
-        )}
-      </View>
-
-      {equinaFeatureFlags.clubPublishing && (
+      {/* One way to post, and no row of sample riders: the tab header
+          already names the Club. */}
+      {equinaFeatureFlags.clubPublishing ? (
         <View style={styles.communityComposer}>
-          <Image source={{ uri: equinaImages.profile }} style={styles.communityComposerAvatar} />
+          <View style={styles.communityComposerMonogram}>
+            <Text style={styles.communityComposerMonogramText}>{rideShare.riderName.trim().slice(0, 1).toUpperCase() || "R"}</Text>
+          </View>
           <Pressable
+            testID="share-ride"
             accessibilityRole="button"
-            accessibilityLabel="Compose a Club post"
+            accessibilityLabel={sharedRide ? "Add a thought to your shared ride" : "Write a Club post"}
             style={({ pressed }) => [styles.communityComposerInput, pressed && styles.pressed]}
             onPress={onShareRide}
           >
-            <Text style={styles.communityComposerText}>{sharedRide ? "Ride shared. Add a thought?" : "What moved you today?"}</Text>
+            <Text style={styles.communityComposerText}>{sharedRide ? "Ride shared. Add a thought?" : "How did today's ride go?"}</Text>
           </Pressable>
           <EquinaIconButton
             Icon={Camera}
@@ -6355,31 +6070,7 @@ function CommunityScreen({
             onPress={() => onClubAction("Photo uploads require connected accounts and moderation.")}
           />
         </View>
-      )}
-
-      {/* The story rail shows the same invented riders as the feed, so it is
-          bound to the same signal: no posts means no community to preview. */}
-      {posts.length > 0 && (
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.communityStoryRail}>
-        {communityStories.map((story) => (
-          <View
-            key={story.name}
-            accessibilityLabel={`${story.name} story preview`}
-            style={styles.communityStory}
-          >
-            <View style={styles.communityStoryRing}>
-              <Image source={{ uri: story.image }} style={styles.communityStoryImage} />
-              {story.live && (
-                <View style={styles.communityLiveBadge}>
-                  <View style={styles.communityLiveDot} />
-                </View>
-              )}
-            </View>
-            <Text numberOfLines={1} style={styles.communityStoryName}>{story.name}</Text>
-          </View>
-        ))}
-      </ScrollView>
-      )}
+      ) : null}
 
       {sharedRide && (
         <CommunityFeedCard
@@ -6400,7 +6091,7 @@ function CommunityScreen({
       )}
 
       <View style={styles.communityFeedHeader}>
-        <Text style={styles.communityFeedTitle}>From your circle</Text>
+        <Text style={styles.communityFeedTitle}>Latest from your Club</Text>
       </View>
 
       {posts.length === 0 && !sharedRide && (
@@ -6775,7 +6466,7 @@ function MarketplaceRow({ listing, selected, onPress }: { listing: Listing; sele
           </View>
         </View>
         <View style={styles.marketTrust}>
-          <BadgeCheck size={14} color={equinaTheme.colors.pine} />
+          <BadgeCheck size={14} color={equinaTheme.colors.brass} />
           <Text style={styles.marketTrustText}>
             {listing.metadata?.serialNumber ? "Serial captured" : "Photos checked"} · {listing.metadata?.proofOfOwnership ? "owner proof" : "seller verified"}
           </Text>
@@ -6844,7 +6535,7 @@ function ShopProductCard({ listing, saved, onPress }: { listing: Listing; saved:
           <Image source={{ uri: imageUrl }} resizeMode="cover" style={styles.shopProductImage} onError={() => setImageFailed(true)} />
         ) : (
           <LinearGradient
-            colors={["#2C2A25", "#181713"]}
+            colors={[equinaTheme.surfaces.elevated, equinaTheme.surfaces.raised]}
             style={styles.shopProductImageFallback}
           >
             <PackageCheck size={24} color={equinaTheme.colors.brass} strokeWidth={1.7} />
@@ -6917,7 +6608,7 @@ function HeroStat({ Icon, value, label }: { Icon: typeof Store; value: string; l
   return (
     <View style={styles.heroStat}>
       <View style={styles.heroStatIcon}>
-        <Icon size={14} color="#FFF7E6" />
+        <Icon size={14} color={equinaTheme.colors.ivory} />
       </View>
       <View>
         <Text style={styles.statValue}>{value}</Text>
@@ -7164,13 +6855,13 @@ function CompactActionList({
         <View key={title}>
           <MotionPressable accessibilityRole="button" accessibilityLabel={`${title}, ${body}`} accessibilityState={{ disabled }} disabled={disabled} style={[styles.compactActionRow, disabled && styles.prototypeActionDisabled]} onPress={onPress}>
             <View style={styles.compactActionIcon}>
-              <Icon size={20} strokeWidth={1.9} color={active ? "#6C9E7C" : equinaTheme.colors.brass} />
+              <Icon size={20} strokeWidth={1.9} color={active ? equinaTheme.text.primary : equinaTheme.colors.brass} />
             </View>
             <View style={styles.compactActionCopy}>
               <Text style={styles.compactActionTitle}>{title}</Text>
               <Text style={styles.compactActionBody}>{body}</Text>
             </View>
-            <ChevronRight size={15} color="#C4BDB3" />
+            <ChevronRight size={15} color={nightTheme.faint} />
           </MotionPressable>
           {index < items.length - 1 && <View style={styles.compactActionDivider} />}
         </View>
@@ -7345,7 +7036,7 @@ function ActionRow({
         <Text style={styles.actionTitle}>{title}</Text>
         <Text style={styles.actionBody}>{body}</Text>
       </View>
-      <ChevronRight size={18} color="#8B8578" />
+      <ChevronRight size={18} color={nightTheme.faint} />
     </Pressable>
   );
 }
@@ -7457,6 +7148,21 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "600"
   },
+  ralfButton: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 22,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    backgroundColor: equinaTheme.material.quiet
+  },
+  ralfButtonText: {
+    color: equinaTheme.text.primary,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "600"
+  },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -7477,7 +7183,7 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: "#36C275"
+    backgroundColor: equinaTheme.colors.brass
   },
   headerStatusText: {
     color: nightTheme.text,
@@ -7697,7 +7403,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#5BCB93"
+    backgroundColor: equinaTheme.colors.brass
   },
   homeStageStateText: {
     color: equinaTheme.colors.ivory,
@@ -7795,7 +7501,7 @@ const styles = StyleSheet.create({
   homeStageLiveFill: {
     height: "100%",
     borderRadius: 999,
-    backgroundColor: "#36C275"
+    backgroundColor: equinaTheme.colors.brass
   },
   homeRidePressable: {
     borderRadius: 14,
@@ -8548,11 +8254,11 @@ const styles = StyleSheet.create({
     width: 9,
     height: 9,
     borderRadius: 5,
-    backgroundColor: "#6F6A60",
+    backgroundColor: equinaTheme.text.tertiary,
     marginTop: 5
   },
   liveDotActive: {
-    backgroundColor: "#36C275"
+    backgroundColor: equinaTheme.colors.brass
   },
   liveDotWrap: {
     width: 34,
@@ -8570,7 +8276,7 @@ const styles = StyleSheet.create({
     width: 13,
     height: 13,
     borderRadius: 7,
-    backgroundColor: "#36C275"
+    backgroundColor: equinaTheme.colors.brass
   },
   todayStats: {
     flexDirection: "row",
@@ -8613,7 +8319,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   statLabel: {
-    color: "#BDB29F",
+    color: equinaTheme.text.secondary,
     fontSize: 11,
     marginTop: 2
   },
@@ -8645,7 +8351,7 @@ const styles = StyleSheet.create({
   rideBtnTitle: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#FFF7E6"
+    color: equinaTheme.colors.ivory
   },
   rideBtnSub: {
     fontSize: 12,
@@ -8659,7 +8365,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   rideBtnCircleInactive: {
-    backgroundColor: "#D8A94A"
+    backgroundColor: equinaTheme.colors.brass
   },
   rideBtnCircleActive: {
     backgroundColor: "rgba(255,247,230,0.15)"
@@ -8897,7 +8603,7 @@ const styles = StyleSheet.create({
     gap: 10,
     backgroundColor: nightTheme.surface,
     borderWidth: 1,
-    borderColor: "#EFE8DA"
+    borderColor: equinaTheme.material.separator
   },
   homeNextIcon: {
     width: 36,
@@ -8937,7 +8643,7 @@ const styles = StyleSheet.create({
   },
   homeSoftActionDone: {
     backgroundColor: nightTheme.surfaceSoft,
-    borderColor: "#D7E2DC"
+    borderColor: equinaTheme.material.separator
   },
   homeSoftActionText: {
     color: nightTheme.text,
@@ -9012,7 +8718,7 @@ const styles = StyleSheet.create({
   },
   homeMicroActionDone: {
     backgroundColor: nightTheme.surfaceSoft,
-    borderColor: "#D7E2DC"
+    borderColor: equinaTheme.material.separator
   },
   homeMicroActionText: {
     color: nightTheme.text,
@@ -9049,13 +8755,13 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: "#36C275"
+    backgroundColor: equinaTheme.colors.brass
   },
   homeLiveRideDot: {
     width: 9,
     height: 9,
     borderRadius: 5,
-    backgroundColor: "#36C275"
+    backgroundColor: equinaTheme.colors.brass
   },
   homeLiveRideTitle: {
     color: nightTheme.text,
@@ -9120,13 +8826,13 @@ const styles = StyleSheet.create({
   homeProgressTrack: {
     height: 8,
     borderRadius: 999,
-    backgroundColor: "#EFE8DA",
+    backgroundColor: equinaTheme.material.quietPressed,
     overflow: "hidden"
   },
   homeProgressFill: {
     height: "100%",
     borderRadius: 999,
-    backgroundColor: equinaTheme.colors.pine
+    backgroundColor: equinaTheme.colors.brass
   },
   homeMomentumStats: {
     flexDirection: "row",
@@ -9214,7 +8920,7 @@ const styles = StyleSheet.create({
     borderWidth: 0
   },
   homeClubShareActive: {
-    backgroundColor: "#1E2A25",
+    backgroundColor: equinaTheme.colorRole.positive,
     borderColor: "rgba(54,194,117,0.24)"
   },
   homeClubShareTitle: {
@@ -9263,9 +8969,9 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: "#36C275",
+    backgroundColor: equinaTheme.colors.brass,
     borderWidth: 2,
-    borderColor: "#FFFFFF"
+    borderColor: equinaTheme.colors.ivory
   },
   friendName: {
     color: nightTheme.text,
@@ -9459,7 +9165,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   trainingProgressLabel: {
-    color: "#6A665E",
+    color: equinaTheme.text.secondary,
     fontSize: 12,
     fontWeight: "400"
   },
@@ -9471,7 +9177,7 @@ const styles = StyleSheet.create({
   trainingTrack: {
     height: 7,
     borderRadius: 999,
-    backgroundColor: "#EFE8DA",
+    backgroundColor: equinaTheme.material.quietPressed,
     overflow: "hidden"
   },
   trainingFill: {
@@ -9611,7 +9317,7 @@ const styles = StyleSheet.create({
   },
   shareRideCardActive: {
     backgroundColor: nightTheme.surfaceSoft,
-    borderColor: "#D5DFDA"
+    borderColor: equinaTheme.material.separator
   },
   shareRideIcon: {
     width: 40,
@@ -9656,7 +9362,7 @@ const styles = StyleSheet.create({
     backgroundColor: nightTheme.surfaceSoft
   },
   homeTackKicker: {
-    color: "#8B8578",
+    color: equinaTheme.text.secondary,
     fontSize: 11,
     fontWeight: "400"
   },
@@ -9823,7 +9529,7 @@ const styles = StyleSheet.create({
     overflow: "hidden"
   },
   heroTitle: {
-    color: "#FFFFFF",
+    color: equinaTheme.colors.ivory,
     fontSize: 30,
     lineHeight: 34,
     fontWeight: "600",
@@ -9865,7 +9571,7 @@ const styles = StyleSheet.create({
   listingImage: {
     width: "100%",
     height: 126,
-    backgroundColor: "#EFE8DA"
+    backgroundColor: equinaTheme.surfaces.raised
   },
   listingCardBody: {
     padding: 11,
@@ -9923,7 +9629,7 @@ const styles = StyleSheet.create({
     borderRadius: 8
   },
   factLabel: {
-    color: "#6A665E",
+    color: equinaTheme.text.secondary,
     fontSize: 11,
     fontWeight: "400",
   },
@@ -10118,6 +9824,24 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     gap: 3
   },
+  stableCareEmpty: {
+    gap: 6,
+    padding: 16,
+    borderRadius: equinaTheme.radius.card,
+    backgroundColor: equinaTheme.surfaces.raised
+  },
+  stableCareEmptyTitle: {
+    color: nightTheme.text,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "600"
+  },
+  stableCareEmptyBody: {
+    color: nightTheme.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "400"
+  },
   stableEmptyNoteTitle: {
     color: nightTheme.text,
     fontSize: 15,
@@ -10294,7 +10018,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#5BCB93"
+    backgroundColor: equinaTheme.colors.brass
   },
   stableProfilePillText: {
     color: equinaTheme.colors.ivory,
@@ -10495,7 +10219,7 @@ const styles = StyleSheet.create({
   nutritionHydrationFill: {
     height: "100%",
     borderRadius: 8,
-    backgroundColor: "#8CCFB7"
+    backgroundColor: equinaTheme.colors.brass
   },
   nutritionBaseline: {
     minHeight: 28,
@@ -10737,7 +10461,7 @@ const styles = StyleSheet.create({
     backgroundColor: equinaTheme.colors.brass
   },
   stableLatestRideDotDone: {
-    backgroundColor: "#6C9E7C"
+    backgroundColor: equinaTheme.text.secondary
   },
   stableLatestRideStatusText: {
     color: nightTheme.faint,
@@ -10982,7 +10706,7 @@ const styles = StyleSheet.create({
   },
   miniActionDone: {
     backgroundColor: nightTheme.surfaceSoft,
-    borderColor: "#D5DFDA"
+    borderColor: equinaTheme.material.separator
   },
   miniActionText: {
     flex: 1,
@@ -11172,7 +10896,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 8,
-    backgroundColor: "#EFE8DA"
+    backgroundColor: equinaTheme.surfaces.raised
   },
   segmented: {
     flexDirection: "row",
@@ -11224,7 +10948,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   shopBody: {
-    color: "#D8CCB8",
+    color: equinaTheme.text.secondary,
     fontSize: 13,
     fontWeight: "400"
   },
@@ -11870,13 +11594,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderRadius: 14,
-    backgroundColor: equinaTheme.colors.pine,
+    backgroundColor: equinaTheme.colors.brass,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 10
   },
   shopOrderReleaseText: {
-    color: equinaTheme.colors.ivory,
+    color: equinaTheme.colors.ink,
     fontSize: 12,
     lineHeight: 16,
     fontWeight: "600"
@@ -12373,7 +12097,7 @@ const styles = StyleSheet.create({
     aspectRatio: 0.86,
     borderRadius: equinaTheme.radius.card,
     overflow: "hidden",
-    backgroundColor: "#EFE8DA"
+    backgroundColor: equinaTheme.surfaces.raised
   },
   shopProductImage: {
     width: "100%",
@@ -12534,13 +12258,13 @@ const styles = StyleSheet.create({
     flexWrap: "wrap"
   },
   shopFeaturePrice: {
-    color: "#FFFFFF",
+    color: equinaTheme.colors.ivory,
     fontSize: 17,
     lineHeight: 22,
     fontWeight: "600"
   },
   shopFeatureMeta: {
-    color: "#F5EBD8",
+    color: equinaTheme.colors.parchment,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: "400"
@@ -12562,7 +12286,7 @@ const styles = StyleSheet.create({
     width: 86,
     height: 112,
     borderRadius: 8,
-    backgroundColor: "#EFE8DA"
+    backgroundColor: equinaTheme.surfaces.raised
   },
   shopSelectedBody: {
     flex: 1,
@@ -12660,7 +12384,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#FFF7E6"
+    backgroundColor: equinaTheme.colors.ivory
   },
   shopProtectionTitle: {
     color: nightTheme.text,
@@ -12724,7 +12448,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 8,
-    backgroundColor: "#FFF7E6",
+    backgroundColor: equinaTheme.colors.ivory,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -12771,7 +12495,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#FFF7E6"
+    backgroundColor: equinaTheme.colors.ivory
   },
   sellerStepIndexText: {
     color: equinaTheme.colors.ink,
@@ -12813,7 +12537,7 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 8,
-    backgroundColor: "#EFE8DA"
+    backgroundColor: equinaTheme.surfaces.raised
   },
   sellerListingBody: {
     flex: 1,
@@ -12873,7 +12597,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 18,
-    backgroundColor: "#FFF7E6",
+    backgroundColor: equinaTheme.colors.ivory,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -12903,7 +12627,7 @@ const styles = StyleSheet.create({
     fontWeight: "400"
   },
   marketplaceTitle: {
-    color: "#FFFFFF",
+    color: equinaTheme.colors.ivory,
     fontSize: 27,
     lineHeight: 31,
     fontWeight: "600",
@@ -12934,7 +12658,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 50,
     borderRadius: 15,
-    backgroundColor: "#FFF7E6",
+    backgroundColor: equinaTheme.colors.ivory,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -13091,7 +12815,7 @@ const styles = StyleSheet.create({
   },
   dossierTimeline: {
     borderTopWidth: 1,
-    borderTopColor: "#E5DFD3",
+    borderTopColor: equinaTheme.material.separator,
     paddingTop: 12,
     gap: 10
   },
@@ -13105,7 +12829,7 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: "#D8CCB8",
+    borderColor: nightTheme.borderStrong,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: nightTheme.surface
@@ -13167,7 +12891,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   marketFit: {
-    color: equinaTheme.colors.pine,
+    color: equinaTheme.text.secondary,
     fontSize: 11,
     fontWeight: "400"
   },
@@ -13183,7 +12907,7 @@ const styles = StyleSheet.create({
     gap: 5
   },
   marketTrustText: {
-    color: equinaTheme.colors.pine,
+    color: equinaTheme.text.secondary,
     fontSize: 11,
     fontWeight: "400"
   },
@@ -13209,7 +12933,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   marketSafetyBody: {
-    color: "#D8CCB8",
+    color: equinaTheme.text.secondary,
     fontSize: 12,
     lineHeight: 16,
     marginTop: 3
@@ -13431,9 +13155,60 @@ const styles = StyleSheet.create({
   },
   academyPathSectionMeta: {
     color: nightTheme.muted,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 12,
+    lineHeight: 16,
     marginTop: 2
+  },
+  academyPathSectionCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  // Done reads brighter than what is left: brass on a quiet track.
+  academyPathTrack: {
+    height: 4,
+    borderRadius: 4,
+    backgroundColor: equinaTheme.material.quietPressed,
+    overflow: "hidden"
+  },
+  academyPathFill: {
+    height: "100%",
+    borderRadius: 4,
+    backgroundColor: equinaTheme.colors.brass
+  },
+  academyEmptyCatalog: {
+    gap: 10,
+    paddingTop: 24
+  },
+  academyEmptyAction: {
+    minHeight: 52,
+    marginTop: 12,
+    borderRadius: equinaTheme.radius.control,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: equinaTheme.colors.brass
+  },
+  academyEmptyActionText: {
+    color: equinaTheme.colors.ink,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "600"
+  },
+  academyChapterList: {
+    gap: 4,
+    marginTop: 12
+  },
+  academyChapterHeading: {
+    color: nightTheme.text,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "600",
+    marginBottom: 4
+  },
+  academyChapterRowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: equinaTheme.material.separator
   },
   academyPathViewAll: {
     minWidth: 74,
@@ -13961,7 +13736,7 @@ const styles = StyleSheet.create({
     gap: 1
   },
   academyPathMeta: {
-    color: "#8B8578",
+    color: equinaTheme.text.secondary,
     fontSize: 10,
     lineHeight: 12
   },
@@ -13974,7 +13749,7 @@ const styles = StyleSheet.create({
   academyPathMiniTrack: {
     height: 4,
     borderRadius: 999,
-    backgroundColor: "#E9E0D1",
+    backgroundColor: equinaTheme.material.quietPressed,
     overflow: "hidden"
   },
   academyPathMiniFill: {
@@ -14012,7 +13787,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   academyUtilityBody: {
-    color: "#8B8578",
+    color: equinaTheme.text.secondary,
     fontSize: 11,
     lineHeight: 14,
     marginTop: 2
@@ -14060,12 +13835,11 @@ const styles = StyleSheet.create({
     gap: 14
   },
   academyDirectoryHeader: {
-    minHeight: 78,
+    minHeight: 40,
     paddingHorizontal: 2,
-    paddingTop: 4,
-    paddingBottom: 2,
+    paddingTop: 12,
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     justifyContent: "space-between"
   },
   academyDirectoryHeading: {
@@ -14122,7 +13896,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   academySearchText: {
-    color: "#8B8578",
+    color: equinaTheme.text.secondary,
     fontSize: 13,
     lineHeight: 17
   },
@@ -14501,15 +14275,11 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   academyChapterRow: {
-    minHeight: 42,
-    borderRadius: 13,
-    backgroundColor: nightTheme.surfaceSoft,
-    borderWidth: 1,
-    borderColor: nightTheme.border,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 10
+    gap: 12,
+    paddingHorizontal: 2
   },
   academyChapterTime: {
     color: equinaTheme.colors.brass,
@@ -14521,9 +14291,9 @@ const styles = StyleSheet.create({
   academyChapterTitle: {
     flex: 1,
     color: nightTheme.text,
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: "600"
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: "400"
   },
   academyNextCard: {
     minHeight: 82,
@@ -14540,7 +14310,7 @@ const styles = StyleSheet.create({
     width: 66,
     height: 64,
     borderRadius: 13,
-    backgroundColor: "#EFE8DA"
+    backgroundColor: equinaTheme.surfaces.raised
   },
   academyNextTitle: {
     color: nightTheme.text,
@@ -14768,7 +14538,7 @@ const styles = StyleSheet.create({
   academyLessonTrack: {
     height: 5,
     borderRadius: 999,
-    backgroundColor: "#EFE8DA",
+    backgroundColor: equinaTheme.material.quietPressed,
     overflow: "hidden",
     marginTop: 3
   },
@@ -14866,7 +14636,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   coachSignalLabel: {
-    color: "#D8CCB8",
+    color: equinaTheme.text.secondary,
     fontSize: 10,
     marginTop: 1
   },
@@ -15126,7 +14896,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#6C9E7C"
+    backgroundColor: equinaTheme.colors.brass
   },
   guideChatTitle: {
     color: nightTheme.text,
@@ -15327,7 +15097,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#E5DFD3"
+    backgroundColor: equinaTheme.material.quietPressed
   },
   setupDotActive: {
     width: 18,
@@ -15429,7 +15199,7 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: "#36C275"
+    backgroundColor: equinaTheme.colors.brass
   },
   chatHeader: {
     flexDirection: "row",
@@ -15645,6 +15415,20 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 14,
     backgroundColor: nightTheme.surfaceSoft
+  },
+  communityComposerMonogram: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.surfaces.elevated
+  },
+  communityComposerMonogramText: {
+    color: equinaTheme.colors.brass,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "600"
   },
   communityComposerInput: {
     flex: 1,
@@ -15980,7 +15764,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   clubBody: {
-    color: "#D8CCB8",
+    color: equinaTheme.text.secondary,
     fontSize: 13,
     marginTop: 5,
     fontWeight: "400"
@@ -16187,7 +15971,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   vaultProgressLabel: {
-    color: "#D8CCB8",
+    color: equinaTheme.text.secondary,
     fontSize: 13
   },
   vaultProgressValue: {
@@ -16207,7 +15991,7 @@ const styles = StyleSheet.create({
     backgroundColor: equinaTheme.colors.brass
   },
   vaultHint: {
-    color: "#D8CCB8",
+    color: equinaTheme.text.secondary,
     fontSize: 12,
     lineHeight: 16
   },
@@ -16221,7 +16005,7 @@ const styles = StyleSheet.create({
   horseRecordImage: {
     width: "100%",
     height: 118,
-    backgroundColor: "#EFE8DA"
+    backgroundColor: equinaTheme.surfaces.raised
   },
   horseRecordBody: {
     padding: 14,

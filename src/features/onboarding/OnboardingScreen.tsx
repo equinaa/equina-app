@@ -307,6 +307,8 @@ export function OnboardingScreen({
   const handlePreviewAction = () => {
     if (completionMode === "connected" && !signedIn) {
       selectionHaptic();
+      const providers = visibleProviders(Platform.OS, socialAuthAvailability);
+      setAccountMethod(providers.apple || providers.google ? "choice" : "password");
       setAccountSheetVisible(true);
       return;
     }
@@ -380,7 +382,7 @@ export function OnboardingScreen({
           {/* A returning rider should never have to walk through account
               creation to find the way in. The sheet is already mounted at the
               root of this screen, so signing in is reachable from step one. */}
-          {completionMode === "connected" && !signedIn && (
+          {step === "you" && completionMode === "connected" && !signedIn && (
             <MotionPressable
               testID="onboarding-sign-in"
               accessibilityRole="button"
@@ -751,7 +753,7 @@ export function AccountMethodSheet({
     email: signingIn
       ? emailAuthMode === "magic-link" ? "Email me a sign-in link" : "Email me a sign-in code"
       : "Continue with email",
-    password: "Create a password",
+    password: hasSocialAuth ? "Create a password" : "Save your Equina",
     signin: "Welcome back",
     recovery: "Recover your account"
   }[method];
@@ -866,7 +868,9 @@ export function AccountMethodSheet({
                   ? "We will email a secure sign-in link. No password to remember."
                   : "We will send a short verification code. No password to remember."
               : method === "password"
-                ? "Use 10 or more characters."
+                ? hasSocialAuth
+                  ? "Use 10 or more characters."
+                  : "Create your account to keep your plan, Academy progress, and horse records in sync. Use 10 or more characters for the password."
                 : method === "signin"
                   ? "Use the email and password connected to your Equina."
                   : emailAuthMode === "magic-link"
@@ -925,6 +929,17 @@ export function AccountMethodSheet({
             leading={<LockKeyhole size={18} color={equinaTheme.colors.ink} />}
             onPress={primaryAction}
           />
+          {method === "password" && !signingIn ? (
+            <MotionPressable
+              testID="onboarding-auth-existing-account"
+              accessibilityRole="button"
+              accessibilityLabel="Sign in with password"
+              onPress={() => onMethodChange("signin")}
+              style={styles.authAlternative}
+            >
+              <Text style={styles.authAlternativeText}>Already have an account? Sign in</Text>
+            </MotionPressable>
+          ) : null}
           {method === "email" && !signingIn ? (
             <MotionPressable
               testID="onboarding-auth-use-password"
@@ -989,16 +1004,28 @@ export function AccountMethodSheet({
               <Text style={styles.authAlternativeText}>Back to password sign-in</Text>
             </MotionPressable>
           ) : null}
-          {/* On the sign-in screen the options sit behind the sheet, so going
-              back means closing it. */}
-          <MotionPressable
-            testID="onboarding-auth-methods-back"
-            accessibilityRole="button"
-            onPress={signingIn ? onDismiss : () => onMethodChange("choice")}
-            style={styles.authAlternative}
-          >
-            <Text style={styles.authAlternativeMuted}>Back to sign-in options</Text>
-          </MotionPressable>
+          {/* The sheet closes from its own button, so a "back" link only
+              appears where there is somewhere to go back to: the provider
+              choice, or account creation for a rider who opened sign-in. */}
+          {!signingIn && hasSocialAuth ? (
+            <MotionPressable
+              testID="onboarding-auth-methods-back"
+              accessibilityRole="button"
+              onPress={() => onMethodChange("choice")}
+              style={styles.authAlternative}
+            >
+              <Text style={styles.authAlternativeMuted}>Back to sign-in options</Text>
+            </MotionPressable>
+          ) : !signingIn && method === "signin" ? (
+            <MotionPressable
+              testID="onboarding-auth-methods-back"
+              accessibilityRole="button"
+              onPress={() => onMethodChange("password")}
+              style={styles.authAlternative}
+            >
+              <Text style={styles.authAlternativeMuted}>Create an account instead</Text>
+            </MotionPressable>
+          ) : null}
         </View>
       )}
     </EquinaSheet>

@@ -5,12 +5,14 @@
 export const signInCopy = {
   wordmark: "Equina",
   headline: "Keep your horses, rides, and plan in one account.",
-  subhead: "Sign in to continue, or create an account.",
+  subhead: "New here? Set up your Equina in three short steps.",
   // Apple's button draws its own title. Nothing here labels it.
   google: "Continue with Google",
-  email: "Continue with email",
+  email: "Sign in with email",
   divider: "or",
-  createAccount: "New to Equina? Create an account",
+  // Someone arriving from the App Store is far more likely new than returning,
+  // so creating is the primary action and signing in the quiet one.
+  createAccount: "Create my Equina",
   createAccountA11y: "Create an account",
   status: {
     finishing: "Finishing sign-in..."

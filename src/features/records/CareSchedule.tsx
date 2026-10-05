@@ -19,7 +19,7 @@ const careIcons: Record<CareType, typeof CalendarCheck> = {
  * ignore red.
  */
 const urgencyColor = (urgency: CareUrgency): string =>
-  urgency === "overdue" ? equinaTheme.colorRole.critical : equinaTheme.colorRole.accent;
+  urgency === "overdue" ? equinaTheme.colorRole.criticalOnDark : equinaTheme.colorRole.accent;
 
 type CareRowProps = {
   item: CareItem;

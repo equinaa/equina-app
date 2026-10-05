@@ -16,8 +16,6 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
-  House,
-  MessageCircle,
   Pause,
   Play,
   SendHorizontal,
@@ -264,8 +262,8 @@ export function RideModeScreen({
     <View testID="ride-mode" style={styles.rideRoot}>
       <Animated.Image source={{ uri: image }} resizeMode="cover" style={[styles.rideImage, imageMotion]} />
       <LinearGradient
-        colors={["rgba(5,6,5,0.42)", "rgba(5,6,5,0.1)", "rgba(5,6,5,0.86)", "rgba(5,6,5,0.98)"]}
-        locations={[0, 0.3, 0.66, 1]}
+        colors={["rgba(5,6,5,0.42)", "rgba(5,6,5,0.08)", "rgba(5,6,5,0.88)", "rgba(5,6,5,0.98)"]}
+        locations={[0, 0.28, 0.56, 1]}
         style={StyleSheet.absoluteFillObject}
       />
 
@@ -284,7 +282,7 @@ export function RideModeScreen({
 
           <View style={styles.rideIdentity}>
             <Text numberOfLines={1} style={styles.rideIdentityName}>{horseName}</Text>
-            <Text style={styles.rideIdentityMeta}>{discipline} · {blueprint.plannedDuration}</Text>
+            <Text style={styles.rideIdentityMeta}>{blueprint.label} · {blueprint.plannedDuration}</Text>
           </View>
 
           <MotionPressable
@@ -299,13 +297,12 @@ export function RideModeScreen({
           </MotionPressable>
         </View>
 
-        <View style={styles.rideTimerBlock}>
-          <Text style={styles.rideTimerLabel}>{paused ? "PAUSED" : "RIDE TIME"}</Text>
-          <Text accessibilityLiveRegion="polite" style={styles.rideTimer}>{formatElapsed(elapsedSeconds)}</Text>
-          <Text style={styles.rideTimerMeta}>{blueprint.label}</Text>
-        </View>
-
         <View style={styles.rideBottom}>
+          <View style={styles.rideTimerBlock}>
+            <Text style={styles.rideTimerLabel}>{paused ? "PAUSED" : "RIDE TIME"}</Text>
+            <Text accessibilityLiveRegion="polite" style={styles.rideTimer}>{formatElapsed(elapsedSeconds)}</Text>
+          </View>
+
           <View style={styles.ridePhaseTrack}>
             {blueprint.phases.map((phase, index) => (
               <View
@@ -366,7 +363,9 @@ export function RideRecapScreen({
   horseName,
   image,
   session,
+  saved,
   recommendation,
+  ralfAvailable,
   shared,
   sharingEnabled,
   onMoodChange,
@@ -377,8 +376,11 @@ export function RideRecapScreen({
   horseName: string;
   image: string;
   session: RideSession;
+  /** Written to the journal, or kept for this session only. */
+  saved: boolean;
   /** Absent while the Academy has no lesson to suggest; the ride goes to Ralf. */
   recommendation?: RideRecommendation;
+  ralfAvailable: boolean;
   shared: boolean;
   sharingEnabled: boolean;
   onMoodChange: (mood: RideMood) => void;
@@ -435,17 +437,17 @@ export function RideRecapScreen({
         <View style={styles.recapTopBar}>
           <View style={styles.recapSavedLine}>
             <Check size={16} color={equinaTheme.colors.brass} />
-            <Text style={styles.recapSavedText}>Ride captured</Text>
+            <Text style={styles.recapSavedText}>{saved ? "Saved to your journal" : "Saved for this session"}</Text>
           </View>
           <MotionPressable
             testID="ride-recap-home-top"
             accessibilityRole="button"
-            accessibilityLabel="Return Home"
+            accessibilityLabel="Close recap"
             hitSlop={6}
             onPress={onHome}
             style={styles.recapHomeIcon}
           >
-            <House size={19} color={equinaTheme.text.primary} />
+            <X size={19} color={equinaTheme.text.primary} />
           </MotionPressable>
         </View>
 
@@ -461,14 +463,13 @@ export function RideRecapScreen({
               style={StyleSheet.absoluteFillObject}
             />
             <View style={styles.recapHeroContent}>
-              <Text style={styles.recapHeroKicker}>SESSION COMPLETE</Text>
               <Text numberOfLines={1} adjustsFontSizeToFit style={styles.recapHeroTitle}>{horseName}</Text>
               <Text style={styles.recapHeroMeta}>{session.discipline} · {session.focus}</Text>
             </View>
           </View>
 
           <View style={styles.recapIntro}>
-            <Text style={styles.recapTitle}>A useful ride, captured.</Text>
+            <Text accessibilityRole="header" style={styles.recapTitle}>A useful ride.</Text>
             <Text style={styles.recapBody}>{completionBody}</Text>
           </View>
 
@@ -505,61 +506,64 @@ export function RideRecapScreen({
             <Text style={styles.recapMoodSelection}>{moodCopy[mood]}</Text>
           </View>
 
-          <View style={styles.recapSection}>
-            <View style={styles.recapSectionTopline}>
-              <View>
-                <Text style={styles.recapSectionEyebrow}>NEXT FOR YOU</Text>
-                <Text style={styles.recapSectionTitle}>Turn this ride into progress</Text>
+          {recommendation || ralfAvailable ? (
+            <View style={styles.recapSection}>
+              <View style={styles.recapSectionTopline}>
+                <View>
+                  <Text style={styles.recapSectionEyebrow}>NEXT FOR YOU</Text>
+                  <Text style={styles.recapSectionTitle}>Turn this ride into progress</Text>
+                </View>
+                <Sparkles size={18} color={equinaTheme.colors.brass} />
               </View>
-              <Sparkles size={18} color={equinaTheme.colors.brass} />
-            </View>
 
-            {recommendation ? (
-              <View
-                testID="ride-recap-recommendation"
+              <MotionPressable
+                testID={recommendation ? "ride-recap-recommendation" : "ride-recap-ralf"}
+                accessibilityRole="button"
+                accessibilityLabel={recommendation ? `Open ${recommendation.title} in Academy` : "Review this ride with Ralf"}
+                onPress={onOpenAcademy}
                 style={styles.recapLessonRow}
               >
-                <Image source={{ uri: recommendation.image }} resizeMode="cover" style={styles.recapLessonImage} />
+                {recommendation ? (
+                  <Image source={{ uri: recommendation.image }} resizeMode="cover" style={styles.recapLessonImage} />
+                ) : (
+                  <View style={styles.recapRalfMark}>
+                    <Sparkles size={22} color={equinaTheme.colors.brass} />
+                  </View>
+                )}
                 <View style={styles.recapLessonCopy}>
-                  <Text numberOfLines={2} style={styles.recapLessonTitle}>{recommendation.title}</Text>
-                  <Text numberOfLines={1} style={styles.recapLessonMeta}>
-                    {[recommendation.coach, recommendation.duration].filter(Boolean).join(" · ")}
+                  <Text numberOfLines={2} style={styles.recapLessonTitle}>
+                    {recommendation ? recommendation.title : "Review this ride with Ralf"}
                   </Text>
-                  <Text numberOfLines={2} style={styles.recapLessonBody}>{recommendation.summary}</Text>
-                </View>
-              </View>
-            ) : (
-              <View testID="ride-recap-ralf" style={styles.recapLessonRow}>
-                <View style={styles.recapRalfMark}>
-                  <Sparkles size={22} color={equinaTheme.colors.brass} />
-                </View>
-                <View style={styles.recapLessonCopy}>
-                  <Text numberOfLines={2} style={styles.recapLessonTitle}>Review this ride with Ralf</Text>
+                  {recommendation ? (
+                    <Text numberOfLines={1} style={styles.recapLessonMeta}>
+                      {[recommendation.coach, recommendation.duration].filter(Boolean).join(" · ")}
+                    </Text>
+                  ) : null}
                   <Text numberOfLines={2} style={styles.recapLessonBody}>
-                    What went well, and the one thing to work on next time.
+                    {recommendation ? recommendation.summary : "What went well, and the one thing to work on next time."}
                   </Text>
                 </View>
-              </View>
-            )}
-          </View>
+                <ChevronRight size={18} color={equinaTheme.text.tertiary} />
+              </MotionPressable>
+            </View>
+          ) : null}
         </ScrollView>
 
         <View style={styles.recapActions}>
           <MotionPressable
-            testID="ride-recap-academy"
+            testID="ride-recap-done"
             accessibilityRole="button"
-            accessibilityLabel={recommendation ? `Continue with ${recommendation.title} in Academy` : "Review this ride with Ralf"}
-            onPress={onOpenAcademy}
+            accessibilityLabel="Done, back to Home"
+            onPress={onHome}
             style={styles.recapPrimaryButton}
           >
-            <Text style={styles.recapPrimaryText}>{recommendation ? "Continue in Academy" : "Review with Ralf"}</Text>
-            <ChevronRight size={19} color={equinaTheme.colors.ink} />
+            <Text style={styles.recapPrimaryText}>Done</Text>
           </MotionPressable>
 
           {/* With sharing off this used to offer "View Club", sending the rider
               into a frozen area at their most rewarding moment. No button is
               better than one that leads nowhere. */}
-          {sharingEnabled && (
+          {sharingEnabled ? (
             <View style={styles.recapSecondaryActions}>
               <MotionPressable
                 testID="ride-recap-share"
@@ -575,7 +579,7 @@ export function RideRecapScreen({
                 <Text style={styles.recapSecondaryText}>{shared ? "Shared" : "Share to Club"}</Text>
               </MotionPressable>
             </View>
-          )}
+          ) : null}
         </View>
       </Animated.View>
     </View>
@@ -642,8 +646,7 @@ const styles = StyleSheet.create({
     marginTop: 1
   },
   rideTimerBlock: {
-    alignItems: "center",
-    paddingVertical: 24
+    alignItems: "flex-start"
   },
   rideTimerLabel: {
     color: equinaTheme.colors.brass,
@@ -659,15 +662,8 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     marginTop: 2
   },
-  rideTimerMeta: {
-    color: equinaTheme.text.secondary,
-    fontSize: 14,
-    lineHeight: 19,
-    marginTop: 2
-  },
   rideBottom: {
-    gap: 16,
-    paddingTop: 18
+    gap: 16
   },
   ridePhaseTrack: {
     flexDirection: "row",
@@ -794,12 +790,6 @@ const styles = StyleSheet.create({
     padding: 18,
     justifyContent: "flex-end"
   },
-  recapHeroKicker: {
-    color: equinaTheme.colors.brass,
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: "600"
-  },
   recapHeroTitle: {
     color: equinaTheme.text.primary,
     fontSize: 30,
@@ -847,7 +837,7 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   recapFactLabel: {
-    color: equinaTheme.text.tertiary,
+    color: equinaTheme.text.secondary,
     fontSize: 11,
     lineHeight: 15,
     marginTop: 1
@@ -883,7 +873,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent"
   },
   recapMoodOptionActive: {
-    backgroundColor: "rgba(167,129,61,0.28)"
+    backgroundColor: equinaTheme.material.selected
   },
   recapMoodTitle: {
     color: equinaTheme.text.secondary,
@@ -895,7 +885,7 @@ const styles = StyleSheet.create({
     color: equinaTheme.text.primary
   },
   recapMoodSelection: {
-    color: equinaTheme.text.tertiary,
+    color: equinaTheme.text.secondary,
     fontSize: 12,
     lineHeight: 16,
     paddingHorizontal: 2,

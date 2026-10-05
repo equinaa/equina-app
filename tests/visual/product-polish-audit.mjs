@@ -164,10 +164,12 @@ screens.push(await inspect("home-after-ride"));
 
 for (const [tab, name] of [
   ["stable", "horse"],
-  ["community", "club"],
   ["assistant", "academy"],
+  ["community", "club"],
   ["gear", "shop"]
 ]) {
+  // The Shop tab only exists while a marketplace switch is on.
+  if (!(await visible(`tab-${tab}`))) continue;
   await page.getByTestId(`tab-${tab}`).click();
   screens.push(await inspect(name));
 }
@@ -185,7 +187,7 @@ if (await visible("academy-open-ai")) {
   screens.push(await inspect("ralf"));
   await page.getByTestId("ai-chat-more").click();
   screens.push(await inspect("ralf-options"));
-  const adjustContext = page.getByRole("button", { name: "Adjust context" });
+  const adjustContext = page.getByRole("button", { name: "This conversation" });
   if (await adjustContext.isVisible().catch(() => false)) {
     await adjustContext.click();
     screens.push(await inspect("ralf-context"));
@@ -195,13 +197,9 @@ if (await visible("academy-open-ai")) {
   screens.push(await inspect("ralf-composer-focused"));
   await page.getByTestId("ai-chat-send").click();
   screens.push(await inspect("ralf-after-message"));
-  await page.getByTestId("ai-chat-more").click();
-  const historyAction = page.getByRole("button", { name: "History" });
-  if (await historyAction.isVisible().catch(() => false)) {
-    await historyAction.click();
-    screens.push(await inspect("ralf-history"));
-    await page.getByRole("button", { name: "Close" }).last().click();
-  }
+  await page.getByTestId("ai-chat-history").click();
+  screens.push(await inspect("ralf-history"));
+  await page.getByRole("button", { name: "Close" }).last().click();
 }
 
 if (await visible("ai-chat-back")) {
@@ -220,15 +218,19 @@ if (await visible("account-edit-profile")) {
   screens.push(await inspect("account-profile-focused"));
   await page.getByTestId("account-route-back").click();
 }
+if (await visible("account-close")) {
+  await page.getByTestId("account-close").click();
+}
 
 await page.getByTestId("tab-stable").click();
-for (const view of ["nutrition", "health", "docs"]) {
+for (const view of ["care", "documents"]) {
   await page.getByTestId(`stable-view-${view}`).click();
   screens.push(await inspect(`horse-${view}`));
 }
 
+// All lessons sit at the end of the Academy page itself.
 await page.getByTestId("tab-assistant").click();
-await page.getByTestId("academy-mode-directory").click();
+await page.getByTestId("academy-search-input").scrollIntoViewIfNeeded();
 screens.push(await inspect("academy-directory"));
 await page.getByTestId("academy-search-input").fill("zzzz-no-lesson");
 screens.push(await inspect("academy-directory-empty"));
@@ -252,6 +254,9 @@ if (await firstLesson.isVisible().catch(() => false)) {
   await page.getByTestId("academy-video-back").click();
 }
 
+if (!(await visible("tab-gear"))) {
+  console.log("Shop is switched off in this build; skipping the Shop screens.");
+} else {
 await page.getByTestId("tab-gear").click();
 await page.getByTestId("shop-mode-sell").click();
 screens.push(await inspect("shop-seller"));
@@ -263,6 +268,7 @@ if (await checkoutProduct.isVisible().catch(() => false)) {
   screens.push(await inspect("shop-checkout"));
   await page.getByTestId("shop-route-back").click();
   await page.getByTestId("shop-product-back").click();
+}
 }
 
 await writeFile(

@@ -24,7 +24,7 @@ accurate.
 | Onboarding | Your Equina | Preview, send email OTP, and complete one idempotent account handoff | backend implemented / rollout gated |
 | Authentication | Email OTP | Verify a Supabase session without passwords | backend implemented / deployment gated |
 | Account | Root | Inspect identity and open grouped account settings | real client; connected persistence gated |
-| Account | Profile/Personalization | Edit rider identity and Academy defaults | backend implemented / rollout gated |
+| Account | Profile/Training profile | Edit rider identity; discipline, level and focus for Academy and Ralf | backend implemented / rollout gated |
 | Account | Notifications | Persist category choices and contextually register native push | backend implemented / rollout gated |
 | Account | Privacy and Ralf | Control Ralf context, export data, and clear AI history | backend implemented / rollout gated |
 | Account | Security | Manage blocks and schedule/cancel account deletion | backend implemented / rollout gated |
