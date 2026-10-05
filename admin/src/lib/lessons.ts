@@ -152,7 +152,7 @@ export const readChapters = (
   return { marks: marks.sort((a, b) => a.starts_at_seconds - b.starts_at_seconds), error: null };
 };
 
-export type VideoStatus = "processing" | "ready" | "failed";
+export type VideoStatus = "uploading" | "processing" | "ready" | "failed";
 
 // What still stands between a draft and riders. The database checks the same
 // two things when staff press Publish.
@@ -160,6 +160,7 @@ export const publishBlockers = (durationSeconds: number | null, video: VideoStat
   const blockers: string[] = [];
   if (durationSeconds === null) blockers.push("Add the lesson's length.");
   if (video === null) blockers.push("Upload the video.");
+  else if (video === "uploading") blockers.push("Finish uploading the video.");
   else if (video === "processing") blockers.push("Wait for the video to finish processing.");
   else if (video === "failed") blockers.push("The video failed to process. Upload it again.");
   return blockers;

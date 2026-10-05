@@ -1,24 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { lessonColumns, videoStatusOf, type LessonRow } from "@/lib/lesson-data";
+import { lessonColumns, videoOf, type LessonRow } from "@/lib/lesson-data";
 import { formatClock, publishBlockers } from "@/lib/lessons";
 import { LocalTime } from "@/components/local-time";
 import { requireStaff } from "@/lib/staff";
 import { ChaptersEditor } from "../chapters-editor";
 import { LessonForm } from "../lesson-form";
 import { DeleteDraftButton, PublishButton } from "../publish-controls";
+import { VideoPanel } from "../video-panel";
 
 export const metadata: Metadata = { title: "Lesson" };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const videoCopy = {
-  none: "No video yet. Uploading from here comes with the next version of the admin.",
-  processing: "Uploaded. The video host is still preparing it for riders.",
-  ready: "Ready to watch.",
-  failed: "The video host could not process this upload."
-};
 
 export default async function LessonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -33,9 +27,10 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   if (!lesson) notFound();
   const chapters = (chapterData ?? []) as Array<{ starts_at_seconds: number; title: string }>;
 
-  const video = videoStatusOf(lesson);
+  const video = videoOf(lesson);
+  const videoStatus = video?.status ?? null;
   const published = Boolean(lesson.published_at);
-  const blockers = publishBlockers(lesson.duration_seconds, video);
+  const blockers = publishBlockers(lesson.duration_seconds, videoStatus);
 
   return (
     <main className="page">
@@ -74,6 +69,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                 coachTitle: lesson.coach_title ?? "",
                 position: String(lesson.position)
               }}
+              videoLength={videoStatus === "ready" && lesson.duration_seconds ? formatClock(lesson.duration_seconds) : null}
             />
           </section>
 
@@ -111,11 +107,16 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
           <section className="panel" aria-labelledby="video-title">
             <div className="panel-head">
               <h2 id="video-title">Video</h2>
-              {video === "ready" ? <span className="chip positive">Ready</span> : null}
-              {video === "processing" ? <span className="chip warning">Processing</span> : null}
-              {video === "failed" ? <span className="chip critical">Failed</span> : null}
+              {videoStatus === "ready" ? <span className="chip positive">Ready</span> : null}
+              {videoStatus === "uploading" ? <span className="chip warning">Uploading</span> : null}
+              {videoStatus === "processing" ? <span className="chip warning">Processing</span> : null}
+              {videoStatus === "failed" ? <span className="chip critical">Failed</span> : null}
             </div>
-            <p className="meta">{videoCopy[video ?? "none"]}</p>
+            <VideoPanel
+              lessonId={lesson.id}
+              published={published}
+              video={video ? { status: video.status, failureReason: video.failure_reason } : null}
+            />
           </section>
 
           {!published ? (

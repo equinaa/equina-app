@@ -8,8 +8,8 @@ Deno.serve(async (request) => {
   if (options) return options;
   try {
     requireMethod(request, "POST");
-    const { user } = await requireUser(request);
-    await requireStaff(user.id);
+    const { user, token } = await requireUser(request);
+    await requireStaff(user.id, token);
     const input = await readJson<ReviewRequest>(request);
     if (!input.listingId || !["approve", "reject"].includes(input.decision)) throw new HttpError(400, "Listing and decision are required.", "invalid_review");
     const admin = createAdminClient();

@@ -75,6 +75,10 @@ verify_jwt = false
 [functions.stripe-webhook]
 verify_jwt = false
 
+# Mux signs its webhooks (Mux-Signature); the function checks that instead.
+[functions.mux-webhook]
+verify_jwt = false
+
 [functions.process-order-deadlines]
 verify_jwt = false
 

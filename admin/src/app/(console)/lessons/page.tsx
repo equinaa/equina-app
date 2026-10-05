@@ -9,6 +9,7 @@ export const metadata: Metadata = { title: "Lessons" };
 
 const videoChip: Record<VideoStatus | "none", { label: string; tone: string }> = {
   none: { label: "No video", tone: "" },
+  uploading: { label: "Uploading", tone: "warning" },
   processing: { label: "Processing", tone: "warning" },
   ready: { label: "Ready", tone: "positive" },
   failed: { label: "Failed", tone: "critical" }

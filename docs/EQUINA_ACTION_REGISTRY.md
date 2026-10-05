@@ -37,9 +37,9 @@ accurate.
 | Horse | Docs | Inspect sample document state | read-only |
 | Academy | For You | Inspect one personalized lesson path | published catalogue for connected accounts; preview catalogue in demo |
 | Academy | Lessons | Search and filter lessons | published catalogue for connected accounts; preview catalogue in demo |
-| Academy | Lesson | Play a lesson through a signed, expiring link and save the rider's place | backend implemented / video host gated (`academy-playback`, Bunny Stream); demo plays a bundled clip |
+| Academy | Lesson | Play a lesson through a signed, expiring link and save the rider's place | backend implemented / video host gated (`academy-playback`, Mux); demo plays a bundled clip |
 | Academy | Coach | Persist a private Ralf conversation through a server provider boundary | backend implemented / rollout gated; explicit dev demo adapter |
-| Admin | Lessons | Create, edit, chapter, publish and unpublish Academy lessons | built in `admin/`; needs a staff account with a second factor; video upload not yet |
+| Admin | Lessons | Create, edit, chapter, upload the video, publish and unpublish Academy lessons | built in `admin/`; needs a staff account with a second factor and the Mux secrets |
 | Admin | Moderation | Restore or remove Club posts and comments that riders reported or the filter hid | built in `admin/`; needs a staff account with a second factor |
 | Club | Feed | Inspect seeded social content | read-only |
 | Shop buyer | Browse | Search, filter, save, and inspect seeded listings | local prototype/read-only |

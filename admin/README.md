@@ -15,11 +15,14 @@ no staff powers anywhere, including through the API.
 
 | Area | What staff can do |
 | --- | --- |
-| Lessons | Create drafts, edit details, set chapters, publish and unpublish, delete drafts. A lesson needs a length and a finished video before it can be published, and the database checks both. |
+| Lessons | Create drafts, edit details, set chapters, upload the video, publish and unpublish, delete drafts. The video goes from the browser straight to Mux; when Mux finishes it, the page updates by itself and the lesson's length is filled in. A lesson needs a length and a finished video before it can be published, and the database checks both. A published lesson keeps its video: unpublish it to replace the video. |
 | Moderation | See Club posts and comments that riders reported or the phrase filter hid. **Restore** puts an item back and dismisses its reports. **Remove** keeps it hidden and closes its reports. Each decision is recorded in `moderation_actions` with who made it. |
 
-Not yet: uploading video (the Bunny Stream step), lesson posters, user reports
-and sanctions.
+Not yet: lesson posters (Mux can make them from the video), user reports and
+sanctions.
+
+Mux's free plan holds ten videos. Replacing, removing or deleting a lesson
+deletes its video at Mux, so slots are only used by lessons that have one.
 
 ## Run it locally
 

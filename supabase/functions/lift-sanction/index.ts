@@ -6,8 +6,8 @@ Deno.serve(async (request) => {
   if (options) return options;
   try {
     requireMethod(request, "POST");
-    const { user } = await requireUser(request);
-    const roles = await requireStaff(user.id);
+    const { user, token } = await requireUser(request);
+    const roles = await requireStaff(user.id, token);
     if (!roles.includes("admin")) throw new HttpError(403, "An administrator account is required.", "admin_required");
     const { sanctionId } = await readJson<{ sanctionId: string }>(request);
     const admin = createAdminClient();

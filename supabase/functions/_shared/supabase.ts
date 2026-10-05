@@ -61,7 +61,25 @@ export const requireActiveUser = async (userId: string): Promise<void> => {
   if ((count ?? 0) > 0) throw new HttpError(403, "This account is temporarily restricted.", "account_restricted");
 };
 
-export const requireStaff = async (userId: string) => {
+// The assurance level of a token requireUser has already checked with
+// Supabase Auth, so its claims can be read as they are.
+const assuranceLevel = (token: string) => {
+  try {
+    const payload = (token.split(".")[1] ?? "").replace(/-/g, "+").replace(/_/g, "/");
+    const claims = JSON.parse(atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, "=")));
+    return typeof claims.aal === "string" ? claims.aal : null;
+  } catch {
+    return null;
+  }
+};
+
+// Staff powers need a second factor (202610050001). These functions act with
+// the service role, so the database cannot check it for them: with only a
+// password, a staff account is a rider account here too.
+export const requireStaff = async (userId: string, token: string) => {
+  if (assuranceLevel(token) !== "aal2") {
+    throw new HttpError(403, "Confirm your sign-in with your authenticator code first.", "second_factor_required");
+  }
   const admin = createAdminClient();
   const { data, error } = await admin.from("user_roles").select("role").eq("user_id", userId).in("role", ["moderator", "admin"]);
   if (error || !data?.length) throw new HttpError(403, "A staff account is required.", "staff_required");
