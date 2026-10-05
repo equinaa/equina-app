@@ -18,6 +18,7 @@ import {
   CircleHelp,
   Database,
   Download,
+  Gem,
   GraduationCap,
   Heart,
   LockKeyhole,
@@ -35,6 +36,7 @@ import type {
   AccountSnapshot,
   BlockedAccountRecord,
   NotificationPreferencesRecord,
+  PlanState,
   ProfileRecord,
   UploadAsset,
   UserPreferencesRecord
@@ -46,6 +48,8 @@ import { SettingsGroup } from "../../ui/settings/SettingsGroup";
 import { SettingsRow } from "../../ui/settings/SettingsRow";
 import { equinaTheme } from "../../ui/theme/theme";
 import { trainingFocusByDiscipline } from "../coach/coach-types";
+import { PlanScreen } from "../plans/PlanScreen";
+import { planRowValue } from "../plans/plan-rules";
 import type { AccountMode, AccountRoute } from "./account-types";
 
 const disciplines: Array<{ value: Discipline; label: string }> = [
@@ -78,6 +82,8 @@ type ConfirmAction = "signout" | "coach-history" | "delete-account" | null;
 export function AccountScreen({
   mode,
   marketplaceOpen,
+  plan,
+  initialRoute = "root",
   snapshot,
   horseName,
   busy,
@@ -101,6 +107,12 @@ export function AccountScreen({
   mode: AccountMode;
   /** Buying, selling or messaging is on, so its settings mean something. */
   marketplaceOpen: boolean;
+  plan: PlanState;
+  /**
+   * Where Account opens. A screen elsewhere that sends a rider to their plan
+   * opens it here, and back returns them to that screen.
+   */
+  initialRoute?: AccountRoute;
   snapshot: AccountSnapshot;
   horseName: string;
   busy: string;
@@ -135,7 +147,7 @@ export function AccountScreen({
   /** Account opens over a tab; this goes back to it. */
   onClose: () => void;
 }) {
-  const [route, setRoute] = useState<AccountRoute>("root");
+  const [route, setRoute] = useState<AccountRoute>(initialRoute);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [exportReady, setExportReady] = useState("");
 
@@ -174,7 +186,10 @@ export function AccountScreen({
   return (
     <View style={styles.screen}>
       {route !== "root" ? (
-        <AccountRouteHeader title={routeTitle(route)} onBack={() => navigate("root")} />
+        <AccountRouteHeader
+          title={routeTitle(route)}
+          onBack={() => (route === initialRoute ? onClose() : navigate("root"))}
+        />
       ) : (
         <View style={styles.rootHeader}>
           <Text accessibilityRole="header" style={styles.rootTitle}>Account</Text>
@@ -202,6 +217,7 @@ export function AccountScreen({
         <AccountRoot
           mode={mode}
           marketplaceOpen={marketplaceOpen}
+          plan={plan}
           snapshot={snapshot}
           horseName={horseName}
           onNavigate={navigate}
@@ -251,6 +267,8 @@ export function AccountScreen({
           onDelete={() => setConfirmAction("delete-account")}
           onCancelDeletion={onCancelDeletion}
         />
+      ) : route === "plan" ? (
+        <PlanScreen plan={plan} />
       ) : route === "blocked" ? (
         <BlockedAccounts
           mode={mode}
@@ -274,6 +292,7 @@ export function AccountScreen({
 function AccountRoot({
   mode,
   marketplaceOpen,
+  plan,
   snapshot,
   horseName,
   onNavigate,
@@ -287,6 +306,7 @@ function AccountRoot({
   onOpenHorse: () => void;
   onSignOut: () => void;
   marketplaceOpen: boolean;
+  plan: PlanState;
 }) {
   const notifications = snapshot.notifications;
   const notificationSummary = marketplaceOpen
@@ -357,6 +377,13 @@ function AccountRoot({
       </SettingsGroup>
 
       <SettingsGroup title="Account">
+        <SettingsRow
+          Icon={Gem}
+          title="Plan"
+          value={planRowValue(plan)}
+          testID="account-open-plan"
+          onPress={() => onNavigate("plan")}
+        />
         <SettingsRow
           Icon={LockKeyhole}
           title="Security"
@@ -923,7 +950,8 @@ const routeTitle = (route: AccountRoute) => ({
   privacy: "Privacy and Ralf",
   security: "Security",
   blocked: "Blocked accounts",
-  help: "Help and legal"
+  help: "Help and legal",
+  plan: "Plans"
 })[route];
 
 const styles = StyleSheet.create({

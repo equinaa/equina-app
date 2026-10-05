@@ -13,6 +13,7 @@ export function NavLinks({ waiting }: { waiting: number }) {
         Moderation
         {waiting > 0 ? <span className="count" aria-label={`${waiting} waiting`}>{waiting}</span> : null}
       </Link>
+      <Link href="/plans" aria-current={current("/plans")}>Plans</Link>
     </nav>
   );
 }

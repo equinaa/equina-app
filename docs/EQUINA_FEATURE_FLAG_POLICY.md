@@ -23,6 +23,17 @@ messaging.
 | `recordMutations` | false | secure horse-record persistence and signed private uploads |
 | `horseManagement` | false | authenticated horse CRUD, ownership authorization, archive/delete |
 
+## Server-only Flags
+
+These have no compile-time switch: the database applies them, and the app reads
+their effect rather than the flag.
+
+| Flag | Default | What it does | Unlock requirement |
+| --- | --- | --- | --- |
+| `coach_credits` | off | Meters Ralf by the rider's monthly allowance | paywall copy and a store webhook that grants credits |
+| `academy_progress` | off | Saves where a rider stopped in a lesson | real lessons to make progress through |
+| `plans` | off | Applies each plan's limits: Academy picks and Club access (`docs/EQUINA_PLANS.md`) | riders can subscribe in the app; per-account overrides first, to try the Free experience |
+
 ## Rules
 
 1. Disabled capability copy must describe the boundary plainly.

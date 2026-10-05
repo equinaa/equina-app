@@ -72,7 +72,8 @@ import {
   Zap
 } from "lucide-react-native";
 import Svg, { Path } from "react-native-svg";
-import type { EquinaBackend, HorseTimelineRecord } from "./backend";
+import type { EquinaBackend, HorseTimelineRecord, PlanState } from "./backend";
+import { noPicksLeft } from "./backend/plan-repository";
 import type { Discipline, Listing, Order } from "./domain/types";
 import { equinaFeatureFlags } from "./config/feature-flags";
 import {
@@ -94,7 +95,7 @@ import { AuthVerificationScreen } from "./features/account/AuthVerificationScree
 import { PasswordRecoveryScreen } from "./features/account/PasswordRecoveryScreen";
 import { SessionGateScreen } from "./features/account/SessionGateScreen";
 import { socialAuthAvailability } from "./features/account/social-auth";
-import type { AccountMode } from "./features/account/account-types";
+import type { AccountMode, AccountRoute } from "./features/account/account-types";
 import { useAccount } from "./features/account/useAccount";
 import { useEquinaSession } from "./features/account/useEquinaSession";
 import { RalfScreen } from "./features/coach/CoachScreen";
@@ -126,6 +127,8 @@ import {
   type AcademyLessonView
 } from "./features/academy/academy-catalog";
 import { useAcademy } from "./features/academy/useAcademy";
+import { lessonOpen, picksLeft, planFor } from "./features/plans/plan-rules";
+import { usePlan } from "./features/plans/usePlan";
 import { useLessonVideo } from "./features/academy/useLessonVideo";
 import type { AcademyPlaybackLink } from "./backend/contracts";
 import { ClubScreen, type ClubRideShare } from "./features/club/ClubScreen";
@@ -570,7 +573,8 @@ const academyPreviewLessons: AcademyLessonView[] = ([
   progress: 0,
   positionSeconds: 0,
   completed: false,
-  video: "preview"
+  video: "preview",
+  access: "free"
 }));
 
 // A live lesson has no picture of its own until posters arrive with the
@@ -844,6 +848,7 @@ function EquinaApp() {
   const [tab, setTab] = useState<Tab>("home");
   // Account opens over the tab the rider was on, and closing it goes back there.
   const [accountReturnTab, setAccountReturnTab] = useState<Tab>("home");
+  const [accountInitialRoute, setAccountInitialRoute] = useState<AccountRoute>("root");
   // Ralf opens over whichever tab asked for him, with that tab's question.
   const [ralfOpen, setRalfOpen] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState(api.store.listings[0]?.id ?? "");
@@ -1009,11 +1014,19 @@ function EquinaApp() {
   // The app states this number back to the rider as fact ("N rides are now in
   // your journal"), so it has to come from the journal, never from a seed.
   const sessionCount = ridePersistence ? rideJournal.entries.length : localSessionCount;
+  // The rider's plan (202610060001): which paid lessons are open and how much
+  // of the Club. Until plans are enforced it says everything is open.
+  const planController = usePlan({
+    backend: equinaSession.backend,
+    enabled: accountMode === "connected" && equinaSession.phase === "authenticated"
+  });
+  const plan = planController.plan;
   const club = useClub({
     backend: equinaSession.backend,
     enabled:
       accountMode === "connected" &&
       equinaSession.phase === "authenticated" &&
+      plan.clubAccess !== "none" &&
       (equinaSession.capabilities.clubPublishing || equinaSession.capabilities.clubInteractions)
   });
   const clubSharing = accountMode === "connected"
@@ -1429,10 +1442,18 @@ function EquinaApp() {
     setRalfOpen(false);
   };
 
-  const openAccount = () => {
+  const openAccountAt = (route: AccountRoute) => {
     if (tab !== "profile") setAccountReturnTab(tab);
+    setAccountInitialRoute(route);
     setRalfOpen(false);
     setTab("profile");
+  };
+  const openAccount = () => openAccountAt("root");
+  // "See plans" from the Academy, the Club or Ralf goes straight to the plan,
+  // and back returns the rider to where they were.
+  const openPlans = () => {
+    void planController.refresh();
+    openAccountAt("plan");
   };
 
   const closeAccount = () => {
@@ -2314,6 +2335,7 @@ function EquinaApp() {
                 suggestions={coachPromptsFor(riderContext, horseState)}
                 focusOptions={coachGoalsByDiscipline[onboardingDiscipline]}
                 onBack={closeRalf}
+                onSeePlans={accountMode === "connected" ? openPlans : undefined}
                 onContextChange={(next) => {
                   setCoachGoal(next.focus);
                   setCoachLoad(next.load);
@@ -2432,13 +2454,20 @@ function EquinaApp() {
                 onAcademyModeChange={navigateAcademy}
                 onAcademyLessonOpen={openAcademyLesson}
                 onOpenRalf={ralfAvailable ? openRalf : undefined}
+                plan={plan}
+                onPickLesson={planController.pickLesson}
+                onSeePlans={openPlans}
+                onPlanStale={() => void planController.refresh()}
               />
             )}
             {!ralfOpen && tab === "community" && accountMode === "connected" && (
               <ClubScreen
                 club={club}
-                canPost={equinaSession.capabilities.clubPublishing}
-                canInteract={equinaSession.capabilities.clubInteractions}
+                access={plan.clubAccess}
+                upgradeName={planFor(plan, "club")?.name}
+                onSeePlans={openPlans}
+                canPost={equinaSession.capabilities.clubPublishing && plan.clubAccess === "post"}
+                canInteract={equinaSession.capabilities.clubInteractions && plan.clubAccess === "post"}
                 currentUserId={equinaSession.session?.user.id}
                 riderName={riderDisplayName}
                 defaultSpaceSlug={spaceSlugForDiscipline(onboardingDiscipline)}
@@ -2479,6 +2508,8 @@ function EquinaApp() {
               <AccountScreen
                 mode={accountMode}
                 marketplaceOpen={marketplaceOpen}
+                plan={plan}
+                initialRoute={accountInitialRoute}
                 snapshot={accountController.snapshot}
                 horseName={(accountController.snapshot.primaryHorse?.name ?? primaryHorseName) || "No horse yet"}
                 busy={accountController.busy}
@@ -5253,7 +5284,11 @@ function AcademyScreen({
   onLessonComplete,
   onAcademyModeChange,
   onAcademyLessonOpen,
-  onOpenRalf
+  onOpenRalf,
+  plan,
+  onPickLesson,
+  onSeePlans,
+  onPlanStale
 }: {
   horse: HorseState;
   rider: RiderContext;
@@ -5269,8 +5304,17 @@ function AcademyScreen({
   onAcademyLessonOpen: (lessonId: string) => void;
   /** Absent while Ralf is switched off for this account. */
   onOpenRalf?: (prompt?: string) => void;
+  /** Which paid lessons this rider's plan opens; everything, until plans are enforced. */
+  plan: PlanState;
+  /** Spends a pick on a paid lesson; answers whether it is now open. */
+  onPickLesson: (lessonId: string) => Promise<boolean>;
+  onSeePlans: () => void;
+  /** The server and the app disagree about a lesson: ask for the plan again. */
+  onPlanStale: () => void;
 }) {
   const reduceAcademyMotion = useReducedMotion();
+  // Preview lessons are the demo's own and always open.
+  const locked = (lesson: AcademyLessonView) => lesson.video === "live" && !lessonOpen(plan, lesson);
   const academyMotion = useRef(new Animated.Value(1)).current;
   const guidance = levelGuidance[rider.level];
   const academyFocus = horse.lastRide?.mood === "Tender" ? "Recovery" : coachGoal;
@@ -5350,6 +5394,13 @@ function AcademyScreen({
           onComplete={onLessonComplete}
           onOpenLesson={openLesson}
           onOpenGuide={onOpenRalf ? () => onOpenRalf(lessonQuestion(selectedLesson)) : undefined}
+          locked={locked(selectedLesson)}
+          picksLeft={picksLeft(plan)}
+          picksLimit={plan.academy.picksLimit}
+          upgradeName={planFor(plan, "lessons")?.name}
+          onPick={() => onPickLesson(selectedLesson.id)}
+          onSeePlans={onSeePlans}
+          onPlanStale={onPlanStale}
         />
       </Animated.View>
     );
@@ -5393,7 +5444,7 @@ function AcademyScreen({
         <Pressable
           testID="academy-open-recommended"
           accessibilityRole="button"
-          accessibilityLabel={`Open lesson ${currentLesson.title}`}
+          accessibilityLabel={`Open lesson ${currentLesson.title}${locked(currentLesson) ? ", part of a plan" : ""}`}
           style={({ pressed }) => [styles.academyRecommendation, pressed && styles.pressed]}
           onPress={() => openLesson(currentLesson)}
         >
@@ -5417,7 +5468,9 @@ function AcademyScreen({
             <View style={styles.academyRecommendationFooter}>
               <Text style={styles.academyRecommendationCoach}>{currentLesson.coach}</Text>
               <View style={styles.academyRecommendationPlay}>
-                <Play size={16} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} strokeWidth={1.8} />
+                {locked(currentLesson)
+                  ? <LockKeyhole size={16} color={equinaTheme.colors.ink} strokeWidth={2} />
+                  : <Play size={16} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} strokeWidth={1.8} />}
               </View>
             </View>
           </View>
@@ -5447,7 +5500,7 @@ function AcademyScreen({
                   key={lesson.id}
                   testID={`academy-path-lesson-${index + 2}`}
                   accessibilityRole="button"
-                  accessibilityLabel={`Open lesson ${index + 2} of ${learningPath.length}, ${lesson.title}`}
+                  accessibilityLabel={`Open lesson ${index + 2} of ${learningPath.length}, ${lesson.title}${locked(lesson) ? ", part of a plan" : ""}`}
                   style={({ pressed }) => [styles.academyPathRow, pressed && styles.pressed]}
                   onPress={() => openLesson(lesson)}
                 >
@@ -5456,7 +5509,9 @@ function AcademyScreen({
                     <Text numberOfLines={1} style={styles.academyPathRowTitle}>{lesson.title}</Text>
                     <Text style={styles.academyPathRowMeta}>{metaLine(lesson.coach, lesson.duration)}</Text>
                   </View>
-                  <ChevronRight size={16} color={nightTheme.faint} />
+                  {locked(lesson)
+                    ? <LockKeyhole size={15} color={nightTheme.faint} />
+                    : <ChevronRight size={16} color={nightTheme.faint} />}
                 </Pressable>
               ))}
             </View>
@@ -5482,7 +5537,7 @@ function AcademyScreen({
           </Pressable>
         ) : null}
 
-        <AcademyLessonList lessons={lessons} rider={rider} focus={academyFocus} onOpenLesson={openLesson} />
+        <AcademyLessonList lessons={lessons} rider={rider} focus={academyFocus} locked={locked} onOpenLesson={openLesson} />
       </View>
     </Animated.View>
   );
@@ -5521,11 +5576,13 @@ function AcademyLessonList({
   lessons,
   rider,
   focus,
+  locked,
   onOpenLesson
 }: {
   lessons: AcademyLessonView[];
   rider: RiderContext;
   focus: string;
+  locked: (lesson: AcademyLessonView) => boolean;
   onOpenLesson: (lesson: AcademyLessonView) => void;
 }) {
   const [topic, setTopic] = useState<AcademyTopic>("All");
@@ -5602,6 +5659,7 @@ function AcademyLessonList({
               key={lesson.id}
               lesson={lesson}
               featured={false}
+              locked={locked(lesson)}
               onPress={() => onOpenLesson(lesson)}
             />
           ))}
@@ -5628,7 +5686,14 @@ function AcademyVideoPage({
   onBack,
   onComplete,
   onOpenLesson,
-  onOpenGuide
+  onOpenGuide,
+  locked,
+  picksLeft: picksRemaining,
+  picksLimit,
+  upgradeName,
+  onPick,
+  onSeePlans,
+  onPlanStale
 }: {
   lessons: AcademyLessonView[];
   lesson: AcademyLessonView;
@@ -5642,10 +5707,57 @@ function AcademyVideoPage({
   onOpenLesson: (lesson: AcademyLessonView) => void;
   /** Absent while Ralf is switched off for this account. */
   onOpenGuide?: () => void;
+  /** A paid lesson the rider's plan does not open yet. */
+  locked: boolean;
+  /** Picks the rider can still make; null on a plan that opens every lesson. */
+  picksLeft: number | null;
+  picksLimit: number | null;
+  /** The plan that opens more lessons, if there is one above the rider's. */
+  upgradeName?: string;
+  onPick: () => Promise<boolean>;
+  onSeePlans: () => void;
+  onPlanStale: () => void;
 }) {
   const [videoReady, setVideoReady] = useState(false);
   const [videoStarted, setVideoStarted] = useState(false);
-  const video = useLessonVideo({ lesson, previewSource: academyDemoVideo, playbackLink, onProgress });
+  // A pick is permanent, so it takes a second tap that says so.
+  const [confirmingPick, setConfirmingPick] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState("");
+  const video = useLessonVideo({ lesson, locked, previewSource: academyDemoVideo, playbackLink, onProgress });
+  const canPick = (picksRemaining ?? 0) > 0;
+  const allowance = picksLimit ?? 0;
+  const lessonsWord = (count: number) => (count === 1 ? "lesson" : "lessons");
+  const picksWord = (count: number) => (count === 1 ? "pick" : "picks");
+
+  useEffect(() => {
+    setConfirmingPick(false);
+    setPickError("");
+  }, [lesson.id]);
+
+  // The app thought this lesson was open and the server disagreed: the plan
+  // it holds is stale (a downgrade, or plans just switched on).
+  const lockedByServer = video.state.phase === "error" && video.state.code === "lesson_locked";
+  useEffect(() => {
+    if (lockedByServer) onPlanStale();
+  }, [lockedByServer]);
+
+  const pick = async () => {
+    setPicking(true);
+    setPickError("");
+    try {
+      await onPick();
+      setConfirmingPick(false);
+    } catch (cause) {
+      const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+      setPickError(code === noPicksLeft
+        ? "You have already used every pick your plan includes."
+        : "This lesson could not be added. Try again.");
+      if (code === noPicksLeft) onPlanStale();
+    } finally {
+      setPicking(false);
+    }
+  };
   const videoPlayer = video.player;
   const videoPhase = video.state.phase;
   const learningPath = academyPathFor(lessons, rider, focus);
@@ -5701,10 +5813,22 @@ function AcademyVideoPage({
           style={styles.academyVideoImage}
           onFirstFrameRender={() => setVideoReady(true)}
         />
-        {(!videoStarted || !videoReady || videoPhase !== "ready") && (
+        {(locked || !videoStarted || !videoReady || videoPhase !== "ready") && (
           <Image source={{ uri: lesson.image }} style={styles.academyVideoPoster} resizeMode="cover" />
         )}
-        {video.state.phase === "error" ? (
+        {locked ? (
+          <>
+            <LinearGradient
+              colors={["rgba(8,7,6,0.30)", "rgba(8,7,6,0.72)"]}
+              style={styles.academyVideoScrim}
+            />
+            <View accessible accessibilityLabel="Locked lesson" style={styles.academyVideoCenter}>
+              <View style={styles.academyVideoPlay}>
+                <LockKeyhole size={22} color={equinaTheme.colors.ink} strokeWidth={2} />
+              </View>
+            </View>
+          </>
+        ) : video.state.phase === "error" ? (
           <>
             <LinearGradient
               colors={["rgba(8,7,6,0.40)", "rgba(8,7,6,0.82)"]}
@@ -5756,6 +5880,84 @@ function AcademyVideoPage({
         ) : null}
       </View>
 
+      {locked ? (
+        <View testID="academy-lesson-locked" style={styles.academyLockCard}>
+          <Text style={styles.academyLockTitle}>
+            {!canPick
+              ? "You have used your lesson picks"
+              : confirmingPick ? "Use one of your picks?" : "Choose this lesson to watch it"}
+          </Text>
+          <Text style={styles.academyLockBody}>
+            {!canPick
+              ? `Your plan includes ${allowance} paid ${lessonsWord(allowance)} of your choice.${upgradeName ? ` ${upgradeName} opens more.` : ""} Free lessons are always open.`
+              : confirmingPick
+                ? (picksRemaining ?? 1) - 1 === 0
+                  ? "A pick can't be changed later, and this is your last one."
+                  : `A pick can't be changed later. You will have ${(picksRemaining ?? 1) - 1} ${picksWord((picksRemaining ?? 1) - 1)} left.`
+                : `Your plan includes ${allowance} paid ${lessonsWord(allowance)} of your choice, and ${picksRemaining} ${(picksRemaining ?? 0) === 1 ? "is" : "are"} left. Free lessons are always open.`}
+          </Text>
+          {pickError ? <Text accessibilityRole="alert" style={styles.academyLockError}>{pickError}</Text> : null}
+          <View style={styles.academyLockActions}>
+            {canPick && confirmingPick ? (
+              <>
+                <MotionPressable
+                  testID="academy-pick-confirm"
+                  accessibilityRole="button"
+                  accessibilityLabel="Use a pick on this lesson"
+                  accessibilityState={{ disabled: picking, busy: picking }}
+                  disabled={picking}
+                  style={styles.academyLockPrimary}
+                  onPress={() => void pick()}
+                >
+                  {picking
+                    ? <ActivityIndicator size="small" color={equinaTheme.colors.ink} />
+                    : <Text style={styles.academyLockPrimaryText}>Use a pick</Text>}
+                </MotionPressable>
+                <Pressable
+                  testID="academy-pick-cancel"
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.academyLockSecondary, pressed && styles.pressed]}
+                  onPress={() => setConfirmingPick(false)}
+                >
+                  <Text style={styles.academyLockSecondaryText}>Not now</Text>
+                </Pressable>
+              </>
+            ) : canPick ? (
+              <>
+                <MotionPressable
+                  testID="academy-pick"
+                  accessibilityRole="button"
+                  style={styles.academyLockPrimary}
+                  onPress={() => {
+                    void Haptics.selectionAsync().catch(() => undefined);
+                    setConfirmingPick(true);
+                  }}
+                >
+                  <Text style={styles.academyLockPrimaryText}>Choose this lesson</Text>
+                </MotionPressable>
+                <Pressable
+                  testID="academy-lock-plans"
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.academyLockSecondary, pressed && styles.pressed]}
+                  onPress={onSeePlans}
+                >
+                  <Text style={styles.academyLockSecondaryText}>See plans</Text>
+                </Pressable>
+              </>
+            ) : (
+              <MotionPressable
+                testID="academy-lock-plans"
+                accessibilityRole="button"
+                style={styles.academyLockPrimary}
+                onPress={onSeePlans}
+              >
+                <Text style={styles.academyLockPrimaryText}>See plans</Text>
+              </MotionPressable>
+            )}
+          </View>
+        </View>
+      ) : null}
+
       <View style={styles.academyVideoDetails}>
         <Text style={styles.academyVideoKicker}>{metaLine(lesson.level, lesson.topic, lesson.duration)}</Text>
         <Text style={styles.academyVideoTitle}>{lesson.title}</Text>
@@ -5770,6 +5972,7 @@ function AcademyVideoPage({
                 key={`${chapter.seconds}-${chapter.title}`}
                 chapter={chapter}
                 last={index === lesson.chapters.length - 1}
+                disabled={locked}
                 onPress={() => playChapter(chapter.seconds)}
               />
             ))}
@@ -5810,7 +6013,7 @@ function AcademyVideoPage({
           </Pressable>
         ) : null}
 
-        <MotionPressable
+        {locked ? null : <MotionPressable
           testID="academy-video-complete"
           accessibilityRole="button"
           accessibilityLabel={nextLesson ? `Complete lesson and open ${nextLesson.title}` : "Complete lesson"}
@@ -5832,7 +6035,7 @@ function AcademyVideoPage({
             <Text numberOfLines={1} style={styles.academyLessonCompleteMeta}>{nextLesson ? `Next: ${nextLesson.title}` : "Back to the Academy"}</Text>
           </View>
           <ChevronRight size={17} color={equinaTheme.colors.ink} />
-        </MotionPressable>
+        </MotionPressable>}
       </View>
     </View>
   );
@@ -5841,22 +6044,27 @@ function AcademyVideoPage({
 function AcademyChapterRow({
   chapter,
   last,
+  disabled = false,
   onPress
 }: {
   chapter: { time: string; title: string };
   last: boolean;
+  /** A locked lesson lists its chapters but cannot play them. */
+  disabled?: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Play from ${chapter.time}, ${chapter.title}`}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
       style={({ pressed }) => [styles.academyChapterRow, !last && styles.academyChapterRowDivider, pressed && styles.pressed]}
       onPress={onPress}
     >
       <Text style={styles.academyChapterTime}>{chapter.time}</Text>
       <Text numberOfLines={2} style={styles.academyChapterTitle}>{chapter.title}</Text>
-      <PlayCircle size={18} color={equinaTheme.colors.brass} />
+      <PlayCircle size={18} color={disabled ? nightTheme.faint : equinaTheme.colors.brass} />
     </Pressable>
   );
 }
@@ -5896,12 +6104,15 @@ function AcademyLessonCard({
   featured,
   featuredLabel,
   matchReason,
+  locked = false,
   onPress
 }: {
   lesson: AcademyLessonView;
   featured: boolean;
   featuredLabel?: string;
   matchReason?: string;
+  /** A paid lesson the rider's plan does not open yet. */
+  locked?: boolean;
   onPress: () => void;
 }) {
   const lessonTestId = `academy-lesson-${lesson.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
@@ -5943,7 +6154,7 @@ function AcademyLessonCard({
     <Pressable
       testID={lessonTestId}
       accessibilityRole="button"
-      accessibilityLabel={`Open lesson ${lesson.title}`}
+      accessibilityLabel={`Open lesson ${lesson.title}${locked ? ", part of a plan" : ""}`}
       style={({ pressed }) => [styles.academyLessonCard, pressed && styles.pressed]}
       onPress={onPress}
     >
@@ -5956,7 +6167,7 @@ function AcademyLessonCard({
         <Text numberOfLines={1} style={styles.academyLessonMeta}>{metaLine(lesson.coach, lesson.duration)}</Text>
         <Text numberOfLines={1} style={styles.academyLessonSummary}>{lesson.summary}</Text>
       </View>
-      <ChevronRight size={17} color={nightTheme.faint} />
+      {locked ? <LockKeyhole size={16} color={nightTheme.faint} /> : <ChevronRight size={17} color={nightTheme.faint} />}
     </Pressable>
   );
 }
@@ -14054,6 +14265,60 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,247,230,0.94)"
+  },
+  academyLockCard: {
+    gap: 8,
+    padding: 16,
+    borderRadius: equinaTheme.radius.card,
+    backgroundColor: equinaTheme.surfaces.raised
+  },
+  academyLockTitle: {
+    color: equinaTheme.text.primary,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "600"
+  },
+  academyLockBody: {
+    color: equinaTheme.text.secondary,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "400"
+  },
+  academyLockError: {
+    color: equinaTheme.colorRole.criticalOnDark,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "400"
+  },
+  academyLockActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 16,
+    marginTop: 6
+  },
+  academyLockPrimary: {
+    minHeight: 44,
+    minWidth: 120,
+    borderRadius: 22,
+    paddingHorizontal: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.colors.brass
+  },
+  academyLockPrimaryText: {
+    color: equinaTheme.colors.ink,
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  academyLockSecondary: {
+    minHeight: 44,
+    justifyContent: "center"
+  },
+  academyLockSecondaryText: {
+    color: equinaTheme.colors.brass,
+    fontSize: 14,
+    fontWeight: "600"
   },
   academyVideoMessage: {
     ...StyleSheet.absoluteFillObject,

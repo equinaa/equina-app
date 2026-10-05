@@ -512,6 +512,29 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Plans -------------------------------------------------------------- */
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.stack-tight {
+  display: grid;
+  gap: 8px;
+}
+
+.plain-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+}
+
 /* ---- Chapters ----------------------------------------------------------- */
 
 .chapter-row {

@@ -28,6 +28,7 @@ accurate.
 | Account | Notifications | Persist category choices and contextually register native push | backend implemented / rollout gated |
 | Account | Privacy and Ralf | Control Ralf context, export data, and clear AI history | backend implemented / rollout gated |
 | Account | Security | Manage blocks and schedule/cancel account deletion | backend implemented / rollout gated |
+| Account | Plan | Show the rider's plan and what Free, Plus and Premium hold; opened by "See plans" from the Academy, the Club and Ralf, and back returns there | backend implemented (`my_plan`); purchases wait for the App Store account |
 | Home | Briefing | Show one suggested ride and factual journal context | local prototype |
 | Home | Ride mode | Run a three-phase timer | local prototype |
 | Home | Ride recap | Show elapsed time, phases, discipline, and rider check-in | local prototype |
@@ -38,9 +39,11 @@ accurate.
 | Academy | For You | Inspect one personalized lesson path | published catalogue for connected accounts; preview catalogue in demo |
 | Academy | Lessons | Search and filter lessons | published catalogue for connected accounts; preview catalogue in demo |
 | Academy | Lesson | Play a lesson through a signed, expiring link and save the rider's place | backend implemented / video host gated (`academy-playback`, Mux); demo plays a bundled clip |
+| Academy | Locked lesson | Spend one of the plan's picks on a paid lesson (confirmed, permanent), or see the plans | backend implemented (`pick_academy_lesson`) / applies only while `plans` is on |
 | Academy | Coach | Persist a private Ralf conversation through a server provider boundary | backend implemented / rollout gated; explicit dev demo adapter |
 | Admin | Lessons | Create, edit, chapter, upload the video, publish and unpublish Academy lessons | built in `admin/`; needs a staff account with a second factor and the Mux secrets |
 | Admin | Moderation | Restore or remove Club posts and comments that riders reported or the filter hid | built in `admin/`; needs a staff account with a second factor |
+| Admin | Plans | Change what each plan holds, give or take back a plan by email, list who holds one | built in `admin/`; admin role with a second factor |
 | Club | Feed | Inspect seeded social content | read-only |
 | Shop buyer | Browse | Search, filter, save, and inspect seeded listings | local prototype/read-only |
 | Shop buyer | Product | Inspect photos, metadata, and preliminary fit inputs | read-only |
@@ -69,6 +72,7 @@ accurate.
 | Horse-feel check-in | rider selection | recap only | Attribute to the rider; never infer it |
 | Ride count | seeded React state | reload resets | Call it journal entries, not weekly performance |
 | Academy progress | Postgres (`academy_progress`) for connected accounts; React state in demo | durable when `academy_progress` is on; session only otherwise | Finishing is recorded by the player or "Complete lesson", never inferred from a position |
+| Plan and lesson picks | Postgres (`plan_subscriptions`, `academy_lesson_picks`) through `my_plan()`; the founding plan in demo | durable | Until the plan loads the app assumes everything is open; the database enforces every limit itself |
 | Ralf conversations | Postgres/Realtime | durable for connected accounts | server generates assistant role; dev demo is explicitly local |
 | Ralf confidence | server-derived context coverage | message metadata | never trust model prose as confidence |
 | Marketplace messages | Postgres/Realtime | durable | drafts only are local; bodies are server-readable for moderation |

@@ -320,6 +320,46 @@ export type AcademyLesson = {
   chapters: AcademyChapter[];
 };
 
+/** The keys the database uses; riders only ever see a plan's name. */
+export type PlanKey = "free" | "mid" | "premium";
+
+/** How much of the Club a plan opens. */
+export type ClubAccess = "none" | "read" | "post";
+
+/** What one plan holds (plan_tiers, with its Ralf allowance). */
+export type PlanTier = {
+  key: PlanKey;
+  name: string;
+  /** Paid lessons a rider picks, on top of every free one. Null: every lesson. */
+  academyPicks: number | null;
+  clubAccess: ClubAccess;
+  monthlyCredits: number;
+  coachSessions: number;
+  eventTickets: number;
+  trialDays: number;
+};
+
+/** The rider's plan as my_plan() answers it. */
+export type PlanState = {
+  /** False in the founding phase: every rider has everything. */
+  enforced: boolean;
+  /** The plan the rider holds, enforced or not. */
+  tier: PlanKey;
+  status?: "trialing" | "active" | "grace";
+  source?: "app_store" | "play" | "stripe" | "staff";
+  trialEndsAt?: string;
+  endsAt?: string;
+  /** What the Club lets this rider do now, plans enforced or not. */
+  clubAccess: ClubAccess;
+  academy: {
+    picksLimit: number | null;
+    picksUsed: number;
+    /** The picked lessons that are open, earliest first. */
+    openPicks: string[];
+  };
+  tiers: PlanTier[];
+};
+
 /** A signed link to one lesson's video, minted by academy-playback. */
 export type AcademyPlaybackLink = {
   url: string;

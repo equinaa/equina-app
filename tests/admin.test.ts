@@ -11,6 +11,7 @@ import {
   slugFor
 } from "../admin/src/lib/lessons";
 import { queueReason, reasonLabel, restoreLabel } from "../admin/src/lib/moderation";
+import { heldPlanState, planSummary, readGrantForm, readPlanTierForm } from "../admin/src/lib/plans";
 import { knownTopics } from "../src/features/academy/academy-catalog";
 
 // --- Filing a lesson ---------------------------------------------------------
@@ -133,6 +134,44 @@ assert.equal(queueReason({ status: "visible", open_reports: 1, reasons: ["harass
 assert.equal(queueReason({ status: "hidden", open_reports: 0, reasons: [] }), "Hidden by the phrase filter");
 assert.equal(restoreLabel("visible"), "Keep visible");
 assert.equal(restoreLabel("hidden"), "Restore");
+
+// --- Plans -----------------------------------------------------------------------------------
+
+const tierForm = (values: Record<string, string>) => (name: string) => values[name] ?? "";
+const plusValues = {
+  name: " Plus ", academyPicks: "30", clubAccess: "post", monthlyCredits: "100", coachSessions: "1", eventTickets: "0", trialDays: "7"
+};
+assert.deepEqual(readPlanTierForm("mid", tierForm(plusValues)).fields, {
+  name: "Plus", academyPicks: 30, clubAccess: "post", monthlyCredits: 100, coachSessions: 1, eventTickets: 0, trialDays: 7
+});
+assert.equal(readPlanTierForm("premium", tierForm({ ...plusValues, academyPicks: "" })).fields?.academyPicks, null,
+  "An empty pick count opens every lesson.");
+assert.equal(readPlanTierForm("free", tierForm({ ...plusValues, trialDays: "7" })).fields?.trialDays, 0, "Free never has a trial.");
+assert.deepEqual(
+  Object.keys(readPlanTierForm("mid", tierForm({ ...plusValues, academyPicks: "5000", clubAccess: "all", monthlyCredits: "-1", name: "" })).errors).sort(),
+  ["academyPicks", "clubAccess", "monthlyCredits", "name"]
+);
+assert.equal(
+  planSummary({ academy_picks: 2, club_access: "none", monthly_credits: 15 }),
+  "Free lessons + 2 paid picks · no Club · 15 Ralf credits a month"
+);
+
+const now = new Date("2026-10-06T12:00:00Z");
+const grant = (values: Record<string, string>) => readGrantForm((name) => values[name] ?? "", now);
+assert.deepEqual(grant({ email: " rider@equina.app ", tier: "premium", until: "2026-12-31", note: "" }).fields, {
+  email: "rider@equina.app", tier: "premium", endsAt: "2026-12-31T23:59:59.999Z", note: null
+}, "A plan given until a day lasts through that whole day.");
+assert.equal(grant({ email: "rider@equina.app", tier: "mid", until: "" }).fields?.endsAt, null, "No date is no end date.");
+assert.ok(grant({ email: "rider@equina.app", tier: "mid", until: "2026-10-05" }).errors.until, "An end date must be after today.");
+assert.ok(grant({ email: "rider@equina.app", tier: "mid", until: "2026-02-30" }).errors.until, "A date that does not exist is refused.");
+assert.ok(grant({ email: "not an email", tier: "mid" }).errors.email);
+assert.ok(grant({ email: "rider@equina.app", tier: "gold" }).errors.tier);
+
+assert.deepEqual(heldPlanState({ status: "active", live: true }), { label: "Active", tone: "positive" });
+assert.deepEqual(heldPlanState({ status: "active", live: false }), { label: "Ended", tone: "" },
+  "A plan past its end date reads as ended before anything rewrites its status.");
+assert.deepEqual(heldPlanState({ status: "revoked", live: false }), { label: "Removed", tone: "" });
+assert.deepEqual(heldPlanState({ status: "trialing", live: true }), { label: "Free trial", tone: "warning" });
 
 // --- What the admin's code may do ----------------------------------------------------------
 

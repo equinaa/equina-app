@@ -197,6 +197,12 @@ assert.match(coachEdgeSource, /AbortController/);
 assert.match(coachEdgeSource, /health_escalation/);
 assert.match(coachEdgeSource, /clientNonce/);
 assert.doesNotMatch(coachEdgeSource, /console\.(log|error)\([^)]*(message|email|token|authorization)/i);
+// Out of credits and out of lesson picks are answers, not failures: each has
+// its own status and code, which the app turns into the plans rather than an
+// error.
+assert.match(coachEdgeSource, /PT402[\s\S]{0,200}402[\s\S]{0,200}coach_credits_exhausted/);
+const playbackEdgeSource = readFileSync(join(root, "supabase", "functions", "academy-playback", "index.ts"), "utf8");
+assert.match(playbackEdgeSource, /PT402[\s\S]{0,200}402[\s\S]{0,200}lesson_locked/);
 
 const notificationEdgeSource = readFileSync(join(root, "supabase", "functions", "process-notification-outbox", "index.ts"), "utf8");
 assert.doesNotMatch(notificationEdgeSource, /message\.body|payload\.body/);

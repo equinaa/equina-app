@@ -101,7 +101,7 @@ const missingRls = await db.query<{ tablename: string }>(`
 assert.deepEqual(missingRls.rows, [], `All public backend tables need RLS: ${missingRls.rows.map((row) => row.tablename).join(", ")}`);
 
 const seededFlags = await db.query<{ enabled: boolean; rollout_percent: number }>("select enabled, rollout_percent from public.app_feature_flags");
-assert.equal(seededFlags.rows.length, 13);
+assert.equal(seededFlags.rows.length, 14);
 assert.ok(seededFlags.rows.every((flag) => !flag.enabled && flag.rollout_percent === 0));
 
 const riderA = "10000000-0000-4000-8000-000000000001";
@@ -146,7 +146,10 @@ await db.exec(`
   delete from public.horses where id = '${overrideHorse.rows[0]?.id}';
   delete from public.feature_flag_overrides where user_id = '${riderA}';
 `);
-await db.exec(`reset role; update public.app_feature_flags set enabled = true, rollout_percent = 100;`);
+// Every feature on -- except plans: the tests below run in the founding phase,
+// as production does until riders can subscribe. The plans section turns them
+// on for the riders it names.
+await db.exec(`reset role; update public.app_feature_flags set enabled = true, rollout_percent = 100 where key <> 'plans';`);
 await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 const activeIdentity = await db.query<{ uid: string | null; role: string }>("select auth.uid() as uid, current_user as role");
 assert.equal(activeIdentity.rows[0]?.role, "authenticated");
@@ -839,13 +842,17 @@ await assert.rejects(
 
 await db.exec("reset role;");
 
-// Only the free tier ships with a number. Mid and premium are a commercial
-// decision nobody has made, and a missing row must resolve to no credits.
+// Free's 15 was measured against real traffic; Plus and Premium arrived with
+// the plans (202610060001), from Ilinca's draft. A tier with no row would
+// still resolve to no credits.
 const policies = await db.query<{ key: string; monthly_credits: number }>(
   "select key, monthly_credits from public.coach_credit_policies order by key"
 );
-assert.deepEqual(policies.rows, [{ key: "free", monthly_credits: 15 }],
-  "Seeding a tier we have not priced would assert a commercial decision that was never made.");
+assert.deepEqual(policies.rows, [
+  { key: "free", monthly_credits: 15 },
+  { key: "mid", monthly_credits: 100 },
+  { key: "premium", monthly_credits: 300 }
+]);
 
 const spend = async (user: string, key: string, cost = 1) =>
   await db.query<{ spend_coach_credits: { spent: number; balance: number; idempotent: boolean } }>(
@@ -1845,6 +1852,263 @@ assert.equal(
   "An admin session with a second factor changes flags."
 );
 
+// --- Plans ------------------------------------------------------------------
+
+type PlanState = {
+  enforced: boolean;
+  tier: string;
+  status: string | null;
+  source: string | null;
+  clubAccess: string;
+  academy: { picksLimit: number | null; picksUsed: number; openPicks: string[] };
+  tiers: Array<{ key: string; name: string }>;
+};
+const myPlan = async () =>
+  (await db.query<{ plan: PlanState }>("select public.my_plan() as plan")).rows[0]?.plan as PlanState;
+const pickLesson = (lesson: string) =>
+  db.query<{ plan: PlanState }>("select public.pick_academy_lesson($1) as plan", [lesson]);
+const watchLesson = (lesson: string) =>
+  db.query<{ status: string }>("select status from public.academy_playback_source($1)", [lesson]);
+const readsPost = async (post: string) =>
+  (await db.query("select id from public.club_posts where id = $1", [post])).rows.length === 1;
+// PT402 is what PostgREST turns into HTTP 402: the app shows the plans, not an error.
+const paywall = (pattern: RegExp) => (error: unknown) =>
+  error instanceof Error && (error as { code?: string }).code === "PT402" && pattern.test(error.message);
+
+await db.exec("reset role;");
+
+// Ilinca's three plans, as rows the admin changes without a migration.
+const planTiers = await db.query(`
+  select tier.key, tier.name, tier.academy_picks, tier.club_access, tier.coach_sessions,
+         tier.event_tickets, tier.trial_days, policy.monthly_credits
+  from public.plan_tiers tier
+  join public.coach_credit_policies policy on policy.key = tier.key
+  order by tier.rank
+`);
+assert.deepEqual(planTiers.rows, [
+  { key: "free", name: "Free", academy_picks: 2, club_access: "none", coach_sessions: 0, event_tickets: 0, trial_days: 0, monthly_credits: 15 },
+  { key: "mid", name: "Plus", academy_picks: 30, club_access: "post", coach_sessions: 1, event_tickets: 0, trial_days: 7, monthly_credits: 100 },
+  { key: "premium", name: "Premium", academy_picks: null, club_access: "post", coach_sessions: 2, event_tickets: 1, trial_days: 7, monthly_credits: 300 }
+]);
+
+// Four paid lessons and a free one, all with finished videos, and a Club post
+// from a rider plans never touch.
+const planLessons: string[] = [];
+for (const [slug, access] of [
+  ["plan-seat", "paid"], ["plan-canter", "paid"], ["plan-grid", "paid"], ["plan-rein-back", "paid"], ["plan-grooming", "free"]
+] as const) {
+  const row = await db.query<{ id: string }>(`
+    insert into public.academy_lessons(slug, title, summary, category, access, duration_seconds, published_at)
+    values ($1, $1, 'A lesson for the plan tests.', 'Dressage', $2, 600, now()) returning id
+  `, [slug, access]);
+  const id = row.rows[0]?.id as string;
+  await db.query("insert into public.academy_videos(lesson_id, provider, asset_id, status) values ($1, 'bunny', $2, 'ready')", [id, `asset-${slug}`]);
+  planLessons.push(id);
+}
+const [seatLesson, canterLesson, gridLesson, reinBackLesson, groomingLesson] = planLessons as [string, string, string, string, string];
+
+await asRider(riderC);
+const plansPost = (await db.query<{ id: string }>(`
+  insert into public.club_posts(author_id, space_id, post_type, body)
+  values ($1, $2, 'ride', 'Hacked out on the buckle today.') returning id
+`, [riderC, spaceId])).rows[0]?.id as string;
+
+// The founding phase: with plans off, every rider has every lesson and the
+// whole Club, and picking spends nothing.
+await asRider(riderD);
+const founding = await myPlan();
+assert.deepEqual(
+  { enforced: founding.enforced, tier: founding.tier, clubAccess: founding.clubAccess },
+  { enforced: false, tier: "free", clubAccess: "post" }
+);
+assert.deepEqual(founding.tiers.map((tier) => tier.name), ["Free", "Plus", "Premium"], "The plan screen reads every plan in one call.");
+assert.deepEqual((await watchLesson(seatLesson)).rows, [{ status: "ready" }], "While plans are off, every rider watches paid lessons.");
+await pickLesson(seatLesson);
+assert.equal((await myPlan()).academy.picksUsed, 0, "A pick is not spent while every lesson is open.");
+assert.ok(await readsPost(plansPost), "While plans are off, every rider reads the Club.");
+
+// On for one account first: that is how staff try Free before anyone else.
+await db.exec(`reset role; insert into public.feature_flag_overrides(user_id, key, enabled, note) values ('${riderD}', 'plans', true, 'Trying Free');`);
+await asRider(riderD);
+const onFree = await myPlan();
+assert.deepEqual(
+  { enforced: onFree.enforced, tier: onFree.tier, clubAccess: onFree.clubAccess, academy: onFree.academy },
+  { enforced: true, tier: "free", clubAccess: "none", academy: { picksLimit: 2, picksUsed: 0, openPicks: [] } }
+);
+await assert.rejects(watchLesson(seatLesson), paywall(/not part of your plan/), "On Free a paid lesson waits for a pick.");
+assert.deepEqual((await watchLesson(groomingLesson)).rows, [{ status: "ready" }], "Free lessons are open on every plan.");
+
+const afterPick = (await pickLesson(seatLesson)).rows[0]?.plan as PlanState;
+assert.deepEqual(afterPick.academy, { picksLimit: 2, picksUsed: 1, openPicks: [seatLesson] }, "A pick answers with the plan as it now stands.");
+assert.deepEqual((await watchLesson(seatLesson)).rows, [{ status: "ready" }], "A picked lesson opens at once.");
+await pickLesson(canterLesson);
+await assert.rejects(pickLesson(gridLesson), paywall(/No lesson picks left/), "Free picks two paid lessons, not three.");
+await pickLesson(seatLesson);
+assert.equal((await myPlan()).academy.picksUsed, 2, "Opening a lesson already picked spends nothing.");
+await pickLesson(groomingLesson);
+assert.equal((await myPlan()).academy.picksUsed, 2, "A free lesson is never a pick.");
+await assert.rejects(
+  db.query("insert into public.academy_lesson_picks(user_id, lesson_id) values ($1, $2)", [riderD, gridLesson]),
+  /permission denied/,
+  "Picks go through pick_academy_lesson, which counts them."
+);
+
+// Free has no Club: no feed, no thread, no writing.
+assert.equal(await readsPost(plansPost), false, "Free does not read the Club.");
+assert.equal(
+  (await db.query("select id from public.club_comments where post_id = $1", [plansPost])).rows.length, 0,
+  "A thread follows its post."
+);
+await assert.rejects(
+  db.query("insert into public.club_posts(author_id, space_id, post_type, body) values ($1, $2, 'ride', 'Hello, Club')", [riderD, spaceId]),
+  /row-level security/,
+  "Free does not post in the Club."
+);
+await assert.rejects(
+  db.query("insert into public.club_memberships(space_id, user_id, role) values ($1, $2, 'member')", [spaceId, riderD]),
+  /row-level security/,
+  "Free does not join Club spaces."
+);
+
+// An admin gives a plan by email -- with the second factor, like flags.
+await assert.rejects(db.query("select public.staff_set_plan('rider-d@equina.test', 'mid')"), /Only an admin/,
+  "A rider cannot give themselves a plan.");
+await asStaff("aal1");
+await assert.rejects(db.query("select public.staff_set_plan('rider-d@equina.test', 'mid')"), /Only an admin/,
+  "An admin password alone must not give plans.");
+await asStaff("aal2");
+await assert.rejects(db.query("select public.staff_set_plan('nobody@equina.test', 'mid')"), /No Equina account/);
+await assert.rejects(db.query("select public.staff_set_plan('rider-d@equina.test', 'gold')"), /Choose Free, Plus or Premium/);
+await assert.rejects(
+  db.query("select public.staff_set_plan('rider-d@equina.test', 'mid', now() - interval '1 day')"),
+  /end date in the future/
+);
+assert.equal(
+  (await db.query<{ tier: string }>("select public.staff_set_plan(' Rider-D@equina.test ', 'mid', null, 'Beta tester') as tier")).rows[0]?.tier,
+  "mid",
+  "An email finds its account whatever its case or spacing."
+);
+
+await asRider(riderD);
+const onPlus = await myPlan();
+assert.deepEqual(
+  { tier: onPlus.tier, status: onPlus.status, source: onPlus.source, clubAccess: onPlus.clubAccess, picksLimit: onPlus.academy.picksLimit },
+  { tier: "mid", status: "active", source: "staff", clubAccess: "post", picksLimit: 30 }
+);
+assert.ok(await readsPost(plansPost), "Plus reads the Club.");
+await db.query("insert into public.club_comments(post_id, author_id, body) values ($1, $2, 'Lovely way to end the week.')", [plansPost, riderD]);
+await pickLesson(gridLesson);
+assert.deepEqual((await watchLesson(gridLesson)).rows, [{ status: "ready" }], "Plus picks up to thirty.");
+
+// Ralf's allowance follows the plan, from the day the plan started.
+await db.exec("reset role;");
+const plusSpend = await spend(riderD, "20000000-0000-4000-8000-0000000000d1");
+assert.equal(plusSpend.rows[0]?.spend_coach_credits.balance, 99, "Plus grants its 100 credits on first use.");
+const plusLots = await db.query<{ source: string; source_ref: string; granted: number }>(
+  "select source, source_ref, granted from public.coach_credit_lots where user_id = $1", [riderD]
+);
+assert.equal(plusLots.rows.length, 1, "A rider on Plus is granted Plus's allowance, not Free's as well.");
+assert.equal(plusLots.rows[0]?.source, "staff");
+assert.match(plusLots.rows[0]?.source_ref ?? "", /^plan:mid:\d+:0$/);
+
+await asStaff("aal2");
+await db.query("select public.staff_set_plan('rider-d@equina.test', 'premium')");
+await db.exec("reset role;");
+await spend(riderD, "20000000-0000-4000-8000-0000000000d2");
+assert.equal(await balanceOf(riderD), 398, "Moving up to Premium grants its 300 at once, on top of what is left.");
+await asRider(riderD);
+assert.deepEqual((await watchLesson(reinBackLesson)).rows, [{ status: "ready" }], "Premium opens every lesson, picked or not.");
+assert.equal((await myPlan()).academy.picksLimit, null);
+
+// Taking the plan back: the earliest picks stay open, as many as Free allows.
+await asStaff("aal2");
+await db.query("select public.staff_set_plan('rider-d@equina.test', 'free', null, 'Beta over')");
+await asRider(riderD);
+const downgraded = await myPlan();
+assert.deepEqual(
+  { tier: downgraded.tier, academy: downgraded.academy },
+  { tier: "free", academy: { picksLimit: 2, picksUsed: 3, openPicks: [seatLesson, canterLesson] } },
+  "After a downgrade the earliest picks stay open."
+);
+await assert.rejects(watchLesson(gridLesson), paywall(/not part of your plan/), "A pick beyond the allowance closes again.");
+await assert.rejects(pickLesson(gridLesson), paywall(/No lesson picks left/), "Picking it again does not reopen it.");
+assert.equal(await readsPost(plansPost), false, "Back on Free, the Club closes.");
+
+// A plan bought in the store and one staff gave never overwrite each other:
+// the higher applies, and each lapses on its own.
+await db.exec(`
+  reset role;
+  insert into public.feature_flag_overrides(user_id, key, enabled) values ('${riderE}', 'plans', true);
+  insert into public.plan_subscriptions(user_id, source, tier, status, product_id, original_transaction_id, trial_ends_at, ends_at)
+  values ('${riderE}', 'app_store', 'mid', 'trialing', 'equina.plus.monthly', 'txn-plus-1', now() + interval '7 days', now() + interval '7 days');
+`);
+await asRider(riderE);
+const onTrial = await myPlan();
+assert.deepEqual({ tier: onTrial.tier, status: onTrial.status, source: onTrial.source }, { tier: "mid", status: "trialing", source: "app_store" });
+await asStaff("aal2");
+await db.query("select public.staff_set_plan('rider-e@equina.test', 'premium')");
+await asRider(riderE);
+assert.equal((await myPlan()).tier, "premium", "Of two plans, the higher applies.");
+await asStaff("aal2");
+await db.query("select public.staff_set_plan('rider-e@equina.test', 'free')");
+await asRider(riderE);
+assert.equal((await myPlan()).tier, "mid", "Taking back a staff plan leaves the one bought in the store.");
+await db.exec(`reset role; update public.plan_subscriptions set ends_at = now() - interval '1 minute' where user_id = '${riderE}' and source = 'app_store';`);
+await asRider(riderE);
+assert.equal((await myPlan()).tier, "free", "A plan lapses at its end date, with nothing running at that moment.");
+assert.ok(
+  (await db.query<{ user_id: string }>("select user_id from public.plan_subscriptions")).rows.every((row) => row.user_id === riderE),
+  "A rider reads only their own plans."
+);
+await assert.rejects(
+  db.query("insert into public.plan_subscriptions(user_id, source, tier, status) values ($1, 'stripe', 'premium', 'active')", [riderE]),
+  /permission denied/,
+  "A rider can never write a plan."
+);
+await assert.rejects(db.query("select * from public.staff_list_plans()"), /Only an admin/, "Who holds a plan is for admins.");
+
+// The admin's view, and what a plan holds changed as data.
+await asStaff("aal2");
+const listed = await db.query<{ email: string; tier_name: string; status: string; live: boolean; granted_by_email: string | null }>(
+  "select email, tier_name, status, live, granted_by_email from public.staff_list_plans() where email = 'rider-d@equina.test'"
+);
+assert.deepEqual(listed.rows, [
+  { email: "rider-d@equina.test", tier_name: "Premium", status: "revoked", live: false, granted_by_email: "staff@equina.test" }
+]);
+await assert.rejects(db.query("select public.staff_update_plan_tier('mid', 'Plus', 5000, 'post', 100, 1, 0, 7)"), /from 0 to 1000/);
+await assert.rejects(db.query("select public.staff_update_plan_tier('free', 'Free', 2, 'none', 15, 0, 0, 7)"), /Free has no trial/);
+await db.query("select public.staff_update_plan_tier('free', 'Free', 3, 'read', 20, 0, 0, 0)");
+await asRider(riderD);
+const widened = await myPlan();
+assert.deepEqual(
+  { clubAccess: widened.clubAccess, openPicks: widened.academy.openPicks },
+  { clubAccess: "read", openPicks: [seatLesson, canterLesson, gridLesson] },
+  "Free reading the Club and picking three is a row, not a migration."
+);
+assert.ok(await readsPost(plansPost), "'read' opens the feed.");
+await assert.rejects(
+  db.query("insert into public.club_comments(post_id, author_id, body) values ($1, $2, 'Me too!')", [plansPost, riderD]),
+  /row-level security/,
+  "'read' does not open writing."
+);
+await assert.rejects(
+  db.query("select public.staff_update_plan_tier('free', 'Free', 30, 'post', 15, 0, 0, 0)"),
+  /Only an admin/,
+  "Riders do not change plans."
+);
+await asStaff("aal2");
+await db.query("select public.staff_update_plan_tier('free', 'Free', 2, 'none', 15, 0, 0, 0)");
+await secondFactor("");
+
+// For the erasure below: rider A's own plan and pick, and a plan rider A gave
+// someone else, as if rider A had been staff.
+await db.exec(`
+  reset role;
+  insert into public.plan_subscriptions(user_id, source, tier, status) values ('${riderA}', 'staff', 'mid', 'active');
+  insert into public.academy_lesson_picks(user_id, lesson_id) values ('${riderA}', '${seatLesson}');
+  insert into public.plan_subscriptions(user_id, source, tier, status, granted_by) values ('${riderC}', 'staff', 'mid', 'active', '${riderA}');
+`);
+
 // Account erasure. Production soft-deletes the auth user (orders and other
 // legal records still point at it), so nothing cascades from auth.users:
 // erase_account_data has to name every table that holds a rider's data.
@@ -1913,13 +2177,15 @@ await db.query(
   "insert into public.feature_flag_overrides(user_id, key, enabled, expires_at) values ($1, 'ride_logging', true, now() + interval '30 days')",
   [riderA]
 );
-const beforeErasure = await db.query<{ rides: number; progress: number; horses: number; conversations: number; packs: number }>(`
+const beforeErasure = await db.query<{ rides: number; progress: number; horses: number; conversations: number; packs: number; picks: number; plans: number }>(`
   select
     (select count(*)::int from public.ride_entries where rider_id = $1) as rides,
     (select count(*)::int from public.academy_progress where user_id = $1) as progress,
     (select count(*)::int from public.horses where owner_id = $1) as horses,
     (select count(*)::int from public.coach_conversations where user_id = $1) as conversations,
-    (select count(*)::int from public.onboarding_starter_packs where user_id = $1) as packs
+    (select count(*)::int from public.onboarding_starter_packs where user_id = $1) as packs,
+    (select count(*)::int from public.academy_lesson_picks where user_id = $1) as picks,
+    (select count(*)::int from public.plan_subscriptions where user_id = $1) as plans
 `, [riderA]);
 for (const [name, count] of Object.entries(beforeErasure.rows[0] ?? {})) {
   assert.ok(count > 0, `The erasure test needs rider A to have ${name} before erasing.`);
@@ -1961,6 +2227,11 @@ const othersAfter = await db.query<{ count: number }>(
   "select count(*)::int as count from public.saved_listings where user_id = $1", [riderC]
 );
 assert.equal(othersAfter.rows[0]?.count, savedByOthers.rows[0]?.count, "Erasing one rider must not touch another's data.");
+const planGiven = await db.query<{ tier: string; granted_by: string | null }>(
+  "select tier, granted_by from public.plan_subscriptions where user_id = $1", [riderC]
+);
+assert.deepEqual(planGiven.rows, [{ tier: "mid", granted_by: null }],
+  "A plan an erased account gave stays with the rider who received it, without the giver's name.");
 
 await db.close();
 console.log("Backend migrations executed successfully in isolated Postgres.");

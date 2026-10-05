@@ -16,7 +16,12 @@ const resumeWindowSeconds = { start: 5, end: 15 };
 export type LessonVideoState =
   | { phase: "loading" }
   | { phase: "ready" }
-  | { phase: "error"; message: string };
+  | { phase: "error"; message: string; code?: string };
+
+const codeOf = (cause: unknown) => {
+  const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : undefined;
+};
 
 /**
  * One player for the lesson on screen.
@@ -28,11 +33,18 @@ export type LessonVideoState =
  */
 export function useLessonVideo({
   lesson,
+  locked = false,
   previewSource,
   playbackLink,
   onProgress
 }: {
   lesson: AcademyLessonView;
+  /**
+   * A paid lesson the rider's plan does not open yet. Nothing is fetched: the
+   * server would refuse the link, and the page offers a pick instead. Opening
+   * it (a pick) loads the video then.
+   */
+  locked?: boolean;
   /** The bundled clip every preview lesson plays. */
   previewSource: number;
   playbackLink: (lessonId: string) => Promise<AcademyPlaybackLink>;
@@ -101,8 +113,9 @@ export function useLessonVideo({
     relinked.current = false;
     resumeAt.current = null;
     setState({ phase: "loading" });
+    if (locked) return () => undefined;
     load(lesson.id, false).catch((cause: unknown) => {
-      if (!cancelled) setState({ phase: "error", message: lessonVideoErrorMessage(cause) });
+      if (!cancelled) setState({ phase: "error", message: lessonVideoErrorMessage(cause), code: codeOf(cause) });
     });
     return () => {
       cancelled = true;
@@ -110,7 +123,7 @@ export function useLessonVideo({
         onProgressRef.current(openedId, position.current, false);
       }
     };
-  }, [attempt, lesson.id, lesson.video, load, player]);
+  }, [attempt, lesson.id, lesson.video, load, locked, player]);
 
   useEffect(() => {
     const statusSubscription = player.addListener("statusChange", ({ status }) => {
@@ -132,7 +145,9 @@ export function useLessonVideo({
         resumeAt.current = position.current > 0 ? position.current : null;
         const lessonId = lessonRef.current.id;
         load(lessonId, true).catch((cause: unknown) => {
-          if (lessonRef.current.id === lessonId) setState({ phase: "error", message: lessonVideoErrorMessage(cause) });
+          if (lessonRef.current.id === lessonId) {
+            setState({ phase: "error", message: lessonVideoErrorMessage(cause), code: codeOf(cause) });
+          }
         });
         return;
       }
