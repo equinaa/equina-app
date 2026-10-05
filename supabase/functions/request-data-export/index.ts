@@ -1,13 +1,29 @@
 import { handleOptions, json, requireMethod, respondToError } from "../_shared/http.ts";
 import { createAdminClient, requireFeature, requireUser } from "../_shared/supabase.ts";
+import { readInBatches } from "../_shared/id-batches.ts";
 
-const selectRows = async (
-  query: PromiseLike<{ data: unknown[] | null; error: { message?: string } | null }>,
-) => {
+type QueryResult<T> = { data: T | null; error: { message?: string } | null };
+
+const selectRows = async (query: PromiseLike<QueryResult<unknown[]>>) => {
   const { data, error } = await query;
   if (error) throw error;
   return data ?? [];
 };
+
+const selectRow = async (query: PromiseLike<QueryResult<unknown>>) => {
+  const { data, error } = await query;
+  if (error) throw error;
+  return data;
+};
+
+// Waits for every section and keeps each result under its own key, in order.
+const gather = async <T extends Record<string, Promise<unknown>>>(sections: T) => {
+  const keys = Object.keys(sections) as (keyof T)[];
+  const results = await Promise.all(keys.map((key) => sections[key]));
+  return Object.fromEntries(keys.map((key, index) => [key, results[index]])) as { [K in keyof T]: Awaited<T[K]> };
+};
+
+const idsOf = (rows: unknown[]) => rows.map((entry) => String((entry as { id: unknown }).id));
 
 Deno.serve(async (request) => {
   const options = handleOptions(request);
@@ -25,44 +41,91 @@ Deno.serve(async (request) => {
     if (exportError || !exportRow) throw exportError ?? new Error("Export request could not be created.");
     exportId = String(exportRow.id);
 
-    const [
-      profile,
-      preferences,
-      notificationPreferences,
+    // The rider's own rows: each table is read by the column that names the
+    // rider, one of its references to auth.users. Every table that references
+    // auth.users is either read here or left out on purpose, with the reason,
+    // in tests/data-export.test.ts.
+    const own = (table: string, rider: string | string[], columns = "*") => {
+      const query = admin.from(table).select(columns);
+      return selectRows(typeof rider === "string"
+        ? query.eq(rider, user.id)
+        : query.or(rider.map((column) => `${column}.eq.${user.id}`).join(",")));
+    };
+    const ownRow = (table: string, rider: string) =>
+      selectRow(admin.from(table).select("*").eq(rider, user.id).maybeSingle());
+    // Rows that belong to the rider's own rows: the records of their horses,
+    // the messages of their conversations, the history of their orders. The
+    // parent ids travel in the URL, so a long list is read in batches.
+    const under = (table: string, parent: string, parentIds: string[]) =>
+      readInBatches(parentIds, (batch) => selectRows(admin.from(table).select("*").in(parent, batch)));
+
+    const horses = own("horses", "owner_id");
+    const horseRecords = horses.then((rows) => under("horse_records", "horse_id", idsOf(rows)));
+    const coachConversations = own("coach_conversations", "user_id");
+    const marketplaceConversations = own("marketplace_conversations", ["buyer_id", "seller_id"]);
+    const listings = own("listings", "seller_id");
+    const orders = own("orders", ["buyer_id", "seller_id"]);
+    const orderDisputes = orders.then((rows) => under("order_disputes", "order_id", idsOf(rows)));
+
+    const sections = await gather({
+      profile: ownRow("profiles", "id"),
+      preferences: ownRow("user_preferences", "user_id"),
+      notificationPreferences: ownRow("notification_preferences", "user_id"),
       horses,
+      horseRecords,
       coachConversations,
+      coachMessages: coachConversations.then((rows) => under("coach_messages", "conversation_id", idsOf(rows))),
       marketplaceConversations,
-      savedListings,
-      deletionRequests,
-    ] = await Promise.all([
-      admin.from("profiles").select("*").eq("id", user.id).maybeSingle(),
-      admin.from("user_preferences").select("*").eq("user_id", user.id).maybeSingle(),
-      admin.from("notification_preferences").select("*").eq("user_id", user.id).maybeSingle(),
-      selectRows(admin.from("horses").select("*").eq("owner_id", user.id)),
-      selectRows(admin.from("coach_conversations").select("*").eq("user_id", user.id)),
-      selectRows(admin.from("marketplace_conversations").select("*").or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)),
-      selectRows(admin.from("saved_listings").select("listing_id,created_at").eq("user_id", user.id)),
-      selectRows(admin.from("account_deletion_requests").select("*").eq("user_id", user.id)),
-    ]);
-    if (profile.error) throw profile.error;
-    if (preferences.error) throw preferences.error;
-    if (notificationPreferences.error) throw notificationPreferences.error;
+      marketplaceMessages: marketplaceConversations.then((rows) =>
+        under("marketplace_messages", "conversation_id", idsOf(rows))
+      ),
+      savedListings: own("saved_listings", "user_id", "listing_id,created_at"),
+      deletionRequests: own("account_deletion_requests", "user_id"),
 
-    const horseIds = horses.map((entry) => String((entry as { id: unknown }).id));
-    const coachConversationIds = coachConversations.map((entry) => String((entry as { id: unknown }).id));
-    const marketplaceConversationIds = marketplaceConversations.map((entry) => String((entry as { id: unknown }).id));
-
-    const [horseRecords, coachMessages, marketplaceMessages] = await Promise.all([
-      horseIds.length
-        ? selectRows(admin.from("horse_records").select("*").in("horse_id", horseIds))
-        : Promise.resolve([]),
-      coachConversationIds.length
-        ? selectRows(admin.from("coach_messages").select("*").in("conversation_id", coachConversationIds))
-        : Promise.resolve([]),
-      marketplaceConversationIds.length
-        ? selectRows(admin.from("marketplace_messages").select("*").in("conversation_id", marketplaceConversationIds))
-        : Promise.resolve([]),
-    ]);
+      horseRecordFiles: horseRecords.then((rows) => under("horse_record_files", "record_id", idsOf(rows))),
+      horseCollaborators: own("horse_collaborators", ["user_id", "invited_by"]),
+      rideEntries: own("ride_entries", "rider_id"),
+      onboardingStarterPack: ownRow("onboarding_starter_packs", "user_id"),
+      academyProgress: own("academy_progress", "user_id"),
+      academyLessonPicks: own("academy_lesson_picks", "user_id"),
+      planSubscriptions: own("plan_subscriptions", "user_id"),
+      coachMessageFeedback: own("coach_message_feedback", "user_id"),
+      coachCreditLots: own("coach_credit_lots", "user_id"),
+      coachCreditLedger: own("coach_credit_ledger", "user_id"),
+      coachUsageEvents: own("coach_usage_events", "user_id"),
+      clubMemberships: own("club_memberships", "user_id"),
+      clubPosts: own("club_posts", "author_id"),
+      clubPostMedia: own("club_post_media", "uploaded_by"),
+      clubComments: own("club_comments", "author_id"),
+      clubReactions: own("club_reactions", "user_id"),
+      contentReports: own("content_reports", "reporter_id"),
+      userBlocks: own("user_blocks", "blocker_id"),
+      sellerAccount: ownRow("seller_accounts", "user_id"),
+      listings,
+      listingPhotos: own("listing_photos", "uploaded_by"),
+      listingShippingRates: listings.then((rows) => under("listing_shipping_rates", "listing_id", idsOf(rows))),
+      checkoutQuotes: own("checkout_quotes", "buyer_id"),
+      orders,
+      orderEvents: orders.then((rows) => under("order_events", "order_id", idsOf(rows))),
+      shipments: orders.then((rows) => under("shipments", "order_id", idsOf(rows))),
+      orderDisputes,
+      disputeEvidence: orderDisputes.then((rows) => under("dispute_evidence", "dispute_id", idsOf(rows))),
+      marketplaceReviews: own("marketplace_reviews", ["reviewer_id", "reviewee_id"]),
+      marketplaceReports: own("marketplace_reports", "reporter_id"),
+      userSanctions: own("user_sanctions", "user_id"),
+      userRoles: own("user_roles", "user_id"),
+      featureFlagOverrides: own("feature_flag_overrides", "user_id"),
+      // The device, without the push token or its hash.
+      pushDevices: own(
+        "push_devices",
+        "user_id",
+        "id,user_id,platform,app_version,last_seen_at,disabled_reason,revoked_at,created_at",
+      ),
+      notifications: own("notification_outbox", "recipient_id"),
+      uploadTickets: own("upload_tickets", "user_id"),
+      exportRequests: own("data_export_requests", "user_id"),
+      auditEvents: own("account_audit_events", "user_id"),
+    });
 
     const exportPayload = {
       format: "equina-account-export",
@@ -73,17 +136,7 @@ Deno.serve(async (request) => {
         email: user.email ?? null,
         createdAt: user.created_at,
       },
-      profile: profile.data,
-      preferences: preferences.data,
-      notificationPreferences: notificationPreferences.data,
-      horses,
-      horseRecords,
-      coachConversations,
-      coachMessages,
-      marketplaceConversations,
-      marketplaceMessages,
-      savedListings,
-      deletionRequests,
+      ...sections,
     };
     const bytes = new TextEncoder().encode(JSON.stringify(exportPayload, null, 2));
     const objectPath = `${user.id}/${exportId}.json`;
