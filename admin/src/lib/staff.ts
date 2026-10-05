@@ -57,9 +57,10 @@ export const requireStaff = async () => {
 };
 
 // Database refusals, in words for staff. Messages raised by the staff
-// functions (P0001, P0002) are already written for people and pass through.
+// functions (P0001, P0002, and 22023 for a value out of range) are already
+// written for people and pass through.
 export const staffMessage = (error: { code?: string; message: string }, fallback: string) => {
-  if (error.code === "P0001" || error.code === "P0002") return error.message;
+  if (error.code === "P0001" || error.code === "P0002" || error.code === "22023") return error.message;
   if (error.code === "42501") return "Your session no longer has staff access. Sign in again.";
   return fallback;
 };

@@ -81,7 +81,10 @@ export function useCoachConversation({
   const [messages, setMessages] = useState<CoachDisplayMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
+  // The code says what the rider can do about it: wait a minute, or see the
+  // plans once this month's credits are spent. Never a retry for either.
+  const [failure, setFailure] = useState({ message: "", code: "" });
+  const setError = (message: string, code = "") => setFailure({ message, code });
   const [historyOpen, setHistoryOpen] = useState(false);
   const messagesRef = useRef<CoachDisplayMessage[]>([]);
   messagesRef.current = messages;
@@ -227,13 +230,20 @@ export function useCoachConversation({
         toDisplay(result.assistantMessage)
       ]));
       return true;
-    } catch {
+    } catch (cause) {
       setMessages((current) => current.map((message) =>
         message.clientNonce === nonce && message.role === "user"
           ? { ...message, status: "failed" }
           : message
       ));
-      setError("Ralf could not answer safely right now. Retry when your connection is stable.");
+      const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+      if (code === "coach_credits_exhausted") {
+        setError("You have used this month's Ralf credits. They come back at the start of your next month.", code);
+      } else if (code === "coach_rate_limited") {
+        setError("Ralf needs a short pause. Send it again in a minute.", code);
+      } else {
+        setError("Ralf could not answer safely right now. Retry when your connection is stable.");
+      }
       return false;
     } finally {
       setSending(false);
@@ -330,7 +340,8 @@ export function useCoachConversation({
     messages,
     loading,
     sending,
-    error,
+    error: failure.message,
+    errorCode: failure.code,
     historyOpen,
     setHistoryOpen,
     loadHistory,

@@ -25,6 +25,10 @@ Deno.serve(async (request) => {
     const { data, error } = await createUserClient(token).rpc("academy_playback_source", { target_lesson: lessonId });
     if (error) {
       if (error.code === "P0002") throw new HttpError(404, "This lesson is not available.", "lesson_not_found");
+      // A paid lesson the rider's plan does not open (202610060001). The app
+      // answers with the rider's picks and the plans, so this is not an error
+      // to show as one.
+      if (error.code === "PT402") throw new HttpError(402, "This lesson is not part of your plan.", "lesson_locked");
       throw error;
     }
     const source = (data as Array<{ provider: string; asset_id: string | null; playback_id: string | null; status: string }> | null)?.[0];

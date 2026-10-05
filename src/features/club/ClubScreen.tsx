@@ -19,7 +19,7 @@ import {
   Trash2,
   UserX
 } from "lucide-react-native";
-import type { ClubCommentWithAuthor, ClubFeedItem, ClubSpace } from "../../backend";
+import type { ClubAccess, ClubCommentWithAuthor, ClubFeedItem, ClubSpace } from "../../backend";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import { clubReportReasons, relativeTime, type ClubReportReason } from "./club-format";
@@ -37,6 +37,9 @@ export type ClubRideShare = {
 
 export function ClubScreen({
   club,
+  access = "post",
+  upgradeName = "Plus",
+  onSeePlans,
   canPost,
   canInteract,
   currentUserId,
@@ -47,6 +50,14 @@ export function ClubScreen({
   onNotice
 }: {
   club: ClubController;
+  /**
+   * What the rider's plan opens (202610060001): nothing, the feed to read, or
+   * all of it. The database applies the same rule to every query.
+   */
+  access?: ClubAccess;
+  /** The plan that opens the Club, named on the locked screen. */
+  upgradeName?: string;
+  onSeePlans?: () => void;
   canPost: boolean;
   canInteract: boolean;
   currentUserId?: string;
@@ -69,6 +80,23 @@ export function ClubScreen({
 
   const spaceName = (spaceId: string) => club.spaces.find((space) => space.id === spaceId)?.name ?? "Club";
   const activeSpace = club.spaces.find((space) => space.id === club.spaceId);
+
+  if (access === "none") {
+    return (
+      <View style={styles.screen}>
+        <View testID="club-locked" style={styles.notice}>
+          <Text style={styles.noticeTitle}>The Club comes with {upgradeName}.</Text>
+          <Text style={styles.noticeBody}>
+            Riders share their rides here, by discipline, and ask questions in Coach Q&A. Your rides and records
+            stay private either way.
+          </Text>
+          {onSeePlans ? (
+            <EquinaButton testID="club-see-plans" label="See plans" variant="secondary" onPress={onSeePlans} style={styles.noticeAction} />
+          ) : null}
+        </View>
+      </View>
+    );
+  }
 
   if (!club.enabled) {
     return (
@@ -111,6 +139,20 @@ export function ClubScreen({
             : <RefreshCw size={18} color={equinaTheme.text.secondary} />}
         </Pressable>
       </View>
+
+      {access === "read" ? (
+        <Pressable
+          testID="club-read-only"
+          accessibilityRole={onSeePlans ? "button" : undefined}
+          disabled={!onSeePlans}
+          onPress={onSeePlans}
+          style={({ pressed }) => [styles.readOnlyNote, pressed && styles.pressed]}
+        >
+          <Text style={styles.noticeBody}>
+            Posting, comments and reactions come with {upgradeName}.{onSeePlans ? " See plans" : ""}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <ScrollView
         horizontal
@@ -798,6 +840,16 @@ const styles = StyleSheet.create({
   noticeBody: {
     ...equinaTheme.typography.meta,
     color: equinaTheme.text.secondary
+  },
+  noticeAction: {
+    alignSelf: "flex-start",
+    marginTop: equinaTheme.spacing.xs
+  },
+  readOnlyNote: {
+    paddingVertical: equinaTheme.spacing.sm,
+    paddingHorizontal: equinaTheme.spacing.compact,
+    borderRadius: equinaTheme.radius.control,
+    backgroundColor: equinaTheme.material.quiet
   },
   card: {
     gap: equinaTheme.spacing.compact,

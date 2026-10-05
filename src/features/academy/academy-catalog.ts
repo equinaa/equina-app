@@ -36,6 +36,8 @@ export type AcademyLessonView = {
   completed: boolean;
   /** The bundled preview clip, or a signed link from academy-playback. */
   video: "preview" | "live";
+  /** Free lessons are open on every plan; a paid one may need a pick. */
+  access: "free" | "paid";
 };
 
 export const academyCredit = "Equina Academy";
@@ -113,7 +115,8 @@ export const liveLessonView = (
     progress: lessonProgressPercent(lesson.durationSeconds, progress),
     positionSeconds: progress?.positionSeconds ?? 0,
     completed: Boolean(progress?.completedAt),
-    video: "live"
+    video: "live",
+    access: lesson.access
   };
 };
 
@@ -186,5 +189,6 @@ export const lessonVideoErrorMessage = (error: unknown) => {
   if (code === networkUnreachable) return "Equina is offline. Reconnect to watch this lesson.";
   if (code === "video_not_ready") return "This lesson is still being prepared. Try again in a few minutes.";
   if (code === "lesson_not_found") return "This lesson is no longer available.";
+  if (code === "lesson_locked") return "This lesson is part of a plan. Choose it as one of your lessons, or see the plans.";
   return "This video could not be loaded. Try again shortly.";
 };

@@ -7,6 +7,7 @@ import { ClubRepository } from "./club-repository";
 import { EdgeClient } from "./edge-client";
 import { MarketplaceRepository } from "./marketplace-repository";
 import { NotificationRepository } from "./notification-repository";
+import { PlanRepository } from "./plan-repository";
 import { RecordsRepository } from "./records-repository";
 import { AcademyRepository } from "./academy-repository";
 import { RideRepository } from "./ride-repository";
@@ -22,6 +23,7 @@ export class EquinaBackend {
   readonly club: ClubRepository;
   readonly marketplace: MarketplaceRepository;
   readonly notifications: NotificationRepository;
+  readonly plans: PlanRepository;
   private readonly edge: EdgeClient;
 
   constructor() {
@@ -35,6 +37,7 @@ export class EquinaBackend {
     this.club = new ClubRepository(client);
     this.marketplace = new MarketplaceRepository(client);
     this.notifications = new NotificationRepository(client);
+    this.plans = new PlanRepository(client);
     this.edge = new EdgeClient(client);
   }
 

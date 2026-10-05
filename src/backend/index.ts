@@ -8,6 +8,7 @@ export * from "./equina-backend";
 export * from "./errors";
 export * from "./marketplace-repository";
 export * from "./notification-repository";
+export * from "./plan-repository";
 export * from "./records-repository";
 export * from "./academy-repository";
 export * from "./ride-repository";

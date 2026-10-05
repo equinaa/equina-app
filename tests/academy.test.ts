@@ -105,6 +105,9 @@ const imageFor = (topic: string) => `image:${topic}`;
   assert.equal(view.image, "image:Dressage");
   assert.deepEqual(view.chapters, [{ time: "4:20", title: "Soft rein connection", seconds: 260 }]);
   assert.equal(view.video, "live");
+  assert.equal(view.access, "free");
+  assert.equal(liveLessonView(lesson({ access: "paid" }), undefined, imageFor).access, "paid",
+    "A lesson's access travels with it, for the plan's lock.");
 
   const credited = liveLessonView(lesson({ coachName: " Ilinca B. ", coachTitle: "Founder" }), undefined, imageFor);
   assert.equal(credited.coach, "Ilinca B.");
@@ -134,6 +137,7 @@ const imageFor = (topic: string) => `image:${topic}`;
   assert.match(lessonVideoErrorMessage(new EquinaBackendError("x", networkUnreachable)), /offline/);
   assert.match(lessonVideoErrorMessage(new EquinaBackendError("x", "video_not_ready")), /still being prepared/);
   assert.match(lessonVideoErrorMessage(new EquinaBackendError("x", "lesson_not_found")), /no longer available/);
+  assert.match(lessonVideoErrorMessage(new EquinaBackendError("x", "lesson_locked")), /part of a plan/);
   assert.match(lessonVideoErrorMessage(new EquinaBackendError("x", "video_host_unavailable")), /could not be loaded/);
 }
 

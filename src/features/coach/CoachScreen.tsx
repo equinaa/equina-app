@@ -60,6 +60,7 @@ export function RalfScreen({
   suggestions,
   focusOptions,
   onBack,
+  onSeePlans,
   onContextChange
 }: {
   mode: AccountMode;
@@ -73,6 +74,8 @@ export function RalfScreen({
   /** The rider's discipline's focuses, the same list as their training profile. */
   focusOptions?: readonly string[];
   onBack: () => void;
+  /** Where a rider out of credits sees what each plan gives. */
+  onSeePlans?: () => void;
   onContextChange: (next: CoachConversationContext) => void;
 }) {
   // A question from elsewhere starts its own conversation rather than landing
@@ -101,6 +104,7 @@ export function RalfScreen({
       onBack={onBack}
       backLabel="Close Ralf"
       dismiss="close"
+      onSeePlans={onSeePlans}
       onContextChange={onContextChange}
     />
   );
@@ -114,6 +118,7 @@ export function CoachScreen({
   onBack,
   backLabel = "Back",
   dismiss = "back",
+  onSeePlans,
   onContextChange
 }: {
   context: CoachConversationContext;
@@ -125,6 +130,7 @@ export function CoachScreen({
   backLabel?: string;
   /** "close" when Ralf sits over a tab rather than inside one. */
   dismiss?: "back" | "close";
+  onSeePlans?: () => void;
   onContextChange: (next: CoachConversationContext) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -223,6 +229,18 @@ export function CoachScreen({
       {controller.error ? (
         <View accessibilityRole="alert" style={styles.errorLine}>
           <Text style={styles.errorText}>{controller.error}</Text>
+          {controller.errorCode === "coach_credits_exhausted" && onSeePlans ? (
+            <Pressable
+              testID="ralf-see-plans"
+              accessibilityRole="button"
+              accessibilityLabel="See plans"
+              hitSlop={8}
+              onPress={onSeePlans}
+              style={({ pressed }) => [styles.errorAction, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.errorActionText}>See plans</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -678,6 +696,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     fontWeight: "400"
+  },
+  errorAction: {
+    alignSelf: "flex-start",
+    minHeight: 32,
+    justifyContent: "center"
+  },
+  errorActionText: {
+    color: equinaTheme.colors.brass,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600"
   },
   scroller: {
     flex: 1

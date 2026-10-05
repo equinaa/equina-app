@@ -6,6 +6,7 @@ export type AccountRoute =
   | "privacy"
   | "security"
   | "blocked"
-  | "help";
+  | "help"
+  | "plan";
 
 export type AccountMode = "connected" | "demo";

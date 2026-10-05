@@ -94,7 +94,7 @@ export function LessonForm(props: Props) {
             <option value="paid">Paid</option>
             <option value="free">Free</option>
           </select>
-          <p id="access-hint" className="hint">Recorded now; every signed-in rider watches both until Plus launches.</p>
+          <p id="access-hint" className="hint">Free: every rider. Paid: Premium, or one of the picks Free and Plus include.</p>
           {error("access")}
         </div>
         <div className="field">
