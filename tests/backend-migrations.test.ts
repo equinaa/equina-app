@@ -177,7 +177,7 @@ const staleOnboarding = await db.query<{ horse_id: string }>(`
 assert.equal(staleOnboarding.rows[0]?.horse_id, horseId);
 const afterStaleOnboarding = await db.query<{ display_name: string; discipline: string; horse_name: string }>(`
   select p.display_name, p.discipline::text as discipline, h.name as horse_name
-  from public.profiles p join public.horses h on h.owner_id = p.id and h.is_primary
+  from public.my_profile() p join public.horses h on h.owner_id = p.id and h.is_primary
   where p.id = $1
 `, [riderA]);
 assert.deepEqual(
@@ -208,10 +208,41 @@ assert.equal(onboardingState.rows[0]?.academy_focus, "Rhythm");
 
 await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 const editableProfile = await db.query<{ id: string }>(
-  "update public.profiles set display_name = display_name, bio = bio where id = $1 returning id",
+  "update public.profiles set display_name = 'Ilinca A', location = 'Stall 4, north barn', bio = 'Rides before work.' where id = $1 returning id",
   [riderA]
 );
 assert.equal(editableProfile.rows[0]?.id, riderA, "Riders must still edit their own profile fields.");
+
+// Riders see each other by name and photo, nothing more (202610050002). Where
+// someone keeps their horse is physical security, and sign-up is open.
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+const otherRiderCard = await db.query<{ id: string; display_name: string; avatar_path: string | null }>(
+  "select id, display_name, avatar_path from public.profiles where id = $1", [riderA]
+);
+assert.deepEqual(otherRiderCard.rows, [{ id: riderA, display_name: "Ilinca A", avatar_path: null }],
+  "Riders see each other's name and photo, as the Club and messages show them.");
+for (const column of ["location", "bio", "discipline", "skill_level", "locale", "onboarding_completed_at", "created_at"]) {
+  await assert.rejects(
+    db.query(`select ${column} from public.profiles where id = $1`, [riderA]),
+    /permission denied/,
+    `Another rider's ${column} must not be readable.`
+  );
+}
+await assert.rejects(db.query("select * from public.profiles"), /permission denied/, "Listing whole profiles must be refused.");
+const ownProfileOnly = await db.query<{ id: string }>("select id from public.my_profile()");
+assert.deepEqual(ownProfileOnly.rows, [{ id: riderB }], "my_profile() answers with the caller's own profile and no one else's.");
+
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+const ownProfile = await db.query<{ location: string; bio: string; discipline: string; skill_level: string }>(
+  "select location, bio, discipline::text as discipline, skill_level::text as skill_level from public.my_profile()"
+);
+assert.deepEqual(ownProfile.rows, [{ location: "Stall 4, north barn", bio: "Rides before work.", discipline: "jumping", skill_level: "intermediate" }],
+  "A rider reads their own whole profile through my_profile().");
+
+await db.exec("reset role; set role anon; select set_config('request.jwt.claim.sub', '', false);");
+await assert.rejects(db.query("select display_name from public.profiles"), /permission denied/, "Signed-out visitors read no profile at all.");
+await assert.rejects(db.query("select * from public.my_profile()"), /permission denied/, "my_profile() needs an account.");
+await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 await assert.rejects(
   db.query("update public.profiles set avatar_path = 'forged/avatar.jpg' where id = $1", [riderA]),
   /permission denied/,

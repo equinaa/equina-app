@@ -100,6 +100,10 @@ state, or guaranteed delivery.
   columns are server-owned.
 - Checkout reservation, payment transitions, upload completion, moderation, and
   cleanup remain server-owned from previous sprints.
+- Riders see each other by name and photo only. Authenticated clients hold SELECT
+  on `profiles(id, display_name, avatar_path)` and nothing else, so another rider's
+  location, bio, discipline and level are unreadable; a rider reads their own full
+  profile through `my_profile()`. Signed-out visitors read no profile (202610050002).
 - Staff powers require a second factor. `private.is_staff()` and the admin feature
   flag policy hold only for a session whose JWT carries `aal: aal2`, so a leaked
   staff password alone opens nothing (202610050001). The admin console uses the
