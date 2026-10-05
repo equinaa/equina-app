@@ -6,6 +6,9 @@ import "./sign-in.test";
 import "./club.test";
 import "./academy.test";
 import "./plans.test";
+import "./revenuecat.test";
 import "./admin.test";
 import "./mux.test";
+// Top-level await inside, so it is imported rather than hoisted.
+await import("./paywall.test");
 await import("./backend-migrations.test");

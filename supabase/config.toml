@@ -79,6 +79,11 @@ verify_jwt = false
 [functions.mux-webhook]
 verify_jwt = false
 
+# RevenueCat sends the Authorization value set on its webhook; the function
+# compares it with REVENUECAT_WEBHOOK_AUTHORIZATION instead of a JWT.
+[functions.revenuecat-webhook]
+verify_jwt = false
+
 [functions.process-order-deadlines]
 verify_jwt = false
 
