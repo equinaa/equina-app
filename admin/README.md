@@ -39,7 +39,8 @@ and the admin section of `tests/backend-migrations.test.ts`).
 A Vercel project of its own, separate from the web app:
 
 1. In Vercel, add a new project from this repository and set **Root Directory**
-   to `admin`. Vercel detects Next.js.
+   to `admin`. `admin/vercel.json` pins the build: without it Vercel applies the
+   app's `vercel.json` at the repository root (a static export to `dist`).
 2. Add the two variables from `.env.example` for Production and Preview.
 3. Point `admin.equina.ai` at it once the domain's DNS is set up.
 
