@@ -51,7 +51,7 @@ const functionNames = [
   "process-storage-cleanup", "process-content-moderation", "moderate-report", "lift-sanction"
   , "coach-chat", "request-data-export", "schedule-account-deletion", "cancel-account-deletion",
   "process-account-deletions", "process-data-export-cleanup", "register-push-device",
-  "revoke-push-device", "process-notification-outbox", "academy-playback"
+  "revoke-push-device", "process-notification-outbox", "academy-playback", "academy-video", "mux-webhook"
 ];
 for (const name of functionNames) {
   assert.ok(existsSync(join(root, "supabase", "functions", name, "index.ts")), `${name} Edge Function must exist.`);
@@ -63,6 +63,15 @@ const mobileSource = readdirSync(join(root, "src", "backend"))
   .join("\n");
 assert.doesNotMatch(mobileSource, /SUPABASE_SERVICE_ROLE_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET/);
 assert.doesNotMatch(mobileSource, /EQUINA_AI_API_KEY|ACCOUNT_AUTOMATION_SECRET|NOTIFICATION_AUTOMATION_SECRET|BUNNY_STREAM_TOKEN_KEY/);
+assert.doesNotMatch(mobileSource, /MUX_TOKEN_SECRET|MUX_SIGNING_KEY_PRIVATE|MUX_WEBHOOK_SECRET/);
+
+// Staff powers need a second factor in edge functions too: requireStaff reads
+// it from the session token, so every call must hand the token over.
+for (const name of readdirSync(join(root, "supabase", "functions")).filter((entry) => !entry.startsWith("_") && entry !== "node_modules")) {
+  const path = join(root, "supabase", "functions", name, "index.ts");
+  if (!existsSync(path)) continue;
+  assert.doesNotMatch(readFileSync(path, "utf8"), /requireStaff\(\s*[^,)]+\)/, `${name} must pass the session token to requireStaff.`);
+}
 
 const secureStorageSource = readFileSync(join(root, "src", "backend", "secure-session-storage.ts"), "utf8");
 assert.match(secureStorageSource, /expo-secure-store/);
@@ -162,6 +171,11 @@ assert.doesNotMatch(socialAuthSource, /console\.(log|error)/);
 // access after the accounts link.
 const authConfig = readFileSync(join(root, "supabase", "config.toml"), "utf8");
 const envExample = readFileSync(join(root, ".env.example"), "utf8");
+// Mux calls its webhook without a Supabase session; the function checks
+// Mux's signature instead, and must exist to be opened up like this.
+assert.match(authConfig, /\[functions\.mux-webhook\]\s*verify_jwt = false/, "mux-webhook verifies Mux's signature, not a JWT.");
+assert.match(readFileSync(join(root, "supabase", "functions", "mux-webhook", "index.ts"), "utf8"), /verifyMuxSignature/,
+  "mux-webhook must check the Mux signature before reading the event.");
 if (/^enable_confirmations\s*=\s*false/m.test(authConfig)) {
   assert.match(envExample, /^EXPO_PUBLIC_ENABLE_APPLE_AUTH=false$/m,
     "Apple sign-in must stay off while email confirmations are off.");

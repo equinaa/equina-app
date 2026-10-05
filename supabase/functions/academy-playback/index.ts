@@ -27,13 +27,16 @@ Deno.serve(async (request) => {
       if (error.code === "P0002") throw new HttpError(404, "This lesson is not available.", "lesson_not_found");
       throw error;
     }
-    const source = (data as Array<{ provider: string; asset_id: string; status: string }> | null)?.[0];
+    const source = (data as Array<{ provider: string; asset_id: string | null; playback_id: string | null; status: string }> | null)?.[0];
     if (!source || source.status !== "ready") {
       throw new HttpError(409, "This lesson's video is still being prepared.", "video_not_ready");
     }
 
     const expiresAt = Math.floor(Date.now() / 1000) + linkLifetimeSeconds;
-    const url = await playbackUrlFor(source.provider, source.asset_id, expiresAt);
+    const url = await playbackUrlFor(
+      { provider: source.provider, assetId: source.asset_id, playbackId: source.playback_id },
+      expiresAt
+    );
     return json({ url, expiresAt: new Date(expiresAt * 1000).toISOString() });
   } catch (error) {
     return respondToError(error);

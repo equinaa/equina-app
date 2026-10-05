@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { edgeMessage } from "@/lib/edge";
 import { readChapters, readLessonForm, slugFor, type FieldErrors } from "@/lib/lessons";
 import { requireStaff, staffMessage } from "@/lib/staff";
 
@@ -54,7 +55,13 @@ export async function updateLesson(_previous: LessonFormState, formData: FormDat
   const { fields, errors } = readLessonForm((name) => values[name] ?? "");
   if (!fields) return { errors, formError: "Check the highlighted fields.", saved: false, values };
 
-  const { data, error } = await supabase.from("academy_lessons").update(fields).eq("id", lessonId).select("id");
+  // Once the video is ready, the lesson is as long as the video says
+  // (mux-webhook sets it), and a stale form must not overwrite that.
+  const { data: video } = await supabase.from("academy_videos").select("status").eq("lesson_id", lessonId).maybeSingle();
+  const { duration_seconds: typedLength, ...otherFields } = fields;
+  const changes = video?.status === "ready" ? otherFields : { ...otherFields, duration_seconds: typedLength };
+
+  const { data, error } = await supabase.from("academy_lessons").update(changes).eq("id", lessonId).select("id");
   if (error) return { errors: {}, formError: staffMessage(error, "The lesson could not be saved. Try again."), saved: false, values };
   if (!data?.length) return { errors: {}, formError: "This lesson no longer exists.", saved: false, values };
 
@@ -100,6 +107,13 @@ export async function setPublished(_previous: PublishState, formData: FormData):
 export async function deleteDraft(_previous: PublishState, formData: FormData): Promise<PublishState> {
   const { supabase } = await requireStaff();
   const lessonId = String(formData.get("lessonId") ?? "");
+  // The video goes first: deleting the lesson would drop its row, and the
+  // video would stay at Mux holding one of the free plan's slots.
+  const { data: video } = await supabase.from("academy_videos").select("status").eq("lesson_id", lessonId).maybeSingle();
+  if (video) {
+    const { error: removeError } = await supabase.functions.invoke("academy-video", { body: { action: "remove", lessonId } });
+    if (removeError) return { error: await edgeMessage(removeError, "The lesson's video could not be removed. Try again.") };
+  }
   // Only drafts can go (202610050001): riders may have progress on a lesson
   // that was ever published, and it would go with it.
   const { data, error } = await supabase.from("academy_lessons").delete().eq("id", lessonId).is("published_at", null).select("id");

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   formatClock,
@@ -117,6 +117,7 @@ assert.match(
 
 assert.deepEqual(publishBlockers(870, "ready"), [], "A lesson with a length and a ready video can be published.");
 assert.deepEqual(publishBlockers(null, null), ["Add the lesson's length.", "Upload the video."]);
+assert.deepEqual(publishBlockers(870, "uploading"), ["Finish uploading the video."]);
 assert.deepEqual(publishBlockers(870, "processing"), ["Wait for the video to finish processing."]);
 assert.deepEqual(publishBlockers(870, "failed"), ["The video failed to process. Upload it again."]);
 
@@ -188,6 +189,16 @@ for (const { path, source } of files) {
     assert.ok(
       new RegExp(`create or replace function public\\.${name}\\(`).test(migrations),
       `${path} calls ${name}, which no migration creates.`
+    );
+  }
+}
+
+// And every edge function it calls exists, under the name it uses.
+for (const { path, source } of files) {
+  for (const [, name] of source.matchAll(/\.functions\.invoke(?:<[^>]*>)?\("([\w-]+)"/g)) {
+    assert.ok(
+      existsSync(join(process.cwd(), "supabase", "functions", name ?? "", "index.ts")),
+      `${path} calls the edge function ${name}, which does not exist.`
     );
   }
 }

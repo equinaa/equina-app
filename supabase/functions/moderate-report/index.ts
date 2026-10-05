@@ -10,8 +10,8 @@ Deno.serve(async (request) => {
   if (options) return options;
   try {
     requireMethod(request, "POST");
-    const { user } = await requireUser(request);
-    await requireStaff(user.id);
+    const { user, token } = await requireUser(request);
+    await requireStaff(user.id, token);
     const input = await readJson<RequestBody>(request);
     if (!["club", "marketplace"].includes(input.domain) || !["dismiss", "hide", "warn", "suspend"].includes(input.action)) {
       throw new HttpError(400, "Report domain and action are required.", "invalid_moderation_action");

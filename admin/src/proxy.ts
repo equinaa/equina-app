@@ -17,7 +17,8 @@ export async function proxy(request: NextRequest) {
     // The authenticator QR code arrives as a data: URI.
     "img-src 'self' data:",
     "font-src 'self'",
-    "connect-src 'self'",
+    // Lesson videos go from the browser straight to Mux's upload storage.
+    `connect-src 'self' https://storage.googleapis.com${development ? " http://localhost:*" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

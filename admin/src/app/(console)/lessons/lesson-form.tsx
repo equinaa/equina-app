@@ -6,7 +6,7 @@ import { createLesson, updateLesson, type LessonFormState } from "./actions";
 
 type Props =
   | { mode: "create"; values: Record<string, string> }
-  | { mode: "edit"; lessonId: string; values: Record<string, string> };
+  | { mode: "edit"; lessonId: string; values: Record<string, string>; videoLength?: string | null };
 
 export function LessonForm(props: Props) {
   const [state, action, pending] = useActionState<LessonFormState, FormData>(
@@ -19,6 +19,10 @@ export function LessonForm(props: Props) {
     [state.errors[name] ? `${name}-error` : null, hint ? `${name}-hint` : null].filter(Boolean).join(" ") || undefined;
   const error = (name: LessonFieldName) =>
     state.errors[name] ? <p id={`${name}-error`} className="field-error">{state.errors[name]}</p> : null;
+  // Once the video is ready its length is the lesson's, set by Mux. It is read
+  // from the page rather than the form's state, so it shows up as soon as the
+  // page refreshes, without resetting what staff are typing elsewhere.
+  const videoLength = props.mode === "edit" ? props.videoLength ?? null : null;
 
   return (
     <form action={action} className="form" noValidate>
@@ -71,9 +75,16 @@ export function LessonForm(props: Props) {
       <div className="field-row">
         <div className="field">
           <label className="label" htmlFor="duration">Length</label>
-          <input id="duration" name="duration" className="input" defaultValue={value("duration")} placeholder="14:30"
-            inputMode="numeric" aria-invalid={invalid("duration")} aria-describedby={describedBy("duration", true)} />
-          <p id="duration-hint" className="hint">Minutes and seconds. Needed to publish.</p>
+          {videoLength !== null ? (
+            <input key="video-length" id="duration" name="duration" className="input" value={videoLength} readOnly
+              aria-describedby="duration-hint" />
+          ) : (
+            <input key="typed-length" id="duration" name="duration" className="input" defaultValue={value("duration")} placeholder="14:30"
+              inputMode="numeric" aria-invalid={invalid("duration")} aria-describedby={describedBy("duration", true)} />
+          )}
+          <p id="duration-hint" className="hint">
+            {videoLength !== null ? "Taken from the video." : "Minutes and seconds. Filled in from the video once it is ready."}
+          </p>
           {error("duration")}
         </div>
         <div className="field">

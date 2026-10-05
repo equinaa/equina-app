@@ -12,8 +12,8 @@ Deno.serve(async (request) => {
 
   try {
     requireMethod(request, "POST");
-    const { user } = await requireUser(request);
-    await requireStaff(user.id);
+    const { user, token } = await requireUser(request);
+    await requireStaff(user.id, token);
     const input = await readJson<ResolveRequest>(request);
     if (!["release", "partial_refund", "return_refund", "full_refund", "dismissed"].includes(input.resolution)) {
       throw new HttpError(400, "A valid dispute resolution is required.", "invalid_resolution");

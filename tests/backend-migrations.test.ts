@@ -1301,13 +1301,79 @@ await db.exec("reset role;");
 assert.equal((await db.query("select id from public.academy_lessons where id = $1", [adminLessonId])).rows.length, 0,
   "A draft can be deleted.");
 
+// --- Lesson videos on Mux -----------------------------------------------------
+
+// Staff upload from the admin straight to Mux. The row follows the upload:
+// uploading, processing once Mux has the file, ready with a playback id.
+const muxLesson = (await db.query<{ id: string }>(`
+  insert into public.academy_lessons(slug, title, summary, category, access)
+  values ('canter-transitions', 'Canter transitions without the rush', 'Prepare, ask, and let it happen.', 'Dressage', 'free')
+  returning id
+`)).rows[0]?.id as string;
+await db.query("insert into public.academy_videos(lesson_id, provider, upload_id, status) values ($1, 'mux', 'upload1', 'uploading')", [muxLesson]);
+
+const videoRefusals: Array<[string, unknown[], string]> = [
+  ["update public.academy_videos set status = 'ready' where lesson_id = $1", [muxLesson], "A Mux video is not ready without a playback id."],
+  ["update public.academy_videos set upload_id = null where lesson_id = $1", [muxLesson], "A video row must name its upload or its asset."],
+  ["update public.academy_videos set playback_id = 'abc/../x' where lesson_id = $1", [muxLesson], "A playback id is spliced into URLs; its shape is a constraint."],
+  ["update public.academy_videos set status = 'queued' where lesson_id = $1", [muxLesson], "Only the known statuses exist."],
+  ["update public.academy_videos set provider = 'vimeo' where lesson_id = $1", [muxLesson], "Only hosts that links can be signed for."]
+];
+for (const [statement, values, message] of videoRefusals) {
+  await assert.rejects(db.query(statement, values), /check constraint/, message);
+}
+
+// Opening an upload or removing a video asks the database first.
+await asStaff("aal2");
+await db.query("select public.staff_prepare_lesson_video($1)", [muxLesson]);
+await assert.rejects(
+  db.query("select public.staff_prepare_lesson_video($1)", ["20000000-0000-4000-8000-0000000000fe"]),
+  /Lesson not found/
+);
+await asStaff("aal1");
+await assert.rejects(
+  db.query("select public.staff_prepare_lesson_video($1)", [muxLesson]),
+  /Staff access required/,
+  "A staff password alone must not open an upload."
+);
+await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+await secondFactor("");
+await assert.rejects(db.query("select public.staff_prepare_lesson_video($1)", [muxLesson]), /Staff access required/,
+  "Riders must not open uploads.");
+
+// Ready, the playback id is what links are signed for.
+await db.exec(`
+  reset role;
+  update public.academy_videos set asset_id = 'asset1', playback_id = 'signed1', status = 'ready' where lesson_id = '${muxLesson}';
+  update public.academy_lessons set duration_seconds = 866 where id = '${muxLesson}';
+`);
+await asStaff("aal2");
+await db.query("select public.staff_set_lesson_published($1, true)", [muxLesson]);
+await assert.rejects(
+  db.query("select public.staff_prepare_lesson_video($1)", [muxLesson]),
+  /Unpublish the lesson before changing its video/,
+  "A published lesson keeps its video: riders could not play it while a new one encodes."
+);
+await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+await secondFactor("");
+const muxSource = await db.query("select provider, asset_id, playback_id, status from public.academy_playback_source($1)", [muxLesson]);
+assert.deepEqual(muxSource.rows, [{ provider: "mux", asset_id: "asset1", playback_id: "signed1", status: "ready" }],
+  "A rider's playback source names the playback id to sign.");
+assert.deepEqual((await db.query("select lesson_id from public.academy_videos")).rows, [],
+  "Riders still never read a video's ids.");
+await asStaff("aal2");
+await db.query("select public.staff_set_lesson_published($1, false)", [muxLesson]);
+await db.query("delete from public.academy_lessons where id = $1", [muxLesson]);
+await db.exec("reset role;");
+
 // Signed-out visitors cannot reach any staff function.
 await db.exec("set role anon; select set_config('request.jwt.claim.sub', '', false);");
 for (const call of [
   "select public.staff_set_lesson_published(gen_random_uuid(), true)",
   "select public.staff_save_lesson_chapters(gen_random_uuid(), '[]'::jsonb)",
   "select * from public.staff_moderation_queue()",
-  "select public.staff_moderate_content('post', gen_random_uuid(), 'remove')"
+  "select public.staff_moderate_content('post', gen_random_uuid(), 'remove')",
+  "select public.staff_prepare_lesson_video(gen_random_uuid())"
 ]) {
   await assert.rejects(db.query(call), /permission denied/, `anon must not call: ${call}`);
 }

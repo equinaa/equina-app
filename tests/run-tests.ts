@@ -6,4 +6,5 @@ import "./sign-in.test";
 import "./club.test";
 import "./academy.test";
 import "./admin.test";
+import "./mux.test";
 await import("./backend-migrations.test");

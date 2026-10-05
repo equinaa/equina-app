@@ -115,15 +115,27 @@ gated. Sprint 4 does not activate or redesign those journeys.
      MALWARE_SCAN_REQUIRED=true \
      CONTENT_MODERATION_URL=https://YOUR_MODERATION_ADAPTER/review \
      CONTENT_MODERATION_TOKEN=REPLACE \
-     BUNNY_STREAM_CDN_HOSTNAME=vz-YOUR_LIBRARY.b-cdn.net \
-     BUNNY_STREAM_TOKEN_KEY=REPLACE
+     MUX_TOKEN_ID=REPLACE \
+     MUX_TOKEN_SECRET=REPLACE \
+     MUX_SIGNING_KEY_ID=REPLACE \
+     MUX_SIGNING_KEY_PRIVATE=REPLACE \
+     MUX_WEBHOOK_SECRET=REPLACE
    ```
 
-   Academy videos are played only through links that `academy-playback` signs
-   with `BUNNY_STREAM_TOKEN_KEY`. Turn on token authentication for the Bunny
-   Stream library's CDN before any lesson is published: with it off, a video
-   id alone would play. Without the two secrets the function answers 503 and
-   the app says lesson videos are unavailable.
+   Academy videos live at Mux. Staff upload from the admin: `academy-video`
+   opens a direct upload once the database confirms a staff session with a
+   second factor and a draft lesson, and the browser sends the file straight
+   to Mux. Mux's signed webhook (`mux-webhook`, the only function besides
+   `stripe-webhook` that takes no JWT) marks the video ready and sets the
+   lesson's length. Riders play only through links `academy-playback` signs
+   with the Mux signing key; every asset is created with signed playback.
+   Create the access token (Mux Video read + write), the signing key and the
+   webhook (`https://<project>.supabase.co/functions/v1/mux-webhook`) in the
+   same Mux environment. Without the secrets the functions answer 503 and the
+   admin and app say videos are not available. Replaced, removed and orphaned
+   videos are deleted at Mux, which keeps the free plan's ten slots free.
+   Bunny Stream remains signable (`BUNNY_STREAM_CDN_HOSTNAME`,
+   `BUNNY_STREAM_TOKEN_KEY`) but holds no video.
 
 4. Configure `TAX_QUOTE_URL` and `TAX_QUOTE_TOKEN` before any business-seller
    checkout rollout.
