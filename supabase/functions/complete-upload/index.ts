@@ -1,4 +1,5 @@
 import { HttpError, handleOptions, json, readJson, requestIdFor, requireMethod, respondToError } from "../_shared/http.ts";
+import { stripJpegMetadata } from "../_shared/image-metadata.ts";
 import { inspectUploadForMalware } from "../_shared/media-safety.ts";
 import { queueStorageCleanup } from "../_shared/storage-cleanup.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
@@ -166,10 +167,26 @@ Deno.serve(async (request) => {
       });
       if (insertError) await rejectRegistration(insertError);
     } else if (ticket.kind === "club_post") {
+      // A Club photo reaches readers without where, when or on what it was
+      // taken (docs/EQUINA_MEDIA_PROCESSING_BOUNDARY.md). The cleaned file
+      // replaces the upload before the media row exists, so no reader can be
+      // given a link to the original.
+      const { data: uploadedPhoto, error: photoError } = await admin.storage.from(ticket.bucket_id).download(ticket.object_path);
+      if (photoError || !uploadedPhoto) return await rejectRegistration(photoError ?? new Error("Uploaded photo could not be read."));
+      let cleaned: Uint8Array;
+      try {
+        cleaned = stripJpegMetadata(new Uint8Array(await uploadedPhoto.arrayBuffer())).bytes;
+      } catch {
+        return await rejectRegistration(new HttpError(422, "The photo could not be read.", "invalid_photo"));
+      }
+      if (cleaned.byteLength !== ticket.byte_size) {
+        const { error: replaceError } = await admin.storage.from(ticket.bucket_id)
+          .upload(ticket.object_path, cleaned, { contentType: "image/jpeg", upsert: true });
+        if (replaceError) return await rejectRegistration(replaceError);
+      }
       const { error: insertError } = await admin.from("club_post_media").insert({
         post_id: ticket.entity_id, uploaded_by: user.id, object_path: ticket.object_path,
-        media_type: ticket.mime_type.startsWith("video/") ? "video" : "image",
-        mime_type: ticket.mime_type, byte_size: ticket.byte_size, position: input.position ?? 0,
+        media_type: "image", mime_type: "image/jpeg", byte_size: cleaned.byteLength, position: input.position ?? 0,
       });
       if (insertError) await rejectRegistration(insertError);
     } else if (ticket.kind === "listing_photo") {

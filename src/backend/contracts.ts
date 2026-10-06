@@ -223,6 +223,29 @@ export type ClubFeedItem = {
   myReaction?: "like" | "support" | "insightful";
 };
 
+/** What a rider is told about in the Club (202610060004). */
+export type ClubActivityKind = "comment" | "reply" | "like";
+export type ClubActivityItem = {
+  id: string;
+  kind: ClubActivityKind;
+  postId: string;
+  commentId?: string;
+  createdAt: string;
+  read: boolean;
+  actor: { id: string; displayName: string; avatarUrl?: string };
+  /** The comment written, or the start of the post that was liked. */
+  excerpt?: string;
+};
+
+/** Another rider as the Club shows them: a name, a photo, their groups and posts. */
+export type ClubRiderProfile = {
+  id: string;
+  displayName: string;
+  avatarUrl?: string;
+  spaceIds: string[];
+  posts: ClubFeedItem[];
+};
+
 export type ListingRecord = {
   id: string;
   sellerId: string;
