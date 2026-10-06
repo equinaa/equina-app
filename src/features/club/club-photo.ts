@@ -1,4 +1,3 @@
-import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import type { UploadAsset } from "../../backend";
 import { clubPhotoResize } from "./club-groups";
 
@@ -13,13 +12,22 @@ const readSize = async (uri: string) => {
  * leaves the original's EXIF behind -- where and when it was taken, and on
  * which phone -- and complete-upload strips whatever a client still sends.
  * Works the same on iOS, Android and the web (canvas).
+ *
+ * The manipulator is native code, loaded only when a photo is prepared: a
+ * build without it then says so here instead of failing as the app opens.
  */
 export async function prepareClubPhoto(source: { uri: string; width?: number; height?: number }): Promise<UploadAsset> {
-  const context = ImageManipulator.manipulate(source.uri);
+  let manipulator: typeof import("expo-image-manipulator");
+  try {
+    manipulator = await import("expo-image-manipulator");
+  } catch {
+    throw new Error("Photos need the latest version of the app.");
+  }
+  const context = manipulator.ImageManipulator.manipulate(source.uri);
   const resize = clubPhotoResize(source.width, source.height);
   if (resize) context.resize(resize);
   const image = await context.renderAsync();
-  const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.85 });
+  const saved = await image.saveAsync({ format: manipulator.SaveFormat.JPEG, compress: 0.85 });
   return {
     uri: saved.uri,
     fileName: `club-${Date.now()}.jpg`,
