@@ -33,6 +33,93 @@ their effect rather than the flag.
 | `coach_credits` | off | Meters Ralf by the rider's monthly allowance | paywall copy and a store webhook that grants credits |
 | `academy_progress` | off | Saves where a rider stopped in a lesson | real lessons to make progress through |
 | `plans` | off | Applies each plan's limits: Academy picks and Club access (`docs/EQUINA_PLANS.md`) | riders can subscribe in the app; per-account overrides first, to try the Free experience |
+| `public_access` | off | Opens Equina to everyone, past the beta door (below) | the launch; Admin → Beta |
+
+## The Beta Door
+
+Three layers, each answering one question:
+
+1. **Feature flags:** is this feature ready to be live? Readiness, and the emergency off
+   switch. Everything above.
+2. **The beta door:** who is in the beta? An invite list by email (`public.beta_invites`),
+   kept from Admin → Beta, and one flag, `public_access`, that opens Equina to everyone.
+3. **Plans:** what does this rider get? `docs/EQUINA_PLANS.md`.
+
+Before the door, every global flag stayed off at 0% and each tester was let in by five to
+ten rows in `feature_flag_overrides`. Now the flags can be on globally for the beta, because
+the door is enforced where every flag already is, in `private.feature_enabled`
+(`202610060003_beta_access.sql`):
+
+1. A live per-person override wins, as before, in both directions. Testers let in by
+   overrides keep every flag they have. Giving or clearing an override is now an admin
+   power with the second factor (`set_feature_flag_override`), like an invite: it lets an
+   account past the door for that feature.
+2. Otherwise an account without app access gets `false` for every key except
+   `public_access` itself and `account_settings`.
+3. Otherwise the global row and its rollout bucket, as before.
+
+An account has app access (`private.has_app_access`) when an invite that was not revoked
+matches its email, case-insensitively, **and** the account has confirmed that email. Or
+when `public_access` is on for it: its global rollout at launch, or a per-person override
+that lets one account in without an invite.
+
+The confirmation proves the address is the rider's only while Supabase Auth asks for it.
+The hosted project asks for it: Auth's public settings report `mailer_autoconfirm: false`
+(checked 2026-10-05), and email is the only sign-in method, so inviting an address before
+its owner signs up is safe. Keep it that way. The local stack in `supabase/config.toml` has
+confirmations off for development, and a project configured like that confirms every
+address at sign-up and applies an email change at once: whoever signs up first with an
+invited address that has no account yet would get in. Admin → Beta reads Auth's settings
+and warns if confirmations are ever off; until they are back on, invite only riders whose
+account already exists and check the sign-up date shown next to them.
+
+`account_settings` is exempt so every account holder can export and delete their own data
+while waiting outside. Content that was never behind a flag is closed separately: the
+Academy's playback and picks (`PT403`, which `academy-playback` answers with 403
+`beta_only`), the Club's posts, comments, reactions, media, spaces and memberships, other
+riders' profiles and avatars. A rider's own basics stay reachable.
+
+The app reads the door as `capabilities.appAccess` (from `my_access()`). A signed-in account
+without it sees the beta door screen instead of onboarding and the app: the account is
+saved, it can check again, sign out or schedule its deletion. Equina emails nobody about an
+invite, and the screen does not say it will. Capabilities are read again when the app
+returns to the foreground, at most once a minute.
+
+**Inviting someone.** Admin → Beta → Invite a rider: the email they sign up with and an
+optional staff note. They are inside as soon as their account exists with that email
+confirmed. Tell them yourself. Revoke puts them back outside (the account stays); Invite
+again clears the revoke. Sign in with Apple can hide the address behind a relay, which then
+needs its own invite.
+
+**Moving the testers in.** Testers let in by overrides before the door need an invite too.
+Their overrides keep every flag they have, but what was never behind a flag follows the
+door alone: from the moment the migration lands, an override-only tester gets 403
+`beta_only` from Academy playback and picks, an empty Club, and no other rider's profile
+or avatar, and the new app shows them the door. The invite list only exists once the
+migration has run, so invite them right after it, in the same session, before anything
+else.
+The emails come from the data, never from the repository:
+
+```sql
+insert into public.beta_invites (email, note)
+select distinct lower(trim(u.email)), 'Tester before the beta door'
+from auth.users u
+join public.feature_flag_overrides o on o.user_id = u.id
+where o.enabled
+  and (o.expires_at is null or o.expires_at > now())
+  and u.email is not null
+  and u.deleted_at is null
+on conflict (email) do nothing;
+```
+
+Then read the list in Admin → Beta and revoke anyone who should not be in the beta.
+`scripts/grant-tester.sh` still grants its five overrides by hand, and now invites the
+account's email as well.
+
+**Opening at launch.** Admin → Beta → Open at launch, after ticking "I understand everyone
+who signs up gets in". This sets `public_access` on at 100%. Closing it again is the same
+control in reverse. A gradual opening is the flag's rollout percent, set on the flag itself;
+the admin shows it.
 
 ## Rules
 
@@ -52,6 +139,9 @@ their effect rather than the flag.
     are absent, even if a database rollout row is enabled.
 
 ## Sprint 4 Activation Order
+
+Since the beta door, these steps turn flags on globally for the beta rather than per
+person; only invited accounts feel them until `public_access` opens.
 
 1. Enable `account_settings` remotely for internal users only after the account
    deletion worker and export cleanup schedule are running.

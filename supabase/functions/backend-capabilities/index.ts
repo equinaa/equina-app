@@ -1,5 +1,5 @@
 import { HttpError, handleOptions, json, requestIdFor, respondToError, requireMethod } from "../_shared/http.ts";
-import { featureFlagsForSession, requireUser } from "../_shared/supabase.ts";
+import { appAccessForSession, featureFlagsForSession, requireUser } from "../_shared/supabase.ts";
 
 Deno.serve(async (request) => {
   const requestId = requestIdFor(request);
@@ -9,9 +9,12 @@ Deno.serve(async (request) => {
   try {
     requireMethod(request, "GET");
     let flags: Record<string, boolean> = {};
+    // The beta door stands in front of a signed-in account only; with no
+    // session there is nothing to keep out yet (202610060003).
+    let appAccess = true;
     try {
       const { token } = await requireUser(request);
-      flags = await featureFlagsForSession(token);
+      [flags, appAccess] = await Promise.all([featureFlagsForSession(token), appAccessForSession(token)]);
     } catch (error) {
       if (!(error instanceof HttpError) || error.status !== 401) throw error;
     }
@@ -54,6 +57,9 @@ Deno.serve(async (request) => {
       version: "2026-09-09",
       capabilities: {
         auth: true,
+        // Outside the beta every feature but account settings is already off
+        // in the database; this tells the app to show the door instead.
+        appAccess,
         accountSettings: Boolean(flags.account_settings && accountOperationsConfigured),
         coachChat: Boolean(flags.coach_chat && coachConfigured),
         pushNotifications: Boolean(flags.push_notifications && pushConfigured),
@@ -71,7 +77,8 @@ Deno.serve(async (request) => {
         checkout: Boolean(flags.shop_transactions && paymentsConfigured),
         // Plans are sold only once they are enforced: while `plans` is off,
         // every rider already has everything, and nobody should pay for it.
-        purchases: Boolean(flags.plans && purchasesConfigured),
+        // Nor should anyone still outside the beta, who can use none of it.
+        purchases: Boolean(appAccess && flags.plans && purchasesConfigured),
       },
     }, 200, { "x-request-id": requestId });
   } catch (error) {

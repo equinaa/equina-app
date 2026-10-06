@@ -84,7 +84,8 @@ export function usePurchases({
       apiKey,
       privacyPolicyUrl: legalLinks().privacyPolicyUrl,
       capability,
-      enforced: plan.enforced
+      enforced: plan.enforced,
+      access: plan.access
     });
 
   const [status, setStatus] = useState<PurchasesStatus>("idle");

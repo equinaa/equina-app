@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { Linking, Platform } from "react-native";
+import { AppState, Linking, Platform } from "react-native";
 import {
   getEquinaBackend,
   isBackendConfigured,
@@ -10,7 +10,6 @@ import {
   type ProfileRecord
 } from "../../backend";
 import type { Discipline } from "../../domain/types";
-import { equinaFeatureFlags } from "../../config/feature-flags";
 import {
   authRedirectUri,
   emailAuthMode,
@@ -22,6 +21,7 @@ import {
   passwordRecoveryRedirectUri,
   type SocialAuthProvider
 } from "./social-auth";
+import { capabilitiesStale, effectiveCapabilities, emptyCapabilities } from "./session-capabilities";
 
 /** Why the rider is looking at the sign-in screen, when they did not choose to. */
 export type SignedOutNotice = "expired" | "linkFailed";
@@ -33,38 +33,6 @@ export type SessionPhase =
   | "authenticated"
   | "recoverableError"
   | "demo";
-
-const emptyCapabilities: BackendCapabilities = {
-  auth: false,
-  accountSettings: false,
-  coachChat: false,
-  pushNotifications: false,
-  records: false,
-  horseManagement: false,
-  rideLogging: false,
-  clubPublishing: false,
-  clubInteractions: false,
-  listingCreation: false,
-  messaging: false,
-  checkout: false,
-  purchases: false
-};
-
-const effectiveCapabilities = (server: BackendCapabilities): BackendCapabilities => ({
-  ...server,
-  accountSettings: server.accountSettings && equinaFeatureFlags.accountSettings,
-  coachChat: server.coachChat && equinaFeatureFlags.coachChat,
-  pushNotifications: server.pushNotifications && equinaFeatureFlags.pushNotifications,
-  records: server.records && equinaFeatureFlags.recordMutations,
-  horseManagement: server.horseManagement && equinaFeatureFlags.horseManagement,
-  rideLogging: server.rideLogging && equinaFeatureFlags.rideLogging,
-  clubPublishing: server.clubPublishing && equinaFeatureFlags.clubPublishing,
-  clubInteractions: server.clubInteractions && equinaFeatureFlags.clubInteractions,
-  listingCreation: server.listingCreation && equinaFeatureFlags.shopListingCreation,
-  messaging: server.messaging && equinaFeatureFlags.shopMessaging,
-  // A server from before purchases existed sends no such field: off.
-  purchases: server.purchases === true
-});
 
 // The URL the app was opened with, if any. On the web that is the page itself.
 const initialAuthUrl = async () =>
@@ -100,6 +68,16 @@ export function useEquinaSession() {
   // worse, overwrite the session the link just created.
   const emailLinkInFlight = useRef(false);
   const initialLinkChecked = useRef(false);
+  // When the server last said what this session may do. Coming back to the
+  // app asks again once it is old enough.
+  const capabilitiesLoadedAt = useRef(0);
+
+  const applyCapabilities = useCallback((server: BackendCapabilities) => {
+    const next = effectiveCapabilities(server);
+    capabilitiesLoadedAt.current = Date.now();
+    setCapabilities(next);
+    return next;
+  }, []);
 
   const acceptsEmailLink = useCallback(
     (url: string) => Boolean(backend) && emailAuthMode === "magic-link" && isEmailAuthCallback(url),
@@ -114,11 +92,11 @@ export function useEquinaSession() {
     const snapshot = await backend.account.snapshot();
     setSession(targetSession);
     setAccount(snapshot);
-    if (nextCapabilities) setCapabilities(effectiveCapabilities(nextCapabilities));
+    if (nextCapabilities) applyCapabilities(nextCapabilities);
     setError("");
     setPhase(snapshot.profile.onboardingCompletedAt ? "authenticated" : "onboarding");
     return snapshot;
-  }, [backend]);
+  }, [applyCapabilities, backend]);
 
   const restore = useCallback(async () => {
     if (!backend) {
@@ -137,7 +115,7 @@ export function useEquinaSession() {
     try {
       const connected = await backend.connect();
       if (emailLinkInFlight.current) return;
-      setCapabilities(effectiveCapabilities(connected.capabilities));
+      applyCapabilities(connected.capabilities);
       if (!connected.session) {
         setSession(null);
         setAccount(null);
@@ -150,7 +128,35 @@ export function useEquinaSession() {
       setError("Equina could not restore your session. Check your connection and try again.");
       setPhase("recoverableError");
     }
-  }, [acceptsEmailLink, backend, loadAuthenticatedState]);
+  }, [acceptsEmailLink, applyCapabilities, backend, loadAuthenticatedState]);
+
+  /**
+   * Asks the server again what this session may do. Capabilities were only
+   * read at sign-in, sign-up and restore, so an invite, a revoke or a flag
+   * changed for one person waited for the app to be closed and reopened.
+   * The beta door's "Check again" is this.
+   */
+  const refreshCapabilities = useCallback(async () => {
+    if (!backend) return null;
+    const connected = await backend.connect();
+    // Signed out, or signed into another way, while the answer was on its way:
+    // it belongs to a session that is gone.
+    const signedIn = phaseRef.current === "authenticated" || phaseRef.current === "onboarding";
+    if (!signedIn || !connected.session) return null;
+    return applyCapabilities(connected.capabilities);
+  }, [applyCapabilities, backend]);
+
+  // Back in the foreground, a signed-in session asks again -- at most once a
+  // minute, so switching apps back and forth does not call the server each time.
+  useEffect(() => {
+    if (!backend || !session) return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active" || !capabilitiesStale(capabilitiesLoadedAt.current, Date.now())) return;
+      // A failed refresh keeps what the session already had.
+      void refreshCapabilities().catch(() => undefined);
+    });
+    return () => subscription.remove();
+  }, [backend, refreshCapabilities, session]);
 
   useEffect(() => {
     void restore();
@@ -410,6 +416,7 @@ export function useEquinaSession() {
     clearSignedOutNotice,
     error,
     restore,
+    refreshCapabilities,
     sendCode,
     verifyCode,
     verifyRecoveryCode,

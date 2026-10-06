@@ -10,6 +10,16 @@ import {
   readLessonForm,
   slugFor
 } from "../admin/src/lib/lessons";
+import {
+  doorState,
+  emailConfirmation,
+  inviteNoteLimit,
+  inviteState,
+  normalizeEmail,
+  readDoorForm,
+  readInviteForm,
+  validEmail
+} from "../admin/src/lib/beta";
 import { queueReason, reasonLabel, restoreLabel } from "../admin/src/lib/moderation";
 import { heldPlanState, planSummary, readGrantForm, readPlanTierForm } from "../admin/src/lib/plans";
 import { knownTopics } from "../src/features/academy/academy-catalog";
@@ -172,6 +182,53 @@ assert.deepEqual(heldPlanState({ status: "active", live: false }), { label: "End
   "A plan past its end date reads as ended before anything rewrites its status.");
 assert.deepEqual(heldPlanState({ status: "revoked", live: false }), { label: "Removed", tone: "" });
 assert.deepEqual(heldPlanState({ status: "trialing", live: true }), { label: "Free trial", tone: "warning" });
+
+// --- Beta ------------------------------------------------------------------------------------
+
+// The admin stores an email the way the database matches it.
+assert.equal(normalizeEmail("  Rider.Name@Example.COM "), "rider.name@example.com");
+assert.equal(validEmail("rider@example.com"), true);
+for (const nonsense of ["", "rider", "rider@", "@example.com", "rider@example", "two words@example.com", `${"a".repeat(310)}@example.com`]) {
+  assert.equal(validEmail(nonsense), false, `"${nonsense.slice(0, 20)}" is not an email to invite.`);
+}
+const invite = (values: Record<string, string>) => readInviteForm((name) => values[name] ?? "");
+assert.deepEqual(invite({ email: " Coach@Example.com ", note: "  Yard coach " }).fields, { email: "coach@example.com", note: "Yard coach" });
+assert.equal(invite({ email: "coach@example.com", note: "   " }).fields?.note, null, "An empty note is no note.");
+assert.ok(invite({ email: "not an email" }).errors.email);
+assert.ok(invite({ email: "coach@example.com", note: "x".repeat(inviteNoteLimit + 1) }).errors.note);
+assert.equal(invite({ email: "coach@example.com", note: "x".repeat(inviteNoteLimit) }).fields?.note?.length, inviteNoteLimit);
+
+assert.deepEqual(inviteState({ revoked_at: null, has_account: false }), { label: "Invited", tone: "warning" });
+assert.deepEqual(inviteState({ revoked_at: null, has_account: true }), { label: "Signed up", tone: "positive" });
+assert.deepEqual(inviteState({ revoked_at: "2026-10-06T12:00:00Z", has_account: true }), { label: "Revoked", tone: "" },
+  "A revoked invite reads as revoked even when the rider has an account.");
+
+assert.equal(doorState(null).label, "Open to invited riders");
+assert.equal(doorState({ enabled: true, rollout_percent: 0 }).openBeyondInvites, false);
+assert.equal(doorState({ enabled: false, rollout_percent: 100 }).openToEveryone, false, "A flag that is off opens nothing.");
+assert.deepEqual(
+  { ...doorState({ enabled: true, rollout_percent: 25 }), detail: undefined },
+  { openToEveryone: false, openBeyondInvites: true, label: "Open to invited riders and 25% of everyone else", detail: undefined }
+);
+assert.equal(doorState({ enabled: true, rollout_percent: 100 }).label, "Open to everyone");
+
+// With Auth confirming nobody's email, an invite to an address with no account
+// goes to whoever signs up with it first, and the page says so.
+assert.equal(emailConfirmation({ mailer_autoconfirm: true }), "off");
+assert.equal(emailConfirmation({ mailer_autoconfirm: false }), "on");
+assert.equal(emailConfirmation({}), "unknown");
+assert.equal(emailConfirmation(null), "unknown");
+assert.equal(emailConfirmation("mailer_autoconfirm"), "unknown");
+assert.equal(emailConfirmation({ mailer_autoconfirm: "false" }), "unknown", "Only a real boolean counts.");
+
+// Opening Equina is the launch: nothing changes without the ticked box.
+const door = (values: Record<string, string>) => readDoorForm((name) => values[name] ?? "");
+assert.deepEqual(door({ decision: "open", confirm: "yes" }), { open: true, error: null });
+assert.deepEqual(door({ decision: "close", confirm: "yes" }), { open: false, error: null });
+assert.equal(door({ decision: "open" }).open, null);
+assert.match(door({ decision: "open" }).error ?? "", /everyone who signs up gets in/);
+assert.equal(door({ decision: "close", confirm: "no" }).open, null);
+assert.equal(door({ decision: "launch", confirm: "yes" }).open, null);
 
 // --- What the admin's code may do ----------------------------------------------------------
 

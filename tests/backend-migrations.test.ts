@@ -19,7 +19,7 @@ const missingRls = await db.query<{ tablename: string }>(`
 assert.deepEqual(missingRls.rows, [], `All public backend tables need RLS: ${missingRls.rows.map((row) => row.tablename).join(", ")}`);
 
 const seededFlags = await db.query<{ enabled: boolean; rollout_percent: number }>("select enabled, rollout_percent from public.app_feature_flags");
-assert.equal(seededFlags.rows.length, 14);
+assert.equal(seededFlags.rows.length, 15);
 assert.ok(seededFlags.rows.every((flag) => !flag.enabled && flag.rollout_percent === 0));
 
 const riderA = "10000000-0000-4000-8000-000000000001";
@@ -66,7 +66,8 @@ await db.exec(`
 `);
 // Every feature on -- except plans: the tests below run in the founding phase,
 // as production does until riders can subscribe. The plans section turns them
-// on for the riders it names.
+// on for the riders it names. public_access is among them, so these riders are
+// through the beta door (202610060003); tests/beta.test.ts covers the door.
 await db.exec(`reset role; update public.app_feature_flags set enabled = true, rollout_percent = 100 where key <> 'plans';`);
 await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 const activeIdentity = await db.query<{ uid: string | null; role: string }>("select auth.uid() as uid, current_user as role");

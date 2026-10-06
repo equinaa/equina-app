@@ -2,6 +2,12 @@ import type { Discipline } from "../domain/types";
 
 export type BackendCapabilities = {
   auth: boolean;
+  /**
+   * This account is through the beta door: invited, or let in by
+   * `public_access`. True with no session -- the door only stands in front
+   * of a signed-in account.
+   */
+  appAccess: boolean;
   accountSettings: boolean;
   coachChat: boolean;
   pushNotifications: boolean;
@@ -347,6 +353,8 @@ export type PlanTier = {
 
 /** The rider's plan as my_plan() answers it. */
 export type PlanState = {
+  /** False for an account still outside the beta: no plans and no picks for it. */
+  access: boolean;
   /** False in the founding phase: every rider has everything. */
   enforced: boolean;
   /** The plan the rider holds, enforced or not. */
