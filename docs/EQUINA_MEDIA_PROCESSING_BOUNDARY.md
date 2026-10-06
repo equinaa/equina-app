@@ -22,8 +22,11 @@ documentation.
 ## Image Metadata Processing
 
 **Club photos** (202610060004) are handled in two places. The app redraws every
-photo as a JPEG of at most 2048 px (`src/features/club/club-photo.ts`), which leaves
-the original's EXIF behind. `create-upload-ticket` accepts only `image/jpeg` for a
+photo as a JPEG of at most 2048 px (`src/features/club/club-photo.ts`), which drops
+the original's EXIF. On iOS the redrawn file still carries a small EXIF header of
+its own (orientation, resolution, colour space; no location, time or device, checked
+on the simulator) and an empty IPTC block, so the server step below is what
+guarantees a clean file. `create-upload-ticket` accepts only `image/jpeg` for a
 Club post, up to 15 MB, and `complete-upload` takes out every APP1 (EXIF, XMP),
 APP3-APP13 (IPTC), APP15 and comment segment, keeping only JFIF, Adobe and ICC
 colour data, then writes the cleaned file over the upload before the media row

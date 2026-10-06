@@ -9,9 +9,10 @@ const readSize = async (uri: string) => {
 
 /**
  * A picked photo, redrawn as a JPEG no larger than the Club keeps. Redrawing
- * leaves the original's EXIF behind -- where and when it was taken, and on
- * which phone -- and complete-upload strips whatever a client still sends.
- * Works the same on iOS, Android and the web (canvas).
+ * drops the original's EXIF -- where and when it was taken, and on which
+ * phone. iOS still writes a small header of its own (orientation, resolution,
+ * colour space; checked on the simulator), and complete-upload strips that
+ * and anything else a client sends. Works on iOS, Android and the web (canvas).
  *
  * The manipulator is native code, loaded only when a photo is prepared: a
  * build without it then says so here instead of failing as the app opens.
