@@ -105,6 +105,8 @@ Deno.serve(async (request) => {
       clubPostMedia: own("club_post_media", "uploaded_by"),
       clubComments: own("club_comments", "author_id"),
       clubReactions: own("club_reactions", "user_id"),
+      // What the rider was told about: comments, replies and likes from others.
+      clubActivity: own("club_activity", "recipient_id"),
       contentReports: own("content_reports", "reporter_id"),
       userBlocks: own("user_blocks", "blocker_id"),
       sellerAccount: ownRow("seller_accounts", "user_id"),
