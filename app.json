@@ -29,7 +29,15 @@
       "expo-notifications",
       "expo-web-browser",
       "expo-apple-authentication",
-      "./plugins/with-storekit-configuration.cjs"
+      "./plugins/with-storekit-configuration.cjs",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": false,

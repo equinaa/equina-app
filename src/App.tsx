@@ -158,6 +158,16 @@ import {
   type RideRecommendation,
   type RideSession
 } from "./features/ride/RideExperience";
+import { RideSetupSheet, type RideSetupHorse } from "./features/ride/RideSetupSheet";
+import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
+import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
+import {
+  defaultTrainingType,
+  phasesFor,
+  plannedMinutes,
+  rideTrainingTypeById,
+  type RidePlan
+} from "./features/ride/ride-plan";
 import { useRideJournal } from "./features/ride/useRideJournal";
 import { createSeededEquinaApi } from "./seed/seed-data";
 import { getFitScreening, type HorseFitContext } from "./product/product-truth";
@@ -876,6 +886,9 @@ function EquinaApp() {
   const [shopOpenedListingId, setShopOpenedListingId] = useState(api.store.listings[0]?.id ?? "");
   const [pendingShopConversationId, setPendingShopConversationId] = useState("");
   const [rideActive, setRideActive] = useState(false);
+  // Set on the setup sheet before the ride screen opens; the clock waits there.
+  const [rideSetupOpen, setRideSetupOpen] = useState(false);
+  const [ridePlan, setRidePlan] = useState<RidePlan | null>(null);
   // Seeded for demo mode only. A connected account counts its real journal.
   const [localSessionCount, setLocalSessionCount] = useState(4);
   const [careLogged, setCareLogged] = useState(false);
@@ -1015,6 +1028,28 @@ function EquinaApp() {
       equinaSession.capabilities.records,
     onPersist: equinaSession.refreshAccount
   });
+  const rideSetupMemory = useRideSetupMemory(equinaSession.session?.user.id);
+  // A ride never outlives the app. Phase alerts left by one that was closed
+  // mid-ride would otherwise keep calling out phases nobody is riding.
+  useEffect(() => {
+    void cancelStaleRideAlerts();
+  }, []);
+  // Every horse the rider has, not only the one selected in the Stable: a
+  // rider with two horses picks today's on the setup sheet.
+  const rideHorses: RideSetupHorse[] = horseRecords.horses.some((record) => !record.archivedAt)
+    ? horseRecords.horses.filter((record) => !record.archivedAt).map((record) => ({ id: record.id, name: record.name }))
+    : primaryHorseName ? [{ name: primaryHorseName }] : [];
+  const rideHorsePhoto = horseRecords.horses.find((record) => record.id === ridePlan?.horseId)?.photoUrl;
+  const rememberedTraining =
+    rideTrainingTypeById(rideSetupMemory.memory?.trainingTypeId) ?? defaultTrainingType(onboardingDiscipline);
+  // Editing is only offered before the clock starts, so an open plan is the one to edit.
+  const rideSetupDraft = rideActive && ridePlan
+    ? { horseId: ridePlan.horseId, trainingType: ridePlan.trainingType, phases: ridePlan.phases }
+    : {
+        horseId: rideSetupMemory.memory?.horseId ?? (horseRecords.selectedHorseId || undefined),
+        trainingType: rememberedTraining,
+        phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
+      };
   const ridePersistence =
     accountMode === "connected" &&
     equinaSession.phase === "authenticated" &&
@@ -1025,7 +1060,14 @@ function EquinaApp() {
   });
   // While ride_logging is off the recap still works, it just does not outlive
   // the session. That difference is stated in the copy rather than hidden.
-  const lastRide = ridePersistence ? rideJournal.lastRide : localLastRide;
+  // The ride just finished is shown from local state until the journal holds
+  // it. Before, a slow or failed save showed the previous ride in its place,
+  // under "Saved to your journal".
+  const journalRide = ridePersistence ? rideJournal.lastRide : null;
+  // Compared as instants: the database writes "+00:00" where the app wrote "Z".
+  const lastRide = localLastRide && (!journalRide || Date.parse(localLastRide.completedAt) > Date.parse(journalRide.completedAt))
+    ? localLastRide
+    : journalRide ?? localLastRide;
   // The app states this number back to the rider as fact ("N rides are now in
   // your journal"), so it has to come from the journal, never from a seed.
   const sessionCount = ridePersistence ? rideJournal.entries.length : localSessionCount;
@@ -1111,8 +1153,17 @@ function EquinaApp() {
     ? {
         id: latestRideEntry.id,
         horseId: latestRideEntry.horseId,
+        // The ride's own training picks the group: a jumping rider's dressage
+        // ride goes to Dressage.
+        spaceSlug: spaceSlugForDiscipline(
+          rideTrainingTypeById(latestRideEntry.trainingType)?.discipline
+            ?? coachDisciplines.find((value) => value.toLowerCase() === latestRideEntry.discipline)
+            ?? onboardingDiscipline
+        ),
         summary: rideShareLine({
-          horseName: latestRideEntry.horseId ? primaryHorseName : undefined,
+          horseName: latestRideEntry.horseId
+            ? horseRecords.horses.find((record) => record.id === latestRideEntry.horseId)?.name ?? primaryHorseName
+            : undefined,
           elapsedSeconds: latestRideEntry.elapsedSeconds,
           focus: latestRideEntry.focus,
           mood: latestRideEntry.mood
@@ -1428,10 +1479,18 @@ function EquinaApp() {
 
   const startRide = () => {
     if (rideActive) return;
+    setRideSetupOpen(true);
+  };
+
+  const confirmRideSetup = (plan: RidePlan) => {
+    setRidePlan(plan);
+    setRideSetupOpen(false);
+    rideSetupMemory.remember(plan);
+    if (rideActive) return;
     setRideActive(true);
     setLastRideRecapVisible(false);
     setDailyMood("Focused");
-    refresh("Ride started. Keep the rhythm easy.");
+    refresh("Ride set up. The clock starts when you start the first phase.");
   };
 
   const finishRide = (session: RideCompletion) => {
@@ -1458,7 +1517,7 @@ function EquinaApp() {
       .logRide({
         session,
         mood: dailyMood,
-        horseId: horseRecords.selectedHorseId || undefined
+        horseId: ridePlan?.horseId
       })
       .then(() => {
         refresh(
@@ -2350,20 +2409,21 @@ function EquinaApp() {
               { pointerEvents: onboardingTransitioning ? "none" : "auto" }
             ]}
           >
-            {tab === "home" && rideActive ? (
+            {tab === "home" && rideActive && ridePlan ? (
               <RideModeScreen
-                horseName={rideHorseName}
+                plan={ridePlan}
                 discipline={onboardingDiscipline}
-                image={onboardingHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
+                image={rideHorsePhoto || onboardingHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
                 onFinish={finishRide}
                 onExit={cancelRide}
+                onEdit={() => setRideSetupOpen(true)}
               />
             ) : tab === "home" && lastRideRecapVisible && lastRide ? (
               <RideRecapScreen
-                horseName={rideHorseName}
-                image={disciplineVisuals[onboardingDiscipline].club}
+                horseName={ridePlan?.horseName || rideHorseName}
+                image={disciplineVisuals[lastRide.discipline].club}
                 session={lastRide}
-                saved={ridePersistence}
+                saved={ridePersistence && lastRide === journalRide}
                 recommendation={postRideRecommendation}
                 ralfAvailable={ralfAvailable}
                 shared={sharedRide}
@@ -2452,6 +2512,7 @@ function EquinaApp() {
                 carePriority={onboardingCarePriority}
                 horsePhoto={onboardingHorsePhoto}
                 onToggleRide={startRide}
+                rideMeta={`${plannedMinutes(rideSetupDraft.phases)} min · ${rideSetupDraft.trainingType.label}`}
                 onLogCare={logCare}
                 onOpenRalf={ralfAvailable ? openRalf : undefined}
                 onOpenCommunity={openCommunity}
@@ -2640,6 +2701,17 @@ function EquinaApp() {
             )}
           </Animated.View>
         )}
+
+        <RideSetupSheet
+          visible={rideSetupOpen}
+          horses={rideHorses}
+          horseId={rideSetupDraft.horseId}
+          trainingType={rideSetupDraft.trainingType}
+          phases={rideSetupDraft.phases}
+          memory={rideSetupMemory.memory}
+          onContinue={confirmRideSetup}
+          onDismiss={() => setRideSetupOpen(false)}
+        />
 
         {signUpPlanOffer.visible && purchases.available ? (
           <PlanOfferScreen plan={plan} purchases={purchases} onClose={signUpPlanOffer.dismiss} />
@@ -3090,6 +3162,7 @@ function HomeScreen({
   carePriority,
   horsePhoto,
   onToggleRide,
+  rideMeta: plannedRideMeta,
   onLogCare,
   onOpenRalf,
   onOpenCommunity,
@@ -3108,6 +3181,8 @@ function HomeScreen({
   carePriority: (typeof carePriorities)[number];
   horsePhoto: string;
   onToggleRide: () => void;
+  /** The ride the setup sheet will open with: "52 min · Dressage". */
+  rideMeta: string;
   onLogCare: () => void;
   /** Absent while Ralf is switched off for this account. */
   onOpenRalf?: (prompt?: string) => void;
@@ -3198,25 +3273,21 @@ function HomeScreen({
   const recapVisible = showRecap && !horse.rideActive;
   const disciplinePlan = {
     Dressage: {
-      rideMeta: "35 min · contact & transitions",
       headline: "Find a softer contact.",
       live: "Keep contact soft. No chasing.",
       plan: selectedMood.planBody
     },
     Jumping: {
-      rideMeta: "30 min · poles & rhythm",
       headline: "Build a calmer line.",
       live: "Keep canter steady. Let the line come.",
       plan: "Poles first, then one confident line."
     },
     Eventing: {
-      rideMeta: "40 min · fitness & recovery",
       headline: "Train the engine.",
       live: "Stay balanced. Recovery matters today.",
       plan: "Short intervals, balanced turns, long cool-down."
     },
     Trail: {
-      rideMeta: "45 min · calm miles",
       headline: "Make space to breathe.",
       live: "Keep it calm. Let the horse breathe forward.",
       plan: "Easy outside miles with a calm rhythm."
@@ -3252,7 +3323,7 @@ function HomeScreen({
         : `That ride felt ${mood.toLowerCase()}. ${horse.sessionCount} rides are now in your journal.`
       : `${disciplinePlan.plan} ${loadNote}`;
   const rideTitle = horse.rideActive ? "Finish ride" : recapVisible ? "Ride again" : "Start ride";
-  const rideMeta = horse.rideActive ? `${discipline} · tap to save` : disciplinePlan.rideMeta;
+  const rideMeta = horse.rideActive ? `${discipline} · tap to save` : plannedRideMeta;
   const nextKicker = recapVisible ? "Coach recap" : horse.careLogged ? "Care complete" : "Next";
   const nextTitle = recapVisible
     ? "Shape tomorrow from this ride"

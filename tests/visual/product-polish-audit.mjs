@@ -154,7 +154,14 @@ await page.getByTestId("ride-toggle").waitFor();
 const screens = [await inspect("home")];
 
 await page.getByTestId("ride-toggle").click();
+await page.getByTestId("ride-setup").waitFor();
+screens.push(await inspect("ride-setup"));
+await page.getByTestId("ride-setup-continue").click();
 screens.push(await inspect("ride-mode"));
+await page.getByTestId("ride-start").click();
+screens.push(await inspect("ride-running"));
+// Four phases by default: skip to the last, where Finish replaces Skip.
+await page.getByTestId("ride-next-phase").click();
 await page.getByTestId("ride-next-phase").click();
 await page.getByTestId("ride-next-phase").click();
 await page.getByTestId("ride-toggle").click();

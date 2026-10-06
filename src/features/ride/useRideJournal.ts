@@ -44,11 +44,13 @@ export const rideSessionFrom = (entry: RideEntry): RideSession => ({
   startedAt: entry.startedAt,
   completedAt: entry.completedAt,
   discipline: disciplineFromRecord[entry.discipline] ?? "Trail",
+  ...(entry.trainingType ? { trainingType: entry.trainingType } : {}),
   focus: entry.focus,
   plannedDuration: entry.plannedDuration ?? "",
   elapsedSeconds: entry.elapsedSeconds,
   completedPhases: entry.completedPhases,
   totalPhases: entry.totalPhases,
+  ...(entry.phases ? { phases: entry.phases } : {}),
   mood: entry.mood ? moodFromRecord[entry.mood] : "Focused"
 });
 
@@ -146,6 +148,7 @@ export function useRideJournal({
       const created = await backend.rides.create({
         horseId: input.horseId,
         discipline: input.session.discipline.toLowerCase() as RideEntry["discipline"],
+        trainingType: input.session.trainingType,
         focus: input.session.focus,
         plannedDuration: input.session.plannedDuration,
         startedAt: input.session.startedAt,
@@ -153,6 +156,7 @@ export function useRideJournal({
         elapsedSeconds: input.session.elapsedSeconds,
         completedPhases: input.session.completedPhases,
         totalPhases: input.session.totalPhases,
+        phases: input.session.phases,
         mood: moodToRecord[input.mood],
         riderNote: input.riderNote
       });

@@ -388,11 +388,21 @@ export type AcademyProgress = {
   lastSeenAt: string;
 };
 
+/** One phase of a ride, as planned and as ridden. No actual time: the ride never got there. */
+export type RidePhaseEntry = {
+  title: string;
+  detail?: string;
+  plannedSeconds: number;
+  actualSeconds?: number;
+};
+
 export type RideEntry = {
   id: string;
   riderId: string;
   horseId?: string;
   discipline: Discipline;
+  /** The kind of training, by id ("dressage", "hack"). Absent on rides from before the setup sheet. */
+  trainingType?: string;
   focus: string;
   plannedDuration?: string;
   startedAt: string;
@@ -400,6 +410,7 @@ export type RideEntry = {
   elapsedSeconds: number;
   completedPhases: number;
   totalPhases: number;
+  phases?: RidePhaseEntry[];
   mood?: RideMoodRecord;
   riderNote?: string;
   createdAt: string;

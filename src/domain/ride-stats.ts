@@ -101,7 +101,12 @@ export type RideSummary = {
   previousRides: number;
   /** Seconds the timer actually ran. Never presented as time in the saddle. */
   trackedSeconds: number;
-  disciplines: Tally<string>[];
+  /**
+   * What was ridden, by the training each ride was set up as. A jumping rider
+   * who rode dressage twice and jumped once reads "Dressage 2 · Jumping 1".
+   * Rides from before the setup sheet count under their discipline.
+   */
+  trainings: Tally<string>[];
   moods: Tally<string>[];
   /** Distinct focuses worked, most recent first, for the one-line recap. */
   focuses: string[];
@@ -134,7 +139,7 @@ export const summarise = (
     rides: current.length,
     previousRides: previous ? ridesWithin(entries, previous).length : 0,
     trackedSeconds: current.reduce((total, entry) => total + Math.max(0, entry.elapsedSeconds), 0),
-    disciplines: tally(current.map((entry) => entry.discipline as string)),
+    trainings: tally(current.map((entry) => entry.trainingType ?? (entry.discipline as string))),
     moods: tally(current.map((entry) => entry.mood as string | undefined)),
     focuses,
     phasesCompleted: current.reduce((total, entry) => total + Math.max(0, entry.completedPhases), 0),

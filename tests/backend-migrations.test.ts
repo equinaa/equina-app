@@ -1372,7 +1372,7 @@ const clientWrites: Record<string, ClientWrites> = {
   },
   profiles: { update: ["display_name", "locale", "location", "discipline", "skill_level", "bio"] },
   ride_entries: {
-    insert: ["rider_id", "horse_id", "discipline", "focus", "planned_duration", "started_at", "completed_at", "elapsed_seconds", "completed_phases", "total_phases", "mood", "rider_note"],
+    insert: ["rider_id", "horse_id", "discipline", "training_type", "focus", "planned_duration", "started_at", "completed_at", "elapsed_seconds", "completed_phases", "total_phases", "phases", "mood", "rider_note"],
     update: ["focus", "mood", "rider_note", "elapsed_seconds", "completed_phases"],
     delete: true
   },
