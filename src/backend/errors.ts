@@ -16,7 +16,7 @@ export const backendError = (error: unknown, fallback: string): EquinaBackendErr
   if (error && typeof error === "object") {
     const candidate = error as { message?: unknown; code?: unknown; status?: unknown; name?: unknown };
     const message = typeof candidate.message === "string" ? candidate.message : fallback;
-    const status = typeof candidate.status === "number" ? candidate.status : 0;
+    const status = typeof candidate.status === "number" ? candidate.status : undefined;
     // supabase-js reports a request that never got an answer as a retryable
     // fetch error with status 0. Name it, so callers can say "no connection"
     // without guessing from a status that a plain Error also lacks.
@@ -25,7 +25,10 @@ export const backendError = (error: unknown, fallback: string): EquinaBackendErr
       : candidate.name === "AuthRetryableFetchError" && status === 0
         ? networkUnreachable
         : "backend_error";
-    return new EquinaBackendError(message, code, status === 0 || status >= 500);
+    // Only a server's answer, or a request that got none, says anything about
+    // the connection. A failure inside the app -- a native module, a storage
+    // read -- carries no status, and retrying it would not help.
+    return new EquinaBackendError(message, code, status !== undefined && (status === 0 || status >= 500));
   }
   return new EquinaBackendError(fallback);
 };

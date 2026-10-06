@@ -32,6 +32,7 @@ import {
   clubPhotoProblem,
   clubSpaceImageKey,
   composerPrompt,
+  composerSpaceSlug,
   orderClubSpaces,
   feedEmptyState,
   latestActivityLabel,
@@ -129,6 +130,14 @@ export function ClubScreen({
   const openGroupFeed = (spaceId: string) => {
     club.selectScope({ kind: "space", spaceId });
     setTab("feed");
+  };
+
+  // Joining takes the rider into the group: its posts, with the group named
+  // on top. Staying on the list after Join read as if nothing had happened.
+  const joinAndOpen = async (space: ClubSpace) => {
+    if (!(await club.joinSpace(space.id))) return;
+    openGroupFeed(space.id);
+    onNotice(`You joined ${space.name}.`);
   };
 
   if (access === "none") {
@@ -231,6 +240,21 @@ export function ClubScreen({
         </ScrollView>
       ) : null}
 
+      {tab === "feed" && activeSpace ? (
+        <ClubGroupHeader
+          space={activeSpace}
+          image={spaceImages[clubSpaceImageKey(activeSpace.slug)]}
+          joined={joined.has(activeSpace.id)}
+          canJoin={canInteract}
+          onJoin={() => {
+            void club.joinSpace(activeSpace.id).then((done) => {
+              if (done) onNotice(`You joined ${activeSpace.name}.`);
+            });
+          }}
+          onLeave={() => void club.leaveSpace(activeSpace.id)}
+        />
+      ) : null}
+
       {club.error ? (
         <Pressable
           accessibilityRole="alert"
@@ -291,7 +315,7 @@ export function ClubScreen({
       {tab === "groups" ? (
         <>
           <Text style={styles.noticeBody}>
-            Join the groups you ride in. Their posts gather under "My groups" in the feed; every group stays open to read.
+            Join a group to go straight to its posts and follow it under "My groups" in the feed. Every group stays open to read.
           </Text>
           {!club.spaces.length && club.loading ? (
             <ActivityIndicator style={styles.loading} color={equinaTheme.colors.brass} />
@@ -305,7 +329,7 @@ export function ClubScreen({
               activity={latestActivityLabel(space.id, club.items)}
               canJoin={canInteract}
               onOpen={() => openGroupFeed(space.id)}
-              onJoin={() => void club.joinSpace(space.id)}
+              onJoin={() => void joinAndOpen(space)}
               onLeave={() => void club.leaveSpace(space.id)}
             />
           ))}
@@ -315,7 +339,7 @@ export function ClubScreen({
       <ComposerSheet
         visible={Boolean(composer)}
         spaces={club.spaces}
-        defaultSpaceSlug={defaultSpaceSlug}
+        defaultSpaceSlug={composerSpaceSlug(club.scope, club.spaces, defaultSpaceSlug)}
         ride={rideToShare}
         startWithRide={Boolean(composer?.attachRide)}
         allowPhoto={photoPosts}
@@ -493,18 +517,63 @@ function ClubGroupCard({
           {activity ? <Text style={styles.meta}>{activity}</Text> : null}
         </View>
       </Pressable>
-      {canJoin ? (
-        <Pressable
-          testID={`club-group-${joined ? "leave" : "join"}-${space.slug}`}
-          accessibilityRole="button"
-          accessibilityLabel={joined ? `Leave ${space.name}` : `Join ${space.name}`}
-          onPress={joined ? onLeave : onJoin}
-          style={({ pressed }) => [styles.groupAction, !joined && styles.groupActionJoin, pressed && styles.pressed]}
-        >
-          <Text style={[styles.groupActionText, !joined && styles.groupActionJoinText]}>{joined ? "Leave" : "Join"}</Text>
-        </Pressable>
-      ) : null}
+      {canJoin ? <GroupMembershipButton space={space} joined={joined} onJoin={onJoin} onLeave={onLeave} /> : null}
     </View>
+  );
+}
+
+/** Inside a group: which group the posts below belong to, and the way out of it. */
+function ClubGroupHeader({
+  space,
+  image,
+  joined,
+  canJoin,
+  onJoin,
+  onLeave
+}: {
+  space: ClubSpace;
+  image: string;
+  joined: boolean;
+  canJoin: boolean;
+  onJoin: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <View style={styles.groupCard} testID={`club-group-header-${space.slug}`}>
+      <Image source={{ uri: image }} style={styles.groupHeaderImage} resizeMode="cover" accessibilityIgnoresInvertColors />
+      <View style={styles.groupText}>
+        <View style={styles.groupTitleRow}>
+          <Text numberOfLines={1} accessibilityRole="header" style={styles.groupName}>{space.name}</Text>
+          {joined ? <Text style={styles.groupJoined}>Joined</Text> : null}
+        </View>
+        {space.description ? <Text style={styles.noticeBody}>{space.description}</Text> : null}
+      </View>
+      {canJoin ? <GroupMembershipButton space={space} joined={joined} onJoin={onJoin} onLeave={onLeave} /> : null}
+    </View>
+  );
+}
+
+function GroupMembershipButton({
+  space,
+  joined,
+  onJoin,
+  onLeave
+}: {
+  space: ClubSpace;
+  joined: boolean;
+  onJoin: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <Pressable
+      testID={`club-group-${joined ? "leave" : "join"}-${space.slug}`}
+      accessibilityRole="button"
+      accessibilityLabel={joined ? `Leave ${space.name}` : `Join ${space.name}`}
+      onPress={joined ? onLeave : onJoin}
+      style={({ pressed }) => [styles.groupAction, !joined && styles.groupActionJoin, pressed && styles.pressed]}
+    >
+      <Text style={[styles.groupActionText, !joined && styles.groupActionJoinText]}>{joined ? "Leave" : "Join"}</Text>
+    </Pressable>
   );
 }
 
@@ -1243,6 +1312,12 @@ const styles = StyleSheet.create({
   groupImage: {
     width: "100%",
     height: 132,
+    borderRadius: equinaTheme.radius.control,
+    backgroundColor: equinaTheme.surfaces.elevated
+  },
+  groupHeaderImage: {
+    width: "100%",
+    height: 96,
     borderRadius: equinaTheme.radius.control,
     backgroundColor: equinaTheme.surfaces.elevated
   },
