@@ -178,7 +178,9 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
   assert.match(mineQuiet.title, /your groups/);
   assert.equal(feedEmptyState({ scope: { kind: "space", spaceId: "x" }, spaceName: "Trail", canPost: true, hasMemberships: false }).title, "No posts in Trail yet.");
   assert.equal(feedEmptyState({ scope: allScope, canPost: false, hasMemberships: false }).body, "Posts from other riders will appear here.");
-  assert.doesNotMatch(composerPrompt, /ride go\?/, "The prompt invites any post, not only a ride.");
+  assert.doesNotMatch(composerPrompt(true), /ride go\?/, "The prompt invites any post, not only a ride.");
+  assert.match(composerPrompt(true), /photo/);
+  assert.doesNotMatch(composerPrompt(false), /photo/, "While photo posts are off, the prompt must not promise one.");
 }
 
 // The photo rules match create-upload-ticket's club_post rule.

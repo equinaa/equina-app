@@ -120,12 +120,16 @@ export const feedEmptyState = ({
   }
   return {
     title: scope.kind === "space" && spaceName ? `No posts in ${spaceName} yet.` : "No posts yet.",
-    body: canPost ? "Share a ride or a photo. Riders in your space will see it right away." : "Posts from other riders will appear here."
+    body: canPost ? "Share how today's ride went. Riders in your space will see it right away." : "Posts from other riders will appear here."
   };
 };
 
-/** One prompt for the composer row and the sheet, inviting any kind of post. */
-export const composerPrompt = "Share a ride, a photo or a question.";
+/**
+ * One prompt for the composer row and the sheet, inviting any kind of post.
+ * It only promises a photo while photo posts are on (feature-flags.ts).
+ */
+export const composerPrompt = (withPhoto: boolean) =>
+  withPhoto ? "Share a ride, a photo or a question." : "Share a ride or ask a question.";
 
 // create-upload-ticket's club_post rule, checked here so the rider hears it
 // before the upload rather than from a failed ticket. Video waits for Phase 2.

@@ -106,6 +106,8 @@ export function ClubScreen({
   const [composer, setComposer] = useState<{ attachRide: boolean } | null>(null);
   const [commentsFor, setCommentsFor] = useState<ClubFeedItem | null>(null);
   const [optionsFor, setOptionsFor] = useState<ClubFeedItem | null>(null);
+  // Photos wait for EXIF and GPS removal (feature-flags.ts).
+  const photoPosts = canPost && equinaFeatureFlags.clubPhotoPosts;
 
   useEffect(() => {
     if (composeRequest > 0 && canPost) setComposer({ attachRide: Boolean(rideToShare) });
@@ -176,7 +178,7 @@ export function ClubScreen({
               style={({ pressed }) => [styles.composerRow, pressed && styles.pressed]}
             >
               <Avatar name={riderName} />
-              <Text style={styles.composerPrompt}>{composerPrompt}</Text>
+              <Text style={styles.composerPrompt}>{composerPrompt(photoPosts)}</Text>
             </Pressable>
           ) : (
             <Text style={styles.feedLabel}>Latest from your Club</Text>
@@ -315,7 +317,7 @@ export function ClubScreen({
         defaultSpaceSlug={defaultSpaceSlug}
         ride={rideToShare}
         startWithRide={Boolean(composer?.attachRide)}
-        allowPhoto={canPost && equinaFeatureFlags.clubPhotoPosts}
+        allowPhoto={photoPosts}
         busy={club.busy === "post"}
         onDismiss={() => setComposer(null)}
         onSubmit={async (input) => {
@@ -591,7 +593,7 @@ function ComposerSheet({
           accessibilityLabel="Post text"
           value={text}
           onChangeText={setText}
-          placeholder={composerPrompt}
+          placeholder={composerPrompt(allowPhoto)}
           placeholderTextColor={equinaTheme.text.tertiary}
           multiline
           maxLength={postLimit}
