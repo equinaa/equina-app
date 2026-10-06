@@ -14,6 +14,7 @@ import {
   allScope,
   clubFilterChips,
   clubPhotoProblem,
+  clubPhotoResize,
   clubSpaceImageKey,
   composerPrompt,
   composerSpaceSlug,
@@ -189,10 +190,14 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
 // The photo rules match create-upload-ticket's club_post rule.
 {
   assert.equal(clubPhotoProblem({ mimeType: "image/jpeg", byteSize: 4 * 1024 * 1024 }), undefined);
-  assert.equal(clubPhotoProblem({ mimeType: "image/heic", byteSize: 1 }), undefined);
-  assert.match(clubPhotoProblem({ mimeType: "image/gif", byteSize: 1 }) ?? "", /JPEG, PNG or HEIC/);
-  assert.match(clubPhotoProblem({ mimeType: "video/mp4", byteSize: 1 }) ?? "", /JPEG, PNG or HEIC/, "Video waits for a later phase.");
-  assert.match(clubPhotoProblem({ mimeType: "image/png", byteSize: 50 * 1024 * 1024 + 1 }) ?? "", /50 MB/);
+  assert.match(clubPhotoProblem({ mimeType: "image/heic", byteSize: 1 }) ?? "", /could not be prepared/,
+    "Only the re-encoded JPEG goes up: the server takes JPEG alone and strips its metadata.");
+  assert.match(clubPhotoProblem({ mimeType: "video/mp4", byteSize: 1 }) ?? "", /could not be prepared/, "Video waits for a later phase.");
+  assert.match(clubPhotoProblem({ mimeType: "image/jpeg", byteSize: 15 * 1024 * 1024 + 1 }) ?? "", /15 MB/);
+  assert.equal(clubPhotoResize(4032, 3024)?.width, 2048, "A landscape photo is shrunk by its width.");
+  assert.equal(clubPhotoResize(3024, 4032)?.height, 2048, "A portrait photo by its height.");
+  assert.equal(clubPhotoResize(1200, 900), undefined, "A small photo keeps its size.");
+  assert.equal(clubPhotoResize(undefined, 900), undefined, "Unknown size: re-encoded, not resized.");
 }
 
 // Groups: the rider's discipline first, Coach Q&A last, the rest by name.

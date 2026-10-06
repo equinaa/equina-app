@@ -150,13 +150,24 @@ export const composerPrompt = (withPhoto: boolean) =>
   withPhoto ? "Share a ride, a photo or a question." : "Share a ride or ask a question.";
 
 // create-upload-ticket's club_post rule, checked here so the rider hears it
-// before the upload rather than from a failed ticket. Video waits for Phase 2.
-export const clubPhotoMaxBytes = 50 * 1024 * 1024;
-export const clubPhotoMimeTypes = ["image/jpeg", "image/png", "image/heic", "image/heif"];
+// before the upload rather than from a failed ticket. Every photo is re-encoded
+// to JPEG on the device first (club-photo.ts), so the type only fails if that
+// step did. Video waits for transcoding.
+export const clubPhotoMaxBytes = 15 * 1024 * 1024;
+export const clubPhotoMimeTypes = ["image/jpeg"];
 
-/** Why a picked photo cannot go up, or undefined when it can. */
+/** Why a prepared photo cannot go up, or undefined when it can. */
 export const clubPhotoProblem = (asset: { mimeType: string; byteSize: number }) => {
-  if (!clubPhotoMimeTypes.includes(asset.mimeType)) return "Use a JPEG, PNG or HEIC photo.";
-  if (asset.byteSize > clubPhotoMaxBytes) return "This photo is over 50 MB. Pick a smaller one.";
+  if (!clubPhotoMimeTypes.includes(asset.mimeType)) return "This photo could not be prepared. Try another one.";
+  if (asset.byteSize > clubPhotoMaxBytes) return "This photo is over 15 MB. Pick a smaller one.";
   return undefined;
+};
+
+/** The longest side a Club photo keeps: on a phone, more is weight, not detail. */
+export const clubPhotoMaxEdge = 2048;
+
+/** How to shrink a photo to the Club's size, or nothing when it already fits or is unknown. */
+export const clubPhotoResize = (width?: number, height?: number, maxEdge = clubPhotoMaxEdge) => {
+  if (!width || !height || Math.max(width, height) <= maxEdge) return undefined;
+  return width >= height ? { width: maxEdge } : { height: maxEdge };
 };

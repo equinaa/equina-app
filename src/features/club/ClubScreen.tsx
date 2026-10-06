@@ -41,6 +41,7 @@ import {
   type ClubSpaceImageKey
 } from "./club-groups";
 import { activityVerb, profileGroups, threadComments, unreadLabel } from "./club-social";
+import { prepareClubPhoto } from "./club-photo";
 import type { ClubController } from "./useClub";
 
 const postLimit = 2000;
@@ -50,20 +51,6 @@ const commentLimit = 1200;
 const sheetSwitchMs = 380;
 
 type ClubTab = "feed" | "groups";
-
-const assetSize = async (uri: string, knownSize?: number | null) => {
-  if (knownSize && knownSize > 0) return knownSize;
-  const response = await fetch(uri);
-  if (!response.ok) throw new Error("The selected photo could not be read.");
-  return (await response.blob()).size;
-};
-
-const photoUploadAsset = async (asset: ImagePicker.ImagePickerAsset): Promise<UploadAsset> => ({
-  uri: asset.uri,
-  fileName: asset.fileName ?? `club-${Date.now()}.jpg`,
-  mimeType: asset.mimeType ?? "image/jpeg",
-  byteSize: await assetSize(asset.uri, asset.fileSize)
-});
 
 export type ClubRideShare = {
   id: string;
@@ -697,14 +684,15 @@ function ComposerSheet({
       setPhotoError("Allow photo access to add a photo to your post.");
       return;
     }
+    // Full quality here: the photo is redrawn as a JPEG once, in prepareClubPhoto.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsEditing: false,
-      quality: 0.88
+      quality: 1
     });
     if (result.canceled || !result.assets[0]) return;
     try {
-      const asset = await photoUploadAsset(result.assets[0]);
+      const asset = await prepareClubPhoto(result.assets[0]);
       const problem = clubPhotoProblem(asset);
       if (problem) {
         setPhotoError(problem);

@@ -21,9 +21,17 @@ documentation.
 
 ## Image Metadata Processing
 
-EXIF removal and image normalization are not implemented in the current worker.
-Until the processor below exists, image upload is approved only for named internal
-users and public Club/listing publishing remains disabled.
+**Club photos** (202610060004) are handled in two places. The app redraws every
+photo as a JPEG of at most 2048 px (`src/features/club/club-photo.ts`), which leaves
+the original's EXIF behind. `create-upload-ticket` accepts only `image/jpeg` for a
+Club post, up to 15 MB, and `complete-upload` takes out every APP1 (EXIF, XMP),
+APP3-APP13 (IPTC), APP15 and comment segment, keeping only JFIF, Adobe and ICC
+colour data, then writes the cleaned file over the upload before the media row
+exists (`_shared/image-metadata.ts`, `tests/image-metadata.test.ts`). The compressed
+picture is copied byte for byte, so nothing about how it looks changes.
+
+Other uploads (listing photos, record files, avatars) still go through the full
+processor below before they can be public.
 
 Required processor contract:
 
