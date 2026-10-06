@@ -58,6 +58,14 @@ const offline = backendError(
   assert.equal(signInErrorCopy(authError(400, "validation_failed"), "google"), copy.errors.googleFailed);
   assert.equal(signInErrorCopy(authError(422, "weak_password"), "password"), copy.errors.generic);
   assert.equal(signInErrorCopy(null, "password"), copy.errors.generic);
+  // React Native's blob store losing a response after a reload, a storage read
+  // failing: the app failed, no server did, and the copy must not blame the
+  // connection.
+  assert.equal(
+    signInErrorCopy(backendError(Object.assign(new Error("Unable to resolve data for blob: X"), { code: "EUNSPECIFIED" }), "fallback"), "password"),
+    copy.errors.generic
+  );
+  assert.equal(signInErrorCopy(backendError(new Error("Lock timed out"), "fallback"), "password"), copy.errors.generic);
   for (const context of ["password", "apple", "google"] as const) {
     assert.doesNotMatch(signInErrorCopy(authError(500), context), /provider text/,
       "The provider's message must never be shown.");

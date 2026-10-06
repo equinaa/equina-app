@@ -15,6 +15,7 @@ import {
   clubPhotoProblem,
   clubSpaceImageKey,
   composerPrompt,
+  composerSpaceSlug,
   orderClubSpaces,
   feedCursor,
   feedEmptyState,
@@ -204,6 +205,20 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
   assert.deepEqual(orderClubSpaces(spaces, "jumping").map((space) => space.slug), ["jumping", "dressage", "western", "coach-qa"]);
   assert.deepEqual(orderClubSpaces(spaces, "unknown").map((space) => space.slug), ["dressage", "jumping", "western", "coach-qa"]);
   assert.deepEqual(spaces[0]!.slug, "coach-qa", "The input order is left alone.");
+}
+
+// A post written inside a group goes to that group; elsewhere, to the
+// rider's own discipline.
+{
+  const spaces = [
+    { id: "s-jump", slug: "jumping", name: "Jumping", isPrivate: false },
+    { id: "s-coach", slug: "coach-qa", name: "Coach Q&A", isPrivate: false }
+  ];
+  assert.equal(composerSpaceSlug({ kind: "space", spaceId: "s-coach" }, spaces, "dressage"), "coach-qa");
+  assert.equal(composerSpaceSlug({ kind: "all" }, spaces, "dressage"), "dressage");
+  assert.equal(composerSpaceSlug({ kind: "mine" }, spaces, "dressage"), "dressage");
+  assert.equal(composerSpaceSlug({ kind: "space", spaceId: "gone" }, spaces, "dressage"), "dressage",
+    "A group that is no longer listed falls back to the discipline.");
 }
 
 console.log("Club rules passed.");

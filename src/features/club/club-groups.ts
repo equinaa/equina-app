@@ -125,6 +125,13 @@ export const feedEmptyState = ({
 };
 
 /**
+ * Where a new post goes by default: the group on screen, so a post written
+ * inside a group lands there, otherwise the rider's own discipline.
+ */
+export const composerSpaceSlug = (scope: ClubFeedScope, spaces: ClubSpace[], fallbackSlug: string) =>
+  scope.kind === "space" ? spaces.find((space) => space.id === scope.spaceId)?.slug ?? fallbackSlug : fallbackSlug;
+
+/**
  * The groups list: the rider's own discipline first, the other disciplines by
  * name, and Coach Q&A last, since it is not a discipline. The database orders
  * by name, which would put Coach Q&A first.

@@ -241,11 +241,10 @@ export function useClub({
       if (joined) await backend.club.joinSpace(spaceId);
       else await backend.club.leaveSpace(spaceId);
       const current = scopeRef.current;
-      // "My groups" is on screen: it has to follow the membership. A feed
-      // filtered to the group just left goes back to All, so the chip row and
-      // the feed keep agreeing.
+      // "My groups" is on screen: it has to follow the membership. A rider who
+      // leaves the group they are reading stays in it: every group is open to
+      // read, and its chip stays while it is on screen (clubFilterChips).
       if (current.kind === "mine") void loadFeed(current);
-      else if (!joined && current.kind === "space" && current.spaceId === spaceId) selectScope(allScope);
       return true;
     } catch (cause) {
       apply(!joined);
@@ -254,7 +253,7 @@ export function useClub({
       void syncMemberships();
       return false;
     }
-  }, [backend, enabled, loadFeed, selectScope, syncMemberships]);
+  }, [backend, enabled, loadFeed, syncMemberships]);
 
   const joinSpace = useCallback((spaceId: string) => setMembership(spaceId, true), [setMembership]);
   const leaveSpace = useCallback((spaceId: string) => setMembership(spaceId, false), [setMembership]);
