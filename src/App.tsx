@@ -138,6 +138,7 @@ import { useLessonVideo } from "./features/academy/useLessonVideo";
 import type { AcademyPlaybackLink } from "./backend/contracts";
 import { ClubScreen, type ClubRideShare } from "./features/club/ClubScreen";
 import { rideShareLine, spaceSlugForDiscipline } from "./features/club/club-format";
+import type { ClubSpaceImageKey } from "./features/club/club-groups";
 import { useClub } from "./features/club/useClub";
 import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
@@ -161,7 +162,7 @@ import { useRideJournal } from "./features/ride/useRideJournal";
 import { createSeededEquinaApi } from "./seed/seed-data";
 import { getFitScreening, type HorseFitContext } from "./product/product-truth";
 import { MotionPressable } from "./ui/motion/MotionPressable";
-import { EquinaIconButton } from "./ui/primitives/EquinaPrimitives";
+import { EquinaIconButton, EquinaSegmentedTabs } from "./ui/primitives/EquinaPrimitives";
 import { useReducedMotion } from "./ui/motion/useReducedMotion";
 import { equinaTheme } from "./ui/theme/theme";
 import { floatingDockContentInset, floatingDockMetrics } from "./ui/layout/metrics";
@@ -351,6 +352,15 @@ const equinaImages = {
   jumpingCoach: jumpingEditorial.coach,
   eventing: "https://images.pexels.com/photos/27669462/pexels-photo-27669462.jpeg?auto=compress&cs=tinysrgb&w=1200",
   trail: "https://images.pexels.com/photos/35105157/pexels-photo-35105157.jpeg?auto=compress&cs=tinysrgb&w=1200"
+};
+// Group cards in the Club reuse the photos already shipped; spaces without
+// one of their own (western, endurance, Coach Q&A) show the stable.
+const clubSpaceImages: Record<ClubSpaceImageKey, string> = {
+  dressage: equinaImages.dressage,
+  jumping: equinaImages.jumpingClub,
+  eventing: equinaImages.eventing,
+  trail: equinaImages.trail,
+  stable: equinaImages.stable
 };
 const equinaCoach = {
   name: "Ralf",
@@ -2556,6 +2566,7 @@ function EquinaApp() {
                 currentUserId={equinaSession.session?.user.id}
                 riderName={riderDisplayName}
                 defaultSpaceSlug={spaceSlugForDiscipline(onboardingDiscipline)}
+                spaceImages={clubSpaceImages}
                 rideToShare={clubRideShare}
                 composeRequest={clubComposeRequest}
                 onNotice={refresh}
@@ -4963,14 +4974,17 @@ function StableScreen({
           ) : null}
         </View>
 
-        <View style={styles.stableViewSwitch}>
-          <StableViewTab label="Overview" active={view === "overview"} onPress={() => openView("overview")} />
-          <StableViewTab label="Care" active={view === "care"} onPress={() => openView("care")} />
-          {nutritionAvailable ? (
-            <StableViewTab label="Nutrition" active={view === "nutrition"} onPress={() => openView("nutrition")} />
-          ) : null}
-          <StableViewTab label="Documents" active={view === "docs"} onPress={() => openView("docs")} />
-        </View>
+        <EquinaSegmentedTabs<StableView>
+          testIDPrefix="stable-view"
+          value={view}
+          onChange={openView}
+          tabs={[
+            { value: "overview", label: "Overview" },
+            { value: "care", label: "Care" },
+            ...(nutritionAvailable ? [{ value: "nutrition" as const, label: "Nutrition" }] : []),
+            { value: "docs", label: "Documents" }
+          ]}
+        />
 
         <Animated.View style={[styles.stableViewBody, viewMotion]}>
           {view === "overview" && (
@@ -5272,20 +5286,6 @@ function StableScreen({
       </View>
       {recordSheets}
     </>
-  );
-}
-
-function StableViewTab({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      testID={`stable-view-${label.toLowerCase()}`}
-      accessibilityRole="tab"
-      accessibilityState={{ selected: active }}
-      style={[styles.stableViewTab, active && styles.stableViewTabActive]}
-      onPress={onPress}
-    >
-      <Text numberOfLines={1} style={[styles.stableViewTabText, active && styles.stableViewTabTextActive]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -6412,8 +6412,10 @@ function CommunityScreen({
           title={post.title}
           body={post.body}
           image={communityFeedMedia[index % communityFeedMedia.length] ?? equinaImages.stable}
-          likes={likes + index * 5}
-          comments={index + 3}
+          // The same rule as the shared ride above: the demo counter is the
+          // only number this screen may show.
+          likes={likes}
+          comments={0}
           verified={post.space.includes("coach")}
           interactionsEnabled={equinaFeatureFlags.clubInteractions}
           onLike={onLike}
@@ -10387,35 +10389,6 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: "400",
     marginTop: 4
-  },
-  stableViewSwitch: {
-    minHeight: 50,
-    borderRadius: equinaTheme.radius.control,
-    padding: 3,
-    flexDirection: "row",
-    gap: 3,
-    backgroundColor: equinaTheme.material.quiet
-  },
-  stableViewTab: {
-    flex: 1,
-    minHeight: 44,
-    borderRadius: equinaTheme.radius.compact,
-    alignItems: "center",
-    justifyContent: "center",
-    outlineStyle: "solid",
-    outlineWidth: 0
-  },
-  stableViewTabActive: {
-    backgroundColor: equinaTheme.material.selected
-  },
-  stableViewTabText: {
-    color: nightTheme.faint,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "600"
-  },
-  stableViewTabTextActive: {
-    color: nightTheme.text
   },
   stableViewBody: {
     gap: 12

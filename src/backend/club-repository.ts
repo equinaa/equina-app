@@ -1,5 +1,8 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type { ClubCommentRecord, ClubCommentWithAuthor, ClubFeedItem, ClubMediaRecord, ClubPostRecord, ClubSpace, UploadAsset } from "./contracts";
+
+/** One space, several spaces, or (empty) every space the rider can read. */
+export type ClubFeedQuery = { spaceId?: string; spaceIds?: string[] };
 import { EdgeClient } from "./edge-client";
 import { backendError, requireData } from "./errors";
 import { UploadRepository } from "./upload-repository";
@@ -44,17 +47,23 @@ export class ClubRepository {
     return (data ?? []).map((row) => mapSpace(row as Record<string, unknown>));
   }
 
-  async feed(spaceId?: string, limit = 20, before?: string): Promise<ClubPostRecord[]> {
+  /**
+   * Newest first. `scope` narrows to one space or to several ("My groups" is
+   * one query, not one per membership); `before` is the created_at cursor of
+   * the oldest post already on screen.
+   */
+  async feed(scope: ClubFeedQuery = {}, limit = 20, before?: string): Promise<ClubPostRecord[]> {
     let query = this.client.from("club_posts").select("*").eq("moderation_status", "visible").order("created_at", { ascending: false }).limit(Math.min(50, limit));
-    if (spaceId) query = query.eq("space_id", spaceId);
+    if (scope.spaceId) query = query.eq("space_id", scope.spaceId);
+    else if (scope.spaceIds) query = query.in("space_id", scope.spaceIds);
     if (before) query = query.lt("created_at", before);
     const { data, error } = await query;
     if (error) throw backendError(error, "Club feed could not be loaded.");
     return (data ?? []).map((row) => mapPost(row as Record<string, unknown>));
   }
 
-  async feedPage(spaceId?: string, limit = 20, before?: string): Promise<ClubFeedItem[]> {
-    const posts = await this.feed(spaceId, limit, before);
+  async feedPage(scope: ClubFeedQuery = {}, limit = 20, before?: string): Promise<ClubFeedItem[]> {
+    const posts = await this.feed(scope, limit, before);
     if (!posts.length) return [];
     const postIds = posts.map((post) => post.id);
     const authorIds = [...new Set(posts.map((post) => post.authorId))];
@@ -111,6 +120,15 @@ export class ClubRepository {
   async post(id: string): Promise<ClubPostRecord> {
     const { data, error } = await this.client.from("club_posts").select("*").eq("id", id).single();
     return mapPost(requireData(data as Record<string, unknown> | null, error, "Post could not be loaded."));
+  }
+
+  /** The spaces the rider has joined. Reading is open to any plan; joining needs `post` access. */
+  async myMemberships(): Promise<string[]> {
+    const { data: auth } = await this.client.auth.getUser();
+    if (!auth.user) return [];
+    const { data, error } = await this.client.from("club_memberships").select("space_id").eq("user_id", auth.user.id);
+    if (error) throw backendError(error, "Your groups could not be loaded.");
+    return (data ?? []).map((row) => String(row.space_id));
   }
 
   async joinSpace(spaceId: string): Promise<void> {

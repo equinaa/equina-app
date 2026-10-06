@@ -28,6 +28,14 @@ Admin → Plans with no migration or release.
   what is inside. Switching Free to `read` (feed without writing) is one change in the admin.
   Riders always see their own posts, so they can take one down, and reporting stays open to
   everyone who can see a post.
+  - **Groups.** The Club's Groups tab lists the seven public spaces. Joining one marks it as
+    the rider's own: it gets a chip in the feed and its posts gather under "My groups". It opens
+    nothing new, since every public space is readable by anyone with Club access, and leaving is
+    one tap. Joining needs `post` access (the membership policies say so); `read` riders see the
+    groups without a Join button. Member counts are not shown yet: the app only prints "Last post
+    2h ago" from posts it has already loaded, never a number it cannot back. A photo on a post goes
+    through the same upload tickets as every other file (type and size checked, content signature
+    verified, malware scan when configured) and re-queues the post for provider moderation.
 - **Ralf.** One credit is one message, three with a photo. Credits are only spent while the
   `coach_credits` flag is on; the allowance always follows the plan the rider holds. Premium's
   draft says "full access"; 300 a month (about EUR 1.60 at full use) keeps the cost bounded.
