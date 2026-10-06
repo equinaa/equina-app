@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { ClubFeedItem, ClubSpace } from "../src/backend/contracts";
 import { backendError } from "../src/backend/errors";
+import { activityVerb, profileGroups, threadComments, unreadLabel } from "../src/features/club/club-social";
 import {
   clubErrorMessage,
   clubReportReasons,
@@ -219,6 +220,39 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
   assert.equal(composerSpaceSlug({ kind: "mine" }, spaces, "dressage"), "dressage");
   assert.equal(composerSpaceSlug({ kind: "space", spaceId: "gone" }, spaces, "dressage"), "dressage",
     "A group that is no longer listed falls back to the discipline.");
+}
+
+// A thread: top comments oldest first, each followed by its replies; a reply
+// to a comment the rider cannot see stands on its own.
+{
+  const at = (minute: number) => `2026-10-06T10:${String(minute).padStart(2, "0")}:00Z`;
+  const comments = [
+    { id: "c2", createdAt: at(5) },
+    { id: "r1", parentId: "c1", createdAt: at(3) },
+    { id: "c1", createdAt: at(1) },
+    { id: "r2", parentId: "c1", createdAt: at(6) },
+    { id: "orphan", parentId: "hidden", createdAt: at(4) }
+  ];
+  assert.deepEqual(
+    threadComments(comments).map((comment) => `${comment.id}:${comment.depth}`),
+    ["c1:0", "r1:1", "r2:1", "orphan:0", "c2:0"]
+  );
+  assert.deepEqual(threadComments([]), []);
+}
+
+// Activity lines, the bell's count and a profile's groups.
+{
+  assert.equal(activityVerb("comment"), "commented on your post");
+  assert.equal(activityVerb("reply"), "replied to your comment");
+  assert.equal(activityVerb("like"), "liked your post");
+  assert.equal(unreadLabel(0), "");
+  assert.equal(unreadLabel(3), "3");
+  assert.equal(unreadLabel(120), "99+");
+  const spaces = [
+    { id: "s1", slug: "dressage", name: "Dressage", isPrivate: false },
+    { id: "s2", slug: "jumping", name: "Jumping", isPrivate: false }
+  ];
+  assert.deepEqual(profileGroups(spaces, ["s2", "gone"]).map((space) => space.name), ["Jumping"]);
 }
 
 console.log("Club rules passed.");
