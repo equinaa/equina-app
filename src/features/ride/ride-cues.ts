@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as Notifications from "expo-notifications";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import type { AudioPlayer } from "expo-audio";
 import type { RideAlert } from "./ride-plan";
 
@@ -23,6 +24,8 @@ let speech: SpeechModule | null = null;
 let audio: AudioModule | null = null;
 let chime: AudioPlayer | null = null;
 const speechDelayMs = 450;
+// Just past the 0.62 s chime: when nothing is said after it, the music comes back here.
+const chimeOnlyMs = 800;
 const alertChannel = "ride-phases";
 const alertRoute = "ride-phase";
 
@@ -37,7 +40,10 @@ export async function prepareRideCues() {
   }
   if (!chime) {
     try {
-      chime = audio.createAudioPlayer(require("../../../assets/sounds/ride-phase.wav"));
+      // Kept from closing the audio session when it ends: by default expo-audio
+      // closes it 0.1 s after the chime, which cut the voice off mid-sentence.
+      // The voice and releaseRideCues close it instead.
+      chime = audio.createAudioPlayer(require("../../../assets/sounds/ride-phase.wav"), { keepAudioSessionActive: true });
     } catch {
       chime = null;
     }
@@ -85,17 +91,26 @@ const ring = () => {
   }
 };
 
+// Each utterance gives the music back only if it is still the one speaking:
+// stopping the last words to say new ones must not close the session the new
+// ones are about to use.
+let currentUtterance = 0;
+
 const say = (text: string) => {
   if (!speech) return;
+  const mine = ++currentUtterance;
+  const finished = () => {
+    if (mine === currentUtterance) unduck();
+  };
   try {
     void speech.stop().catch(() => undefined);
     speech.speak(text, {
       language: "en-GB",
       // A touch slower than normal: heard over hooves and wind.
       rate: 0.95,
-      onDone: unduck,
-      onStopped: unduck,
-      onError: unduck
+      onDone: finished,
+      onStopped: finished,
+      onError: finished
     });
   } catch {
     // The chime and the buzz already said it.
@@ -116,6 +131,7 @@ export function cueFromTap(text: string, voice: boolean) {
   buzz("phase");
   ring();
   if (voice) say(text);
+  else setTimeout(unduck, chimeOnlyMs);
 }
 
 /** A phase change the clock made. The chime first, then the words. */
@@ -123,6 +139,15 @@ export function cueFromClock(text: string, voice: boolean, kind: "phase" | "done
   buzz(kind);
   ring();
   if (voice) setTimeout(() => say(text), speechDelayMs);
+  else setTimeout(unduck, chimeOnlyMs);
+}
+
+/**
+ * Turning the voice back on is a tap, and Safari only lets a page speak from
+ * one: saying so here keeps the next phase change audible in the browser.
+ */
+export function cueVoiceOn() {
+  say("Voice on.");
 }
 
 export function silenceRideCues() {
@@ -201,12 +226,29 @@ type VisibilityDocument = {
 };
 
 /**
- * A browser cannot speak from a locked phone, so on the web the screen stays
- * on while the ride runs. Returns the release. Browsers drop the lock when the
- * tab is hidden; it is taken again when the rider comes back.
+ * Without notifications a locked phone says nothing, so the screen stays on
+ * while the ride runs: always in a browser, and on a phone when the rider
+ * said no to notifications. With them allowed the phone may lock as usual --
+ * a screen left on in a pocket gets tapped. Returns the release.
  */
 export function holdScreenAwake(): () => void {
-  if (Platform.OS !== "web") return () => undefined;
+  if (Platform.OS !== "web") {
+    const tag = "equina-ride";
+    let held = false;
+    let released = false;
+    void rideAlertsAllowed(false).then(async (allowed) => {
+      if (allowed || released) return;
+      await activateKeepAwakeAsync(tag);
+      held = true;
+      if (released) void deactivateKeepAwake(tag).catch(() => undefined);
+    }).catch(() => undefined);
+    return () => {
+      released = true;
+      if (held) void deactivateKeepAwake(tag).catch(() => undefined);
+    };
+  }
+  // Browsers drop the lock when the tab is hidden; it is taken again when the
+  // rider comes back.
   const wakeLock = (globalThis.navigator as WakeLockNavigator | undefined)?.wakeLock;
   const page = (globalThis as { document?: VisibilityDocument }).document;
   if (!wakeLock || !page) return () => undefined;

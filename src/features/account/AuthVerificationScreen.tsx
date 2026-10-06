@@ -255,7 +255,9 @@ const styles = StyleSheet.create({
     borderColor: equinaTheme.colors.brass
   },
   codeFieldError: {
-    borderColor: equinaTheme.colors.danger
+    // The on-dark critical colour: danger (#9D2B2E) is 2.7:1 on the canvas,
+    // below the normal edge, so an error would look quieter than no error.
+    borderColor: equinaTheme.colorRole.criticalOnDark
   },
   codeInput: {
     color: equinaTheme.colors.ivory,

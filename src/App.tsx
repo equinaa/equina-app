@@ -900,6 +900,8 @@ function EquinaApp() {
   const [sharedRide, setSharedRide] = useState(false);
   const [lastRideRecapVisible, setLastRideRecapVisible] = useState(false);
   const [dailyMood, setDailyMood] = useState<MoodOption>("Focused");
+  // The check-in as of now, for a save that lands after the rider picked it.
+  const dailyMoodRef = useRef<MoodOption>("Focused");
   // Kept as the fallback for demo mode and for accounts where ride_logging is
   // still off. When the capability is on, the journal below is the source.
   const [localLastRide, setLocalLastRide] = useState<RideSession | null>(null);
@@ -989,6 +991,12 @@ function EquinaApp() {
     setAcademyProgress(0);
     setAcademyMode("home");
     setRalfOpen(false);
+    // A ride, its setup and its alerts belong to the account that started it.
+    setRideActive(false);
+    setRidePlan(null);
+    setRideSetupOpen(false);
+    setLastRideRecapVisible(false);
+    void cancelStaleRideAlerts();
     setAccountReturnTab("home");
     setTab("home");
   };
@@ -1039,7 +1047,13 @@ function EquinaApp() {
   const rideHorses: RideSetupHorse[] = horseRecords.horses.some((record) => !record.archivedAt)
     ? horseRecords.horses.filter((record) => !record.archivedAt).map((record) => ({ id: record.id, name: record.name }))
     : primaryHorseName ? [{ name: primaryHorseName }] : [];
-  const rideHorsePhoto = horseRecords.horses.find((record) => record.id === ridePlan?.horseId)?.photoUrl;
+  // The picked horse's own photo. The Stable photo stands in only for that same
+  // horse, or when there are no horse records (the demo); otherwise the
+  // discipline picture, never another horse's face.
+  const rideHorseRecord = horseRecords.horses.find((record) => record.id === ridePlan?.horseId);
+  const rideHorsePhoto = rideHorseRecord
+    ? rideHorseRecord.photoUrl || (rideHorseRecord.id === horseRecords.selectedHorseId ? onboardingHorsePhoto : "")
+    : ridePlan?.horseId ? "" : onboardingHorsePhoto;
   const rememberedTraining =
     rideTrainingTypeById(rideSetupMemory.memory?.trainingTypeId) ?? defaultTrainingType(onboardingDiscipline);
   // Editing is only offered before the clock starts, so an open plan is the one to edit.
@@ -1149,7 +1163,9 @@ function EquinaApp() {
   const dockTabs = marketplaceOpen ? [...coreTabs, shopTab] : coreTabs;
   // Every "Ask Ralf" disappears with him, so none of them leads to a dead end.
   const ralfAvailable = accountMode === "demo" || equinaSession.capabilities.coachChat;
-  const latestRideEntry = ridePersistence ? rideJournal.latestEntry : null;
+  // Only the ride on screen is offered for sharing: while a new ride is still
+  // saving, or after its save failed, the journal's newest row is the one before.
+  const latestRideEntry = ridePersistence && lastRide === journalRide ? rideJournal.latestEntry : null;
   const clubRideShare: ClubRideShare | undefined = latestRideEntry
     ? {
         id: latestRideEntry.id,
@@ -1491,6 +1507,7 @@ function EquinaApp() {
     setRideActive(true);
     setLastRideRecapVisible(false);
     setDailyMood("Focused");
+    dailyMoodRef.current = "Focused";
     refresh("Ride set up. The clock starts when you start the first phase.");
   };
 
@@ -1514,13 +1531,19 @@ function EquinaApp() {
 
     // The recap is shown immediately from local state and reconciled once the
     // write lands, so a slow network never blocks the rider's own summary.
+    const moodAtFinish = dailyMood;
+    dailyMoodRef.current = moodAtFinish;
     void rideJournal
       .logRide({
         session,
-        mood: dailyMood,
+        mood: moodAtFinish,
         horseId: ridePlan?.horseId
       })
-      .then(() => {
+      .then((created) => {
+        // A feeling picked on the recap while the save was in flight.
+        if (dailyMoodRef.current !== moodAtFinish) {
+          void rideJournal.updateRide(created.id, { mood: dailyMoodRef.current }).catch(() => undefined);
+        }
         refresh(
           onboardingHasHorse
             ? `Ride saved. Add how ${primaryHorseName} felt, then choose the next useful step.`
@@ -1651,10 +1674,13 @@ function EquinaApp() {
 
   const updateDailyMood = (mood: MoodOption) => {
     setDailyMood(mood);
+    dailyMoodRef.current = mood;
     setLocalLastRide((current) => current ? { ...current, mood } : current);
     // The check-in is an edit to the stored ride, not a separate record. Without
-    // this the recap would show one value and the journal another.
-    if (ridePersistence && rideJournal.latestEntry) {
+    // this the recap would show one value and the journal another. Only the
+    // ride on screen is edited: before its save lands, the journal's newest
+    // row is the previous ride, and finishRide carries the mood over instead.
+    if (ridePersistence && rideJournal.latestEntry && lastRide === journalRide) {
       void rideJournal
         .updateRide(rideJournal.latestEntry.id, { mood })
         .catch((saveError: unknown) => {
@@ -2414,7 +2440,7 @@ function EquinaApp() {
               <RideModeScreen
                 plan={ridePlan}
                 discipline={onboardingDiscipline}
-                image={rideHorsePhoto || onboardingHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
+                image={rideHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
                 onFinish={finishRide}
                 onExit={cancelRide}
                 onEdit={() => setRideSetupOpen(true)}

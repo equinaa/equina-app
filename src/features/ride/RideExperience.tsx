@@ -36,6 +36,7 @@ import {
   cancelStaleRideAlerts,
   cueFromClock,
   cueFromTap,
+  cueVoiceOn,
   holdScreenAwake,
   prepareRideCues,
   releaseRideCues,
@@ -176,9 +177,13 @@ export function RideModeScreen({
     return () => {
       releaseScreen();
       releaseRideCues();
-      const ids = alertIds.current;
-      alertIds.current = [];
-      void cancelRideAlerts(ids);
+      // Behind any scheduling still in flight, so alerts it lands after the
+      // ride ended are cancelled too.
+      alertQueue.current = alertQueue.current.catch(() => undefined).then(async () => {
+        const ids = alertIds.current;
+        alertIds.current = [];
+        await cancelRideAlerts(ids);
+      });
     };
   }, []);
 
@@ -223,7 +228,8 @@ export function RideModeScreen({
       setRun(step.run);
       // Out of sight -- locked, or another app in front -- the notification
       // already told the rider; a second voice from the background would not.
-      if (slept || AppState.currentState !== "active") return;
+      // "inactive" (Control Center pulled down) still runs and still speaks.
+      if (slept || AppState.currentState === "background") return;
       if (step.finished) {
         cueFromClock(phasesDoneAnnouncement, voiceRef.current, "done");
       } else if (step.entered !== null) {
@@ -284,6 +290,7 @@ export function RideModeScreen({
   const toggleVoice = () => {
     void Haptics.selectionAsync().catch(() => undefined);
     if (voice) silenceRideCues();
+    else cueVoiceOn();
     setVoice((value) => !value);
   };
 
@@ -405,11 +412,22 @@ export function RideModeScreen({
           </View>
 
           <Animated.View style={[styles.ridePhaseBlock, phaseStyle]}>
-            <Text testID="ride-phase-title" accessibilityLiveRegion="polite" style={styles.rideTimerLabel}>{phaseLabel}</Text>
+            {/* The name small above the gait, as the yard writes it; a phase
+                with no gait shows its name large instead. */}
+            {done || currentPhase?.detail ? (
+              <Text testID="ride-phase-title" accessibilityLiveRegion="polite" style={styles.rideTimerLabel}>{phaseLabel}</Text>
+            ) : null}
             {done ? (
               <Text style={styles.ridePhaseTitle}>Well ridden.</Text>
-            ) : currentPhase?.detail ? (
-              <Text numberOfLines={2} style={styles.ridePhaseTitle}>{currentPhase.detail}</Text>
+            ) : currentPhase ? (
+              <Text
+                testID={currentPhase.detail ? undefined : "ride-phase-title"}
+                accessibilityLiveRegion={currentPhase.detail ? undefined : "polite"}
+                numberOfLines={2}
+                style={styles.ridePhaseTitle}
+              >
+                {currentPhase.detail || currentPhase.title}
+              </Text>
             ) : null}
             <Text testID="ride-countdown" style={styles.rideTimer}>{timerValue}</Text>
             <Text style={styles.rideTimerNote}>{timerNote}</Text>
