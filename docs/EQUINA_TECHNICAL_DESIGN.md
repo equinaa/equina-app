@@ -186,7 +186,7 @@ Direct writes to `horse_record_files`, `club_post_media`, `listing_photos`, and 
 
 `MALWARE_SCAN_REQUIRED=true` makes provider failure fail closed. The scanner is not yet contracted.
 
-**Known gap:** EXIF stripping, image normalization, and video transcoding are not implemented. The required processor contract is specified in `docs/EQUINA_MEDIA_PROCESSING_BOUNDARY.md` — claim with lease token, download via service signed URL, decode and re-encode, strip all metadata, enforce dimensions, recompute MIME/size/hash, write to a new immutable path, atomically replace the active reference, queue the source for cleanup, complete under the same lease token. Until it exists, public media publishing stays disabled and image upload is approved for named internal users only.
+**Known gap:** EXIF stripping, image normalization, and video transcoding are not implemented. The required processor contract is specified in `docs/EQUINA_MEDIA_PROCESSING_BOUNDARY.md` — claim with lease token, download via service signed URL, decode and re-encode, strip all metadata, enforce dimensions, recompute MIME/size/hash, write to a new immutable path, atomically replace the active reference, queue the source for cleanup, complete under the same lease token. Until it exists, public media publishing stays disabled and image upload is approved for named internal users only. The Club composer's "Add photo" control is built but hidden behind the client flag `EXPO_PUBLIC_ENABLE_CLUB_PHOTO_POSTS` (default off); the server gates `club_post` tickets on `club_publishing` alone, so the client flag is the only thing standing between a HEIC with GPS and every Club reader.
 
 ### 5.3 Edge Functions
 

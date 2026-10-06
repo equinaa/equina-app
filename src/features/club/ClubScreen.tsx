@@ -9,24 +9,55 @@ import {
   TextInput,
   View
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import {
   Ellipsis,
   Flag,
   Heart,
+  ImagePlus,
   MessageSquareText,
   RefreshCw,
   SendHorizontal,
   Trash2,
-  UserX
+  UserX,
+  X
 } from "lucide-react-native";
-import type { ClubAccess, ClubCommentWithAuthor, ClubFeedItem, ClubSpace } from "../../backend";
-import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
+import type { ClubAccess, ClubCommentWithAuthor, ClubFeedItem, ClubSpace, UploadAsset } from "../../backend";
+import { equinaFeatureFlags } from "../../config/feature-flags";
+import { EquinaButton, EquinaIconButton, EquinaSegmentedTabs, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import { clubReportReasons, relativeTime, type ClubReportReason } from "./club-format";
+import {
+  clubFilterChips,
+  clubPhotoProblem,
+  clubSpaceImageKey,
+  composerPrompt,
+  orderClubSpaces,
+  feedEmptyState,
+  latestActivityLabel,
+  sameScope,
+  type ClubSpaceImageKey
+} from "./club-groups";
 import type { ClubController } from "./useClub";
 
 const postLimit = 2000;
 const commentLimit = 1200;
+
+type ClubTab = "feed" | "groups";
+
+const assetSize = async (uri: string, knownSize?: number | null) => {
+  if (knownSize && knownSize > 0) return knownSize;
+  const response = await fetch(uri);
+  if (!response.ok) throw new Error("The selected photo could not be read.");
+  return (await response.blob()).size;
+};
+
+const photoUploadAsset = async (asset: ImagePicker.ImagePickerAsset): Promise<UploadAsset> => ({
+  uri: asset.uri,
+  fileName: asset.fileName ?? `club-${Date.now()}.jpg`,
+  mimeType: asset.mimeType ?? "image/jpeg",
+  byteSize: await assetSize(asset.uri, asset.fileSize)
+});
 
 export type ClubRideShare = {
   id: string;
@@ -45,6 +76,7 @@ export function ClubScreen({
   currentUserId,
   riderName,
   defaultSpaceSlug,
+  spaceImages,
   rideToShare,
   composeRequest,
   onNotice
@@ -63,15 +95,20 @@ export function ClubScreen({
   currentUserId?: string;
   riderName: string;
   defaultSpaceSlug: string;
+  /** The editorial photo behind each group card, by image key. */
+  spaceImages: Record<ClubSpaceImageKey, string>;
   /** The rider's latest ride, offered as an attachment in the composer. */
   rideToShare?: ClubRideShare;
   /** Incremented to open the composer with the ride attached ("Share ride"). */
   composeRequest: number;
   onNotice: (message: string) => void;
 }) {
+  const [tab, setTab] = useState<ClubTab>("feed");
   const [composer, setComposer] = useState<{ attachRide: boolean } | null>(null);
   const [commentsFor, setCommentsFor] = useState<ClubFeedItem | null>(null);
   const [optionsFor, setOptionsFor] = useState<ClubFeedItem | null>(null);
+  // Photos wait for EXIF and GPS removal (feature-flags.ts).
+  const photoPosts = canPost && equinaFeatureFlags.clubPhotoPosts;
 
   useEffect(() => {
     if (composeRequest > 0 && canPost) setComposer({ attachRide: Boolean(rideToShare) });
@@ -80,6 +117,19 @@ export function ClubScreen({
 
   const spaceName = (spaceId: string) => club.spaces.find((space) => space.id === spaceId)?.name ?? "Club";
   const activeSpace = club.spaces.find((space) => space.id === club.spaceId);
+  const joined = new Set(club.joinedSpaceIds);
+  const emptyState = feedEmptyState({
+    scope: club.scope,
+    spaceName: activeSpace?.name,
+    canPost,
+    hasMemberships: club.joinedSpaceIds.length > 0
+  });
+
+  // A group card opens the feed on that group.
+  const openGroupFeed = (spaceId: string) => {
+    club.selectScope({ kind: "space", spaceId });
+    setTab("feed");
+  };
 
   if (access === "none") {
     return (
@@ -111,34 +161,43 @@ export function ClubScreen({
 
   return (
     <View style={styles.screen}>
-      <View style={styles.topBar}>
-        {canPost ? (
+      <EquinaSegmentedTabs<ClubTab>
+        testIDPrefix="club-tab"
+        value={tab}
+        onChange={setTab}
+        tabs={[{ value: "feed", label: "Feed" }, { value: "groups", label: "Groups" }]}
+      />
+
+      {tab === "feed" ? (
+        <View style={styles.topBar}>
+          {canPost ? (
+            <Pressable
+              testID="club-compose"
+              accessibilityRole="button"
+              accessibilityLabel="Write a post"
+              onPress={() => setComposer({ attachRide: false })}
+              style={({ pressed }) => [styles.composerRow, pressed && styles.pressed]}
+            >
+              <Avatar name={riderName} />
+              <Text style={styles.composerPrompt}>{composerPrompt(photoPosts)}</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.feedLabel}>Latest from your Club</Text>
+          )}
           <Pressable
-            testID="club-compose"
+            testID="club-refresh"
             accessibilityRole="button"
-            accessibilityLabel="Write a post"
-            onPress={() => setComposer({ attachRide: false })}
-            style={({ pressed }) => [styles.composerRow, pressed && styles.pressed]}
+            accessibilityLabel="Refresh the feed"
+            disabled={club.loading}
+            onPress={() => void club.refresh()}
+            style={styles.iconButton}
           >
-            <Avatar name={riderName} />
-            <Text style={styles.composerPrompt}>How did today's ride go?</Text>
+            {club.loading
+              ? <ActivityIndicator size="small" color={equinaTheme.colors.brass} />
+              : <RefreshCw size={18} color={equinaTheme.text.secondary} />}
           </Pressable>
-        ) : (
-          <Text style={styles.feedLabel}>Latest from your Club</Text>
-        )}
-        <Pressable
-          testID="club-refresh"
-          accessibilityRole="button"
-          accessibilityLabel="Refresh the feed"
-          disabled={club.loading}
-          onPress={() => void club.refresh()}
-          style={styles.iconButton}
-        >
-          {club.loading
-            ? <ActivityIndicator size="small" color={equinaTheme.colors.brass} />
-            : <RefreshCw size={18} color={equinaTheme.text.secondary} />}
-        </Pressable>
-      </View>
+        </View>
+      ) : null}
 
       {access === "read" ? (
         <Pressable
@@ -154,21 +213,23 @@ export function ClubScreen({
         </Pressable>
       ) : null}
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-      >
-        <SpaceChip label="All" selected={!club.spaceId} onPress={() => club.selectSpace(undefined)} />
-        {club.spaces.map((space) => (
-          <SpaceChip
-            key={space.id}
-            label={space.name}
-            selected={club.spaceId === space.id}
-            onPress={() => club.selectSpace(space.id)}
-          />
-        ))}
-      </ScrollView>
+      {tab === "feed" ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chips}
+        >
+          {clubFilterChips(club.spaces, club.joinedSpaceIds, club.scope).map((chip) => (
+            <SpaceChip
+              key={chip.key}
+              testID={`club-filter-${chip.key}`}
+              label={chip.label}
+              selected={sameScope(club.scope, chip.scope)}
+              onPress={() => club.selectScope(chip.scope)}
+            />
+          ))}
+        </ScrollView>
+      ) : null}
 
       {club.error ? (
         <Pressable
@@ -184,22 +245,27 @@ export function ClubScreen({
         </Pressable>
       ) : null}
 
-      {!club.loaded && club.loading ? (
+      {tab === "feed" && ((!club.loaded && club.loading) || (club.scope.kind === "mine" && !club.membershipsLoaded)) ? (
         <ActivityIndicator style={styles.loading} color={equinaTheme.colors.brass} />
       ) : null}
 
-      {club.loaded && club.items.length === 0 ? (
-        <View style={styles.notice}>
-          <Text style={styles.noticeTitle}>
-            {activeSpace ? `No posts in ${activeSpace.name} yet.` : "No posts yet."}
-          </Text>
-          <Text style={styles.noticeBody}>
-            {canPost ? "Share how today's ride went. Riders in your space will see it right away." : "Posts from other riders will appear here."}
-          </Text>
+      {tab === "feed" && club.loaded && club.items.length === 0 && (club.scope.kind !== "mine" || club.membershipsLoaded) ? (
+        <View style={styles.notice} testID="club-feed-empty">
+          <Text style={styles.noticeTitle}>{emptyState.title}</Text>
+          <Text style={styles.noticeBody}>{emptyState.body}</Text>
+          {emptyState.action === "groups" ? (
+            <EquinaButton
+              testID="club-feed-see-groups"
+              label="See groups"
+              variant="secondary"
+              onPress={() => setTab("groups")}
+              style={styles.noticeAction}
+            />
+          ) : null}
         </View>
       ) : null}
 
-      {club.items.map((item) => (
+      {tab === "feed" ? club.items.map((item) => (
         <ClubPostCard
           key={item.post.id}
           item={item}
@@ -209,7 +275,42 @@ export function ClubScreen({
           onComments={() => setCommentsFor(item)}
           onOptions={() => setOptionsFor(item)}
         />
-      ))}
+      )) : null}
+
+      {tab === "feed" && club.hasMore && club.items.length > 0 ? (
+        <EquinaButton
+          testID="club-load-more"
+          label={club.loadingMore ? "Loading..." : "Load more"}
+          variant="secondary"
+          showArrow={false}
+          disabled={club.loadingMore}
+          onPress={() => void club.loadMore()}
+        />
+      ) : null}
+
+      {tab === "groups" ? (
+        <>
+          <Text style={styles.noticeBody}>
+            Join the groups you ride in. Their posts gather under "My groups" in the feed; every group stays open to read.
+          </Text>
+          {!club.spaces.length && club.loading ? (
+            <ActivityIndicator style={styles.loading} color={equinaTheme.colors.brass} />
+          ) : null}
+          {orderClubSpaces(club.spaces, defaultSpaceSlug).map((space) => (
+            <ClubGroupCard
+              key={space.id}
+              space={space}
+              image={spaceImages[clubSpaceImageKey(space.slug)]}
+              joined={joined.has(space.id)}
+              activity={latestActivityLabel(space.id, club.items)}
+              canJoin={canInteract}
+              onOpen={() => openGroupFeed(space.id)}
+              onJoin={() => void club.joinSpace(space.id)}
+              onLeave={() => void club.leaveSpace(space.id)}
+            />
+          ))}
+        </>
+      ) : null}
 
       <ComposerSheet
         visible={Boolean(composer)}
@@ -217,18 +318,24 @@ export function ClubScreen({
         defaultSpaceSlug={defaultSpaceSlug}
         ride={rideToShare}
         startWithRide={Boolean(composer?.attachRide)}
+        allowPhoto={photoPosts}
         busy={club.busy === "post"}
         onDismiss={() => setComposer(null)}
         onSubmit={async (input) => {
           const result = await club.createPost(input);
           if (!result) return false;
           setComposer(null);
-          // Show the space the post went to; a feed filtered to another space
-          // would hide it and the rider would think it was lost.
-          if (result.published && club.spaceId && club.spaceId !== input.spaceId) club.selectSpace(input.spaceId);
-          onNotice(result.published
-            ? "Posted to Club."
-            : "Your post was not published because it matched the Club guidelines.");
+          // Show the space the post went to; a feed filtered elsewhere would
+          // hide it and the rider would think it was lost.
+          const hidesPost = club.scope.kind === "space"
+            ? club.scope.spaceId !== input.spaceId
+            : club.scope.kind === "mine" && !joined.has(input.spaceId);
+          if (result.published && hidesPost) club.selectScope({ kind: "space", spaceId: input.spaceId });
+          onNotice(!result.published
+            ? "Your post was not published because it matched the Club guidelines."
+            : result.photoFailed
+              ? "Posted, but the photo could not be uploaded."
+              : "Posted to Club.");
           return true;
         }}
       />
@@ -346,12 +453,68 @@ function ClubPostCard({
   );
 }
 
+function ClubGroupCard({
+  space,
+  image,
+  joined,
+  activity,
+  canJoin,
+  onOpen,
+  onJoin,
+  onLeave
+}: {
+  space: ClubSpace;
+  image: string;
+  joined: boolean;
+  /** "Last post 2h ago", from the posts already loaded; absent when none is. */
+  activity?: string;
+  /** Joining needs the plan's `post` access; without it the card only opens the feed. */
+  canJoin: boolean;
+  onOpen: () => void;
+  onJoin: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <View style={styles.groupCard} testID={`club-group-${space.slug}`}>
+      <Pressable
+        testID={`club-group-open-${space.slug}`}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${space.name} in the feed`}
+        onPress={onOpen}
+        style={({ pressed }) => [styles.groupBody, pressed && styles.pressed]}
+      >
+        <Image source={{ uri: image }} style={styles.groupImage} resizeMode="cover" accessibilityIgnoresInvertColors />
+        <View style={styles.groupText}>
+          <View style={styles.groupTitleRow}>
+            <Text numberOfLines={1} style={styles.groupName}>{space.name}</Text>
+            {joined ? <Text style={styles.groupJoined}>Joined</Text> : null}
+          </View>
+          {space.description ? <Text numberOfLines={2} style={styles.noticeBody}>{space.description}</Text> : null}
+          {activity ? <Text style={styles.meta}>{activity}</Text> : null}
+        </View>
+      </Pressable>
+      {canJoin ? (
+        <Pressable
+          testID={`club-group-${joined ? "leave" : "join"}-${space.slug}`}
+          accessibilityRole="button"
+          accessibilityLabel={joined ? `Leave ${space.name}` : `Join ${space.name}`}
+          onPress={joined ? onLeave : onJoin}
+          style={({ pressed }) => [styles.groupAction, !joined && styles.groupActionJoin, pressed && styles.pressed]}
+        >
+          <Text style={[styles.groupActionText, !joined && styles.groupActionJoinText]}>{joined ? "Leave" : "Join"}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function ComposerSheet({
   visible,
   spaces,
   defaultSpaceSlug,
   ride,
   startWithRide,
+  allowPhoto,
   busy,
   onDismiss,
   onSubmit
@@ -362,13 +525,17 @@ function ComposerSheet({
   ride?: ClubRideShare;
   /** Opened from "Share ride": the ride starts attached. */
   startWithRide: boolean;
+  /** Media needs the same plan access as posting; the control is hidden otherwise. */
+  allowPhoto: boolean;
   busy: boolean;
   onDismiss: () => void;
-  onSubmit: (input: { spaceId: string; body: string; rideId?: string; horseId?: string }) => Promise<boolean>;
+  onSubmit: (input: { spaceId: string; body: string; rideId?: string; horseId?: string; photo?: UploadAsset }) => Promise<boolean>;
 }) {
   const [text, setText] = useState("");
   const [spaceId, setSpaceId] = useState("");
   const [attachRide, setAttachRide] = useState(false);
+  const [photo, setPhoto] = useState<UploadAsset | undefined>(undefined);
+  const [photoError, setPhotoError] = useState("");
 
   // Reset only when the sheet opens. The app re-renders underneath while the
   // rider types (a realtime refresh, a new ride summary object), and that must
@@ -378,7 +545,35 @@ function ComposerSheet({
     setText("");
     setAttachRide(startWithRide && Boolean(ride));
     setSpaceId("");
+    setPhoto(undefined);
+    setPhotoError("");
   }, [visible]);
+
+  const pickPhoto = async () => {
+    setPhotoError("");
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setPhotoError("Allow photo access to add a photo to your post.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: false,
+      quality: 0.88
+    });
+    if (result.canceled || !result.assets[0]) return;
+    try {
+      const asset = await photoUploadAsset(result.assets[0]);
+      const problem = clubPhotoProblem(asset);
+      if (problem) {
+        setPhotoError(problem);
+        return;
+      }
+      setPhoto(asset);
+    } catch (assetError) {
+      setPhotoError(assetError instanceof Error ? assetError.message : "Photo could not be prepared.");
+    }
+  };
 
   // Spaces can still be loading when the sheet opens; pick the default once
   // they arrive, and never override a space the rider chose.
@@ -399,12 +594,39 @@ function ComposerSheet({
           accessibilityLabel="Post text"
           value={text}
           onChangeText={setText}
-          placeholder="How did today's ride go?"
+          placeholder={composerPrompt(allowPhoto)}
           placeholderTextColor={equinaTheme.text.tertiary}
           multiline
           maxLength={postLimit}
           style={styles.composerInput}
         />
+        {allowPhoto && photo ? (
+          <View style={styles.photoRow}>
+            <Image source={{ uri: photo.uri }} style={styles.photoPreview} accessibilityIgnoresInvertColors />
+            <Text numberOfLines={1} style={styles.photoName}>{photo.fileName}</Text>
+            <EquinaIconButton
+              testID="club-composer-photo-remove"
+              Icon={X}
+              label="Remove photo"
+              tone="glass"
+              iconSize={18}
+              onPress={() => setPhoto(undefined)}
+            />
+          </View>
+        ) : null}
+        {allowPhoto && !photo ? (
+          <Pressable
+            testID="club-composer-photo"
+            accessibilityRole="button"
+            accessibilityLabel="Add photo"
+            onPress={() => void pickPhoto()}
+            style={({ pressed }) => [styles.attachRow, pressed && styles.pressed]}
+          >
+            <ImagePlus size={18} color={equinaTheme.colors.brass} />
+            <Text style={styles.attachText}>Add photo</Text>
+          </Pressable>
+        ) : null}
+        {photoError ? <Text style={styles.errorText}>{photoError}</Text> : null}
         {ride ? (
           <Pressable
             testID="club-composer-ride"
@@ -438,7 +660,8 @@ function ComposerSheet({
             spaceId,
             body,
             rideId: attachRide ? ride?.id : undefined,
-            horseId: attachRide ? ride?.horseId : undefined
+            horseId: attachRide ? ride?.horseId : undefined,
+            photo: allowPhoto ? photo : undefined
           })}
         />
       </View>
@@ -717,9 +940,10 @@ function OptionRow({
   );
 }
 
-function SpaceChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+function SpaceChip({ label, selected, onPress, testID }: { label: string; selected: boolean; onPress: () => void; testID?: string }) {
   return (
     <Pressable
+      testID={testID}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={label}
@@ -967,6 +1191,104 @@ const styles = StyleSheet.create({
   rideToggleBody: {
     ...equinaTheme.typography.meta,
     color: equinaTheme.text.secondary
+  },
+  attachRow: {
+    minHeight: equinaTheme.accessibility.minimumTapTarget,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.sm,
+    paddingHorizontal: equinaTheme.spacing.compact,
+    borderRadius: equinaTheme.radius.control,
+    borderWidth: 1,
+    borderColor: equinaTheme.material.separator
+  },
+  attachText: {
+    ...equinaTheme.typography.meta,
+    color: equinaTheme.text.primary,
+    fontWeight: "600"
+  },
+  photoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.compact,
+    padding: equinaTheme.spacing.sm,
+    borderRadius: equinaTheme.radius.control,
+    borderWidth: 1,
+    borderColor: equinaTheme.colors.brass,
+    backgroundColor: equinaTheme.material.fieldFocused
+  },
+  photoPreview: {
+    width: 56,
+    height: 56,
+    borderRadius: equinaTheme.radius.compact,
+    backgroundColor: equinaTheme.surfaces.elevated
+  },
+  photoName: {
+    ...equinaTheme.typography.meta,
+    color: equinaTheme.text.secondary,
+    flex: 1,
+    minWidth: 0
+  },
+  groupCard: {
+    gap: equinaTheme.spacing.compact,
+    padding: equinaTheme.spacing.compact,
+    borderRadius: equinaTheme.radius.card,
+    backgroundColor: equinaTheme.surfaces.raised,
+    borderWidth: 1,
+    borderColor: equinaTheme.material.separator
+  },
+  groupBody: {
+    gap: equinaTheme.spacing.compact
+  },
+  groupImage: {
+    width: "100%",
+    height: 132,
+    borderRadius: equinaTheme.radius.control,
+    backgroundColor: equinaTheme.surfaces.elevated
+  },
+  groupText: {
+    gap: 4,
+    paddingHorizontal: equinaTheme.spacing.xs
+  },
+  groupTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.sm
+  },
+  groupName: {
+    ...equinaTheme.typography.body,
+    color: equinaTheme.text.primary,
+    fontWeight: "600",
+    flexShrink: 1
+  },
+  groupJoined: {
+    ...equinaTheme.typography.label,
+    color: equinaTheme.colors.brass,
+    paddingHorizontal: equinaTheme.spacing.sm,
+    paddingVertical: 2,
+    borderRadius: equinaTheme.radius.compact,
+    backgroundColor: equinaTheme.material.selected
+  },
+  groupAction: {
+    alignSelf: "flex-start",
+    minHeight: 40,
+    minWidth: 96,
+    paddingHorizontal: equinaTheme.spacing.md,
+    borderRadius: equinaTheme.radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.material.quiet
+  },
+  groupActionJoin: {
+    backgroundColor: equinaTheme.colors.brass
+  },
+  groupActionText: {
+    ...equinaTheme.typography.meta,
+    color: equinaTheme.text.secondary,
+    fontWeight: "600"
+  },
+  groupActionJoinText: {
+    color: equinaTheme.colors.ink
   },
   commentList: {
     maxHeight: 340

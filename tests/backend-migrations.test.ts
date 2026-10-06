@@ -1569,13 +1569,21 @@ for (const reaction of ["like", "support"]) {
   await upsert("user_blocks", { blocker_id: riderC, blocked_id: riderB }, "blocker_id, blocked_id");
   await upsert("club_reactions", { post_id: postId, user_id: riderC, reaction }, "post_id, user_id");
 }
-// No UPDATE policy on memberships: a first join must work, a repeat is refused.
+// No UPDATE policy on memberships: a first join must work, a repeat through
+// the DO UPDATE path is refused, and the app's join (DO NOTHING) succeeds on a
+// membership already held instead of telling the rider Club is closed.
 await upsert("club_memberships", { space_id: spaceId, user_id: riderC, role: "member" }, "space_id, user_id");
 await assert.rejects(
   upsert("club_memberships", { space_id: spaceId, user_id: riderC, role: "member" }, "space_id, user_id"),
   /row-level security/,
   "The UPDATE grant on memberships exists only so the upsert plans; RLS still refuses the update."
 );
+await db.query(
+  "insert into public.club_memberships(space_id, user_id, role) values ($1, $2, 'member') on conflict (space_id, user_id) do nothing",
+  [spaceId, riderC]
+);
+const repeatedJoin = await db.query("select 1 from public.club_memberships where space_id = $1 and user_id = $2", [spaceId, riderC]);
+assert.equal(repeatedJoin.rows.length, 1, "Joining a group held already keeps the one row and raises nothing.");
 await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 await upsert("coach_message_feedback", {
   user_id: riderA, message_id: coachAssistantMessage.rows[0]?.id, useful: false, reason: "Too general"

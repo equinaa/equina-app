@@ -296,6 +296,8 @@ if (oldKey === undefined) delete process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KE
 else process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = oldKey;
 
 assert.equal(equinaFeatureFlags.clubPublishing, false);
+// No EXIF/GPS removal exists yet; a photo on a post would carry the stable's coordinates.
+assert.equal(equinaFeatureFlags.clubPhotoPosts, false);
 // Posting is post-moderated in the database; it must not wait for the
 // external moderation provider, or no rider could ever publish.
 const capabilitiesSource = readFileSync(join(root, "supabase", "functions", "backend-capabilities", "index.ts"), "utf8");

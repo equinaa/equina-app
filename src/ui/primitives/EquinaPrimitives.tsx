@@ -325,6 +325,39 @@ export function EquinaSelector<T extends string>({
   );
 }
 
+type EquinaSegmentedTabsProps<T extends string> = {
+  tabs: Array<{ value: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+  /** Each tab gets `${testIDPrefix}-${label in lower case}`. */
+  testIDPrefix: string;
+  style?: StyleProp<ViewStyle>;
+};
+
+/** A row of equal tabs that switch one view: the Stable's Overview/Care/Documents, the Club's Feed/Groups. */
+export function EquinaSegmentedTabs<T extends string>({ tabs, value, onChange, testIDPrefix, style }: EquinaSegmentedTabsProps<T>) {
+  return (
+    <View accessibilityRole="tablist" style={[primitiveStyles.segmentedTabs, style]}>
+      {tabs.map((tab) => {
+        const active = tab.value === value;
+        return (
+          <Pressable
+            key={tab.value}
+            testID={`${testIDPrefix}-${tab.label.toLowerCase()}`}
+            accessibilityRole="tab"
+            accessibilityLabel={tab.label}
+            accessibilityState={{ selected: active }}
+            style={[primitiveStyles.segmentedTab, active && primitiveStyles.segmentedTabActive]}
+            onPress={() => onChange(tab.value)}
+          >
+            <Text numberOfLines={1} style={[primitiveStyles.segmentedTabText, active && primitiveStyles.segmentedTabTextActive]}>{tab.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export function EquinaProgress({ current, total, label }: { current: number; total: number; label: string }) {
   return (
     <View
@@ -408,6 +441,36 @@ const primitiveStyles = StyleSheet.create({
   },
   iconButtonDisabled: {
     opacity: 0.4
+  },
+  // Moved as they were from App.tsx's stableViewSwitch/stableViewTab*.
+  segmentedTabs: {
+    minHeight: 50,
+    borderRadius: equinaTheme.radius.control,
+    padding: 3,
+    flexDirection: "row",
+    gap: 3,
+    backgroundColor: equinaTheme.material.quiet
+  },
+  segmentedTab: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: equinaTheme.radius.compact,
+    alignItems: "center",
+    justifyContent: "center",
+    outlineStyle: "solid",
+    outlineWidth: 0
+  },
+  segmentedTabActive: {
+    backgroundColor: equinaTheme.material.selected
+  },
+  segmentedTabText: {
+    color: equinaTheme.text.tertiary,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "600"
+  },
+  segmentedTabTextActive: {
+    color: equinaTheme.text.primary
   },
   sheetRoot: {
     flex: 1,

@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClubCommentWithAuthor, ClubFeedItem, ClubSpace, EquinaBackend } from "../../backend";
+import type { ClubCommentWithAuthor, ClubFeedItem, ClubSpace, EquinaBackend, UploadAsset } from "../../backend";
 import { clubErrorMessage, isDuplicateReport, type ClubReportReason } from "./club-format";
+import {
+  allScope,
+  feedCursor,
+  feedQueryForScope,
+  mergeFeedPages,
+  type ClubFeedScope
+} from "./club-groups";
 
 const feedSize = 30;
 // Several riders acting at once arrive as a burst of change events. One
 // reload after the burst is enough.
 const realtimeSettleMs = 700;
 
-export type ClubPostResult = { published: boolean } | null;
+export type ClubPostResult = { published: boolean; photoFailed: boolean } | null;
 
 export function useClub({
   backend,
@@ -17,25 +24,39 @@ export function useClub({
   enabled: boolean;
 }) {
   const [spaces, setSpaces] = useState<ClubSpace[]>([]);
-  // undefined is every space the rider can read.
-  const [spaceId, setSpaceId] = useState<string | undefined>(undefined);
+  const [scope, setScope] = useState<ClubFeedScope>(allScope);
+  const [joinedSpaceIds, setJoinedSpaceIds] = useState<string[]>([]);
+  // "My groups" says nothing about empty groups until this is true: before the
+  // memberships arrive an empty page only means they were not asked for yet.
+  const [membershipsLoaded, setMembershipsLoaded] = useState(false);
   const [items, setItems] = useState<ClubFeedItem[]>([]);
+  // A full page means older posts may exist; the next page says for sure.
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   // Only the newest load may write the feed: switching spaces quickly would
   // otherwise let a slow earlier response overwrite the space now on screen.
   const latestLoad = useRef(0);
+  // The memberships the feed query reads, without waiting for a render.
+  const joinedRef = useRef<string[]>([]);
+  joinedRef.current = joinedSpaceIds;
+  // The scope a membership response finds on screen when it lands.
+  const scopeRef = useRef<ClubFeedScope>(allScope);
+  scopeRef.current = scope;
 
-  const loadFeed = useCallback(async (targetSpaceId: string | undefined) => {
+  const loadFeed = useCallback(async (targetScope: ClubFeedScope) => {
     if (!backend || !enabled) return;
     const request = ++latestLoad.current;
     setLoading(true);
     try {
-      const page = await backend.club.feedPage(targetSpaceId, feedSize);
+      const query = feedQueryForScope(targetScope, joinedRef.current);
+      const page = query ? await backend.club.feedPage(query, feedSize) : [];
       if (request !== latestLoad.current) return;
       setItems(page);
+      setHasMore(page.length >= feedSize);
       setError("");
       setLoaded(true);
     } catch (cause) {
@@ -47,18 +68,67 @@ export function useClub({
     }
   }, [backend, enabled]);
 
-  const refresh = useCallback(() => loadFeed(spaceId), [loadFeed, spaceId]);
+  const refresh = useCallback(() => loadFeed(scope), [loadFeed, scope]);
 
-  const selectSpace = useCallback((next: string | undefined) => {
-    setSpaceId(next);
+  const selectScope = useCallback((next: ClubFeedScope) => {
+    scopeRef.current = next;
+    setScope(next);
+    // The items on screen still belong to the old scope until the new page
+    // lands; "Load more" must not offer to page them.
+    setHasMore(false);
     void loadFeed(next);
   }, [loadFeed]);
+
+  // The rider's groups, from the server. While "My groups" is on screen the
+  // feed follows, since its query is built from these ids.
+  const syncMemberships = useCallback(async () => {
+    if (!backend || !enabled) return;
+    try {
+      const next = await backend.club.myMemberships();
+      joinedRef.current = next;
+      setJoinedSpaceIds(next);
+      setMembershipsLoaded(true);
+      if (scopeRef.current.kind === "mine") void loadFeed(scopeRef.current);
+    } catch (cause) {
+      setError(clubErrorMessage(cause, "Your groups could not be loaded."));
+    }
+  }, [backend, enabled, loadFeed]);
+
+  /**
+   * Appends the page before the oldest item on screen. It does not claim the
+   * feed: a refresh or realtime reload that lands meanwhile replaces the first
+   * page and this older page is dropped, so the two never interleave. The
+   * trade-off is that a reload while reading far down jumps back to page one;
+   * the rider loads more again. While a first page is in flight the cursor
+   * belongs to the page about to be replaced, so nothing is appended.
+   */
+  const loadMore = useCallback(async () => {
+    if (!backend || !enabled || loading || loadingMore || !hasMore) return;
+    const request = latestLoad.current;
+    const before = feedCursor(items);
+    const query = feedQueryForScope(scope, joinedRef.current);
+    if (!before || !query) return;
+    setLoadingMore(true);
+    try {
+      const page = await backend.club.feedPage(query, feedSize, before);
+      if (request !== latestLoad.current) return;
+      setItems((current) => mergeFeedPages(current, page));
+      setHasMore(page.length >= feedSize);
+    } catch (cause) {
+      if (request === latestLoad.current) setError(clubErrorMessage(cause, "Older posts could not be loaded."));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [backend, enabled, hasMore, items, loading, loadingMore, scope]);
 
   useEffect(() => {
     if (!backend || !enabled) {
       setItems([]);
       setSpaces([]);
-      setSpaceId(undefined);
+      setJoinedSpaceIds([]);
+      setMembershipsLoaded(false);
+      setScope(allScope);
+      setHasMore(false);
       setLoaded(false);
       return;
     }
@@ -67,33 +137,36 @@ export function useClub({
       (next) => { if (active) setSpaces(next); },
       (cause: unknown) => { if (active) setError(clubErrorMessage(cause, "Club spaces could not be loaded.")); }
     );
-    void loadFeed(undefined);
+    void syncMemberships();
+    void loadFeed(allScope);
     return () => { active = false; };
-  }, [backend, enabled, loadFeed]);
+  }, [backend, enabled, loadFeed, syncMemberships]);
 
   // Another rider posting, liking or commenting reloads the feed on its own,
-  // so two riders see each other without pulling to refresh.
+  // so two riders see each other without pulling to refresh. "My groups" and
+  // "All" listen to every space; the reload applies the filter.
   useEffect(() => {
     if (!backend || !enabled) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void loadFeed(spaceId), realtimeSettleMs);
+      timer = setTimeout(() => void loadFeed(scope), realtimeSettleMs);
     };
-    const stopPosts = backend.club.subscribe(spaceId, settle);
+    const stopPosts = backend.club.subscribe(scope.kind === "space" ? scope.spaceId : undefined, settle);
     const stopActivity = backend.club.subscribeActivity(settle);
     return () => {
       if (timer) clearTimeout(timer);
       stopPosts();
       stopActivity();
     };
-  }, [backend, enabled, loadFeed, spaceId]);
+  }, [backend, enabled, loadFeed, scope]);
 
   const createPost = useCallback(async (input: {
     spaceId: string;
     body: string;
     rideId?: string;
     horseId?: string;
+    photo?: UploadAsset;
   }): Promise<ClubPostResult> => {
     if (!backend || !enabled) return null;
     setBusy("post");
@@ -101,22 +174,32 @@ export function useClub({
     try {
       const post = await backend.club.createPost({
         spaceId: input.spaceId,
-        postType: input.rideId ? "ride" : "journal",
+        postType: input.rideId ? "ride" : input.photo ? "photo" : "journal",
         body: input.body,
         rideId: input.rideId,
         horseId: input.horseId
       });
-      await loadFeed(spaceId);
+      // The post exists before the photo goes up. A failed upload keeps the
+      // post and says so; silently dropping the text would be worse.
+      let photoFailed = false;
+      if (input.photo) {
+        try {
+          await backend.club.attachMedia(post.id, input.photo, 0);
+        } catch {
+          photoFailed = true;
+        }
+      }
+      await loadFeed(scope);
       // The phrase filter hides a post on write; its author is told rather
       // than left wondering why it never appeared.
-      return { published: post.moderationStatus === "visible" };
+      return { published: post.moderationStatus === "visible", photoFailed };
     } catch (cause) {
       setError(clubErrorMessage(cause, "Your post could not be shared."));
       return null;
     } finally {
       setBusy("");
     }
-  }, [backend, enabled, loadFeed, spaceId]);
+  }, [backend, enabled, loadFeed, scope]);
 
   const toggleLike = useCallback(async (postId: string) => {
     if (!backend || !enabled) return;
@@ -142,6 +225,39 @@ export function useClub({
       setError(clubErrorMessage(cause, "Your reaction could not be saved."));
     }
   }, [backend, enabled, items]);
+
+  // Joining is a bookmark, not a key: public spaces stay readable either way.
+  // Shown at once; undone if the server refuses.
+  const setMembership = useCallback(async (spaceId: string, joined: boolean) => {
+    if (!backend || !enabled) return false;
+    const apply = (member: boolean) => {
+      const without = joinedRef.current.filter((id) => id !== spaceId);
+      // Written to the ref at once so a reload in the same tick sees it.
+      joinedRef.current = member ? [...without, spaceId] : without;
+      setJoinedSpaceIds(joinedRef.current);
+    };
+    apply(joined);
+    try {
+      if (joined) await backend.club.joinSpace(spaceId);
+      else await backend.club.leaveSpace(spaceId);
+      const current = scopeRef.current;
+      // "My groups" is on screen: it has to follow the membership. A feed
+      // filtered to the group just left goes back to All, so the chip row and
+      // the feed keep agreeing.
+      if (current.kind === "mine") void loadFeed(current);
+      else if (!joined && current.kind === "space" && current.spaceId === spaceId) selectScope(allScope);
+      return true;
+    } catch (cause) {
+      apply(!joined);
+      setError(clubErrorMessage(cause, joined ? "The group could not be joined." : "The group could not be left."));
+      // The guess was wrong somewhere; the server knows which groups are held.
+      void syncMemberships();
+      return false;
+    }
+  }, [backend, enabled, loadFeed, selectScope, syncMemberships]);
+
+  const joinSpace = useCallback((spaceId: string) => setMembership(spaceId, true), [setMembership]);
+  const leaveSpace = useCallback((spaceId: string) => setMembership(spaceId, false), [setMembership]);
 
   const loadComments = useCallback(async (postId: string): Promise<ClubCommentWithAuthor[] | null> => {
     if (!backend || !enabled) return null;
@@ -240,16 +356,25 @@ export function useClub({
   return {
     enabled,
     spaces,
-    spaceId,
+    scope,
+    /** The one space on screen, when the feed is filtered to one. */
+    spaceId: scope.kind === "space" ? scope.spaceId : undefined,
+    joinedSpaceIds,
+    membershipsLoaded,
     items,
+    hasMore,
     loading,
+    loadingMore,
     loaded,
     busy,
     error,
     clearError: () => setError(""),
     refresh,
-    selectSpace,
+    selectScope,
+    loadMore,
     createPost,
+    joinSpace,
+    leaveSpace,
     toggleLike,
     loadComments,
     addComment,
