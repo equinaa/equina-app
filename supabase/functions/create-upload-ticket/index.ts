@@ -8,7 +8,9 @@ const uploadRules: Record<UploadKind, { bucket: string; max: number; mime: strin
   avatar: { bucket: "avatars", max: 10 * 1024 * 1024, mime: ["image/jpeg", "image/png", "image/heic", "image/heif"] },
   horse_photo: { bucket: "horse-media", max: 15 * 1024 * 1024, mime: ["image/jpeg", "image/png", "image/heic", "image/heif"] },
   horse_record: { bucket: "horse-records", max: 20 * 1024 * 1024, mime: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"] },
-  club_post: { bucket: "club-media", max: 50 * 1024 * 1024, mime: ["image/jpeg", "image/png", "image/heic", "image/heif", "video/mp4", "video/quicktime"] },
+  // Photos only, as JPEG: the app re-encodes every Club photo before upload, and
+  // complete-upload takes its metadata out. Video waits for transcoding.
+  club_post: { bucket: "club-media", max: 15 * 1024 * 1024, mime: ["image/jpeg"] },
   listing_photo: { bucket: "listing-media", max: 15 * 1024 * 1024, mime: ["image/jpeg", "image/png", "image/heic", "image/heif"] },
   dispute_evidence: { bucket: "dispute-evidence", max: 20 * 1024 * 1024, mime: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"] },
 };

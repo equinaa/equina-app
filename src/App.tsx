@@ -1127,6 +1127,7 @@ function EquinaApp() {
   }, [arrivingUserId, betaDoor, offerPlansTo]);
   const club = useClub({
     backend: equinaSession.backend,
+    userId: equinaSession.session?.user.id,
     enabled:
       accountMode === "connected" &&
       equinaSession.phase === "authenticated" &&
@@ -2696,7 +2697,15 @@ function EquinaApp() {
           </ScrollView>
         </Animated.View>
 
-        {!focusedTask && <TabDock tabs={dockTabs} activeTab={tab} onChange={setTab} />}
+        {!focusedTask && (
+          <TabDock
+            tabs={dockTabs}
+            activeTab={tab}
+            onChange={setTab}
+            // New Club activity shows on the tab from anywhere in the app.
+            badges={{ community: club.unreadActivity > 0 }}
+          />
+        )}
               </>
             )}
           </Animated.View>
@@ -2882,11 +2891,14 @@ function RalfButton({ onPress }: { onPress: () => void }) {
 function TabDock({
   tabs,
   activeTab,
-  onChange
+  onChange,
+  badges = {}
 }: {
   tabs: readonly DockTab[];
   activeTab: Tab;
   onChange: (tab: Tab) => void;
+  /** Tabs with something new behind them get a dot. */
+  badges?: Partial<Record<Tab, boolean>>;
 }) {
   const [reduceTransparency, setReduceTransparency] = useState(false);
   const reduceDockMotion = useReducedMotion();
@@ -2964,6 +2976,7 @@ function TabDock({
               label={label}
               Icon={Icon}
               active={active}
+              badge={Boolean(badges[id])}
               reducedMotion={reduceDockMotion}
               onPress={() => {
                 if (id !== activeTab) {
@@ -3029,6 +3042,7 @@ function DockTabItem({
   label,
   Icon,
   active,
+  badge = false,
   reducedMotion,
   onPress
 }: {
@@ -3036,6 +3050,7 @@ function DockTabItem({
   label: string;
   Icon: typeof Store | typeof HorseshoeIcon;
   active: boolean;
+  badge?: boolean;
   reducedMotion: boolean;
   onPress: () => void;
 }) {
@@ -3086,7 +3101,7 @@ function DockTabItem({
       <Pressable
         testID={`tab-${id}`}
         accessibilityRole="tab"
-        accessibilityLabel={label}
+        accessibilityLabel={badge ? `${label}, new activity` : label}
         accessibilityState={{ selected: active }}
         style={styles.tabItem}
         onPressIn={() => setPressed(true)}
@@ -3128,6 +3143,7 @@ function DockTabItem({
               strokeWidth={active ? 2.15 : 1.75}
             />
           )}
+          {badge ? <View testID={`tab-${id}-badge`} style={styles.tabBadge} /> : null}
         </Animated.View>
         <Animated.Text
           numberOfLines={1}
@@ -16626,6 +16642,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
     zIndex: 1
+  },
+  tabBadge: {
+    position: "absolute",
+    top: 0,
+    right: 2,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: equinaTheme.colors.brass,
+    borderWidth: 1.5,
+    borderColor: equinaTheme.colors.ink
   },
   tabLabel: {
     color: "rgba(247,243,234,0.52)",

@@ -1,8 +1,8 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
-import type { ClubCommentRecord, ClubCommentWithAuthor, ClubFeedItem, ClubMediaRecord, ClubPostRecord, ClubSpace, UploadAsset } from "./contracts";
+import type { ClubActivityItem, ClubCommentRecord, ClubCommentWithAuthor, ClubFeedItem, ClubMediaRecord, ClubPostRecord, ClubRiderProfile, ClubSpace, UploadAsset } from "./contracts";
 
-/** One space, several spaces, or (empty) every space the rider can read. */
-export type ClubFeedQuery = { spaceId?: string; spaceIds?: string[] };
+/** One space, several spaces, or (empty) every space the rider can read; optionally one rider's posts. */
+export type ClubFeedQuery = { spaceId?: string; spaceIds?: string[]; authorId?: string };
 import { EdgeClient } from "./edge-client";
 import { backendError, requireData } from "./errors";
 import { UploadRepository } from "./upload-repository";
@@ -56,6 +56,7 @@ export class ClubRepository {
     let query = this.client.from("club_posts").select("*").eq("moderation_status", "visible").order("created_at", { ascending: false }).limit(Math.min(50, limit));
     if (scope.spaceId) query = query.eq("space_id", scope.spaceId);
     else if (scope.spaceIds) query = query.in("space_id", scope.spaceIds);
+    if (scope.authorId) query = query.eq("author_id", scope.authorId);
     if (before) query = query.lt("created_at", before);
     const { data, error } = await query;
     if (error) throw backendError(error, "Club feed could not be loaded.");
@@ -63,7 +64,19 @@ export class ClubRepository {
   }
 
   async feedPage(scope: ClubFeedQuery = {}, limit = 20, before?: string): Promise<ClubFeedItem[]> {
-    const posts = await this.feed(scope, limit, before);
+    return await this.hydrate(await this.feed(scope, limit, before));
+  }
+
+  /** One post as the feed shows it, for activity and profiles that point at it. */
+  async postItem(postId: string): Promise<ClubFeedItem | null> {
+    const { data, error } = await this.client.from("club_posts").select("*").eq("id", postId).eq("moderation_status", "visible").maybeSingle();
+    if (error) throw backendError(error, "Post could not be loaded.");
+    if (!data) return null;
+    return (await this.hydrate([mapPost(data as Record<string, unknown>)]))[0] ?? null;
+  }
+
+  /** Authors, media, reactions and comment counts for posts already read. */
+  private async hydrate(posts: ClubPostRecord[]): Promise<ClubFeedItem[]> {
     if (!posts.length) return [];
     const postIds = posts.map((post) => post.id);
     const authorIds = [...new Set(posts.map((post) => post.authorId))];
@@ -254,6 +267,110 @@ export class ClubRepository {
     if (!auth.user) return;
     const { error } = await this.client.from("user_blocks").delete().eq("blocker_id", auth.user.id).eq("blocked_id", userId);
     if (error) throw backendError(error, "This account could not be unblocked.");
+  }
+
+  /**
+   * Another rider as the Club shows them. Profiles expose only a name and a
+   * photo to other riders (202610050002); groups and posts are read under the
+   * Club's own policies, so blocks and the rider's plan apply.
+   */
+  async riderProfile(userId: string): Promise<ClubRiderProfile | null> {
+    const [{ data: profile, error: profileError }, { data: memberships, error: membershipError }, posts] = await Promise.all([
+      this.client.from("profiles").select("id,display_name,avatar_path").eq("id", userId).maybeSingle(),
+      this.client.from("club_memberships").select("space_id").eq("user_id", userId),
+      this.feedPage({ authorId: userId }, 10)
+    ]);
+    if (profileError) throw backendError(profileError, "This rider could not be loaded.");
+    if (membershipError) throw backendError(membershipError, "This rider's groups could not be loaded.");
+    if (!profile) return null;
+    const avatarPath = profile.avatar_path ? String(profile.avatar_path) : undefined;
+    return {
+      id: String(profile.id),
+      displayName: profile.display_name ? String(profile.display_name) : "Rider",
+      avatarUrl: avatarPath ? await this.avatarUrl(avatarPath) : undefined,
+      spaceIds: (memberships ?? []).map((row) => String(row.space_id)),
+      posts
+    };
+  }
+
+  /** The rider's Club activity, newest first, with who did it and what they wrote. */
+  async activity(limit = 40): Promise<ClubActivityItem[]> {
+    const { data, error } = await this.client.from("club_activity")
+      .select("id,kind,post_id,comment_id,actor_id,created_at,read_at")
+      .order("created_at", { ascending: false })
+      .limit(Math.min(100, limit));
+    if (error) throw backendError(error, "Club activity could not be loaded.");
+    const rows = data ?? [];
+    if (!rows.length) return [];
+    const actorIds = [...new Set(rows.map((row) => String(row.actor_id)))];
+    const commentIds = rows.flatMap((row) => row.comment_id ? [String(row.comment_id)] : []);
+    const likedPostIds = [...new Set(rows.flatMap((row) => row.kind === "like" ? [String(row.post_id)] : []))];
+    const [{ data: profiles, error: profileError }, { data: comments, error: commentError }, { data: posts, error: postError }] = await Promise.all([
+      this.client.from("profiles").select("id,display_name,avatar_path").in("id", actorIds),
+      commentIds.length
+        ? this.client.from("club_comments").select("id,body").in("id", commentIds)
+        : Promise.resolve({ data: [] as Array<{ id: string; body: string }>, error: null }),
+      likedPostIds.length
+        ? this.client.from("club_posts").select("id,body").in("id", likedPostIds)
+        : Promise.resolve({ data: [] as Array<{ id: string; body: string }>, error: null })
+    ]);
+    if (profileError) throw backendError(profileError, "Club activity could not be loaded.");
+    if (commentError) throw backendError(commentError, "Club activity could not be loaded.");
+    if (postError) throw backendError(postError, "Club activity could not be loaded.");
+    const avatarPaths = (profiles ?? []).flatMap((row) => row.avatar_path ? [String(row.avatar_path)] : []);
+    const signed = avatarPaths.length
+      ? await this.client.storage.from("avatars").createSignedUrls(avatarPaths, 900)
+      : { data: [], error: null };
+    const avatarUrls = new Map<string, string>((signed.data ?? []).flatMap((entry) =>
+      entry.path && entry.signedUrl ? [[entry.path, entry.signedUrl]] : []
+    ));
+    const bodies = new Map<string, string>([
+      ...(comments ?? []).map((row) => [String(row.id), String(row.body)] as [string, string]),
+      ...(posts ?? []).map((row) => [String(row.id), String(row.body)] as [string, string])
+    ]);
+    return rows.map((row) => {
+      const actor = (profiles ?? []).find((entry) => entry.id === row.actor_id);
+      const avatarPath = actor?.avatar_path ? String(actor.avatar_path) : undefined;
+      const excerptSource = row.comment_id ? String(row.comment_id) : String(row.post_id);
+      return {
+        id: String(row.id),
+        kind: row.kind as ClubActivityItem["kind"],
+        postId: String(row.post_id),
+        commentId: row.comment_id ? String(row.comment_id) : undefined,
+        createdAt: String(row.created_at),
+        read: row.read_at !== null,
+        actor: {
+          id: String(row.actor_id),
+          displayName: actor?.display_name ? String(actor.display_name) : "Rider",
+          avatarUrl: avatarPath ? avatarUrls.get(avatarPath) : undefined
+        },
+        excerpt: bodies.get(excerptSource)
+      };
+    });
+  }
+
+  async unreadActivityCount(): Promise<number> {
+    const { count, error } = await this.client.from("club_activity").select("id", { count: "exact", head: true }).is("read_at", null);
+    if (error) throw backendError(error, "Club activity could not be counted.");
+    return count ?? 0;
+  }
+
+  async markActivityRead(): Promise<void> {
+    const { error } = await this.client.rpc("mark_club_activity_read");
+    if (error) throw backendError(error, "Club activity could not be marked read.");
+  }
+
+  /** New activity for this rider, as it is written. */
+  subscribeInbox(userId: string, onChange: () => void): () => void {
+    const channel = this.client.channel(`club:inbox:${++channelSequence}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "club_activity", filter: `recipient_id=eq.${userId}` }, onChange);
+    channel.subscribe();
+    return () => { void this.client.removeChannel(channel); };
+  }
+
+  private async avatarUrl(path: string): Promise<string | undefined> {
+    const { data } = await this.client.storage.from("avatars").createSignedUrl(path, 900);
+    return data?.signedUrl ?? undefined;
   }
 
   subscribe(spaceId: string | undefined, onChange: () => void): () => void {

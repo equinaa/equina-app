@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import {
+  Bell,
   Ellipsis,
   Flag,
   Heart,
@@ -22,7 +23,7 @@ import {
   UserX,
   X
 } from "lucide-react-native";
-import type { ClubAccess, ClubCommentWithAuthor, ClubFeedItem, ClubSpace, UploadAsset } from "../../backend";
+import type { ClubAccess, ClubActivityItem, ClubCommentWithAuthor, ClubFeedItem, ClubRiderProfile, ClubSpace, UploadAsset } from "../../backend";
 import { equinaFeatureFlags } from "../../config/feature-flags";
 import { EquinaButton, EquinaIconButton, EquinaSegmentedTabs, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
@@ -39,26 +40,17 @@ import {
   sameScope,
   type ClubSpaceImageKey
 } from "./club-groups";
+import { activityVerb, profileGroups, threadComments, unreadLabel } from "./club-social";
+import { prepareClubPhoto } from "./club-photo";
 import type { ClubController } from "./useClub";
 
 const postLimit = 2000;
 const commentLimit = 1200;
+// iOS shows one Modal at a time: going from one sheet to another closes the
+// first and opens the next once it has slid away.
+const sheetSwitchMs = 380;
 
 type ClubTab = "feed" | "groups";
-
-const assetSize = async (uri: string, knownSize?: number | null) => {
-  if (knownSize && knownSize > 0) return knownSize;
-  const response = await fetch(uri);
-  if (!response.ok) throw new Error("The selected photo could not be read.");
-  return (await response.blob()).size;
-};
-
-const photoUploadAsset = async (asset: ImagePicker.ImagePickerAsset): Promise<UploadAsset> => ({
-  uri: asset.uri,
-  fileName: asset.fileName ?? `club-${Date.now()}.jpg`,
-  mimeType: asset.mimeType ?? "image/jpeg",
-  byteSize: await assetSize(asset.uri, asset.fileSize)
-});
 
 export type ClubRideShare = {
   id: string;
@@ -110,6 +102,27 @@ export function ClubScreen({
   const [composer, setComposer] = useState<{ attachRide: boolean } | null>(null);
   const [commentsFor, setCommentsFor] = useState<ClubFeedItem | null>(null);
   const [optionsFor, setOptionsFor] = useState<ClubFeedItem | null>(null);
+  const [profileFor, setProfileFor] = useState<string | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const switchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(switchTimer.current), []);
+  const switchSheet = (open: () => void) => {
+    setComposer(null);
+    setCommentsFor(null);
+    setOptionsFor(null);
+    setProfileFor(null);
+    setActivityOpen(false);
+    clearTimeout(switchTimer.current);
+    switchTimer.current = setTimeout(open, sheetSwitchMs);
+  };
+  // A post someone is told about, or found on a profile, opens on its
+  // comments: the post on top, the thread below.
+  const openPostComments = (postId: string) => switchSheet(() => {
+    void club.loadPost(postId).then((item) => {
+      if (item) setCommentsFor(item);
+      else onNotice("This post is no longer in the Club.");
+    });
+  });
   // Photos wait for EXIF and GPS removal (feature-flags.ts).
   const photoPosts = canPost && equinaFeatureFlags.clubPhotoPosts;
 
@@ -195,6 +208,20 @@ export function ClubScreen({
           ) : (
             <Text style={styles.feedLabel}>Latest from your Club</Text>
           )}
+          <Pressable
+            testID="club-activity"
+            accessibilityRole="button"
+            accessibilityLabel={club.unreadActivity > 0 ? `Activity, ${club.unreadActivity} new` : "Activity"}
+            onPress={() => setActivityOpen(true)}
+            style={styles.iconButton}
+          >
+            <Bell size={19} color={club.unreadActivity > 0 ? equinaTheme.colors.brass : equinaTheme.text.secondary} />
+            {club.unreadActivity > 0 ? (
+              <View style={styles.bellBadge} pointerEvents="none">
+                <Text style={styles.bellBadgeText}>{unreadLabel(club.unreadActivity)}</Text>
+              </View>
+            ) : null}
+          </Pressable>
           <Pressable
             testID="club-refresh"
             accessibilityRole="button"
@@ -300,6 +327,7 @@ export function ClubScreen({
           onLike={() => void club.toggleLike(item.post.id)}
           onComments={() => setCommentsFor(item)}
           onOptions={() => setOptionsFor(item)}
+          onAuthor={() => setProfileFor(item.author.id)}
         />
       )) : null}
 
@@ -379,6 +407,27 @@ export function ClubScreen({
         club={club}
         onDismiss={() => setCommentsFor(null)}
         onNotice={onNotice}
+        onOpenProfile={(riderId) => switchSheet(() => setProfileFor(riderId))}
+      />
+
+      <ProfileSheet
+        riderId={profileFor}
+        currentUserId={currentUserId}
+        club={club}
+        onDismiss={() => setProfileFor(null)}
+        onNotice={onNotice}
+        onOpenPost={openPostComments}
+        onOpenGroup={(spaceId) => {
+          setProfileFor(null);
+          openGroupFeed(spaceId);
+        }}
+      />
+
+      <ActivitySheet
+        visible={activityOpen}
+        club={club}
+        onDismiss={() => setActivityOpen(false)}
+        onOpenPost={openPostComments}
       />
 
       <OptionsSheet
@@ -415,7 +464,8 @@ function ClubPostCard({
   canInteract,
   onLike,
   onComments,
-  onOptions
+  onOptions,
+  onAuthor
 }: {
   item: ClubFeedItem;
   spaceName: string;
@@ -423,6 +473,7 @@ function ClubPostCard({
   onLike: () => void;
   onComments: () => void;
   onOptions: () => void;
+  onAuthor: () => void;
 }) {
   const liked = Boolean(item.myReaction);
   const image = item.media.find((entry) => entry.mediaType === "image" && entry.signedUrl);
@@ -430,11 +481,19 @@ function ClubPostCard({
   return (
     <View style={styles.card} testID={`club-post-${item.post.id}`}>
       <View style={styles.cardHeader}>
-        <Avatar name={item.author.displayName} uri={item.author.avatarUrl} />
-        <View style={styles.cardHeading}>
-          <Text numberOfLines={1} style={styles.author}>{item.author.displayName}</Text>
-          <Text numberOfLines={1} style={styles.meta}>{meta}</Text>
-        </View>
+        <Pressable
+          testID={`club-author-${item.post.id}`}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${item.author.displayName}'s profile`}
+          onPress={onAuthor}
+          style={({ pressed }) => [styles.cardAuthor, pressed && styles.pressed]}
+        >
+          <Avatar name={item.author.displayName} uri={item.author.avatarUrl} />
+          <View style={styles.cardHeading}>
+            <Text numberOfLines={1} style={styles.author}>{item.author.displayName}</Text>
+            <Text numberOfLines={1} style={styles.meta}>{meta}</Text>
+          </View>
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Options for ${item.author.displayName}'s post`}
@@ -631,14 +690,15 @@ function ComposerSheet({
       setPhotoError("Allow photo access to add a photo to your post.");
       return;
     }
+    // Full quality here: the photo is redrawn as a JPEG once, in prepareClubPhoto.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsEditing: false,
-      quality: 0.88
+      quality: 1
     });
     if (result.canceled || !result.assets[0]) return;
     try {
-      const asset = await photoUploadAsset(result.assets[0]);
+      const asset = await prepareClubPhoto(result.assets[0]);
       const problem = clubPhotoProblem(asset);
       if (problem) {
         setPhotoError(problem);
@@ -752,7 +812,8 @@ function CommentsSheet({
   riderName,
   club,
   onDismiss,
-  onNotice
+  onNotice,
+  onOpenProfile
 }: {
   item: ClubFeedItem | null;
   /** The post's comment count as the realtime feed sees it now. */
@@ -763,16 +824,21 @@ function CommentsSheet({
   club: ClubController;
   onDismiss: () => void;
   onNotice: (message: string) => void;
+  onOpenProfile: (riderId: string) => void;
 }) {
   const [comments, setComments] = useState<ClubCommentWithAuthor[] | null>(null);
   const [draft, setDraft] = useState("");
   const [reportingId, setReportingId] = useState("");
+  // The comment being answered. A reply to a reply joins its thread, as the
+  // database files it.
+  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
   const postId = item?.post.id;
 
   useEffect(() => {
     setComments(null);
     setDraft("");
     setReportingId("");
+    setReplyTo(null);
   }, [postId]);
 
   // Loads when the sheet opens, and again whenever the live feed says the
@@ -791,9 +857,10 @@ function CommentsSheet({
   const sending = Boolean(postId) && club.busy === `comment:${postId}`;
   const send = async () => {
     if (!postId || !draft.trim() || sending) return;
-    const comment = await club.addComment(postId, draft, riderName);
+    const comment = await club.addComment(postId, draft, riderName, replyTo?.id);
     if (!comment) return;
     setDraft("");
+    setReplyTo(null);
     if (comment.moderationStatus === "visible") {
       setComments((current) => [...(current ?? []), comment]);
     } else {
@@ -804,33 +871,76 @@ function CommentsSheet({
   return (
     <EquinaSheet visible={Boolean(item)} title="Comments" onDismiss={onDismiss} closeTestID="club-comments-close">
       <View style={styles.sheetBody}>
+        {item ? (
+          <View style={styles.commentPost}>
+            <Text numberOfLines={1} style={styles.meta}>{item.author.displayName}</Text>
+            <Text numberOfLines={3} style={styles.noticeBody}>{item.post.body}</Text>
+          </View>
+        ) : null}
         <ScrollView style={styles.commentList} contentContainerStyle={styles.commentListContent}>
           {comments === null ? <ActivityIndicator color={equinaTheme.colors.brass} /> : null}
           {comments?.length === 0 ? <Text style={styles.noticeBody}>No comments yet.</Text> : null}
-          {comments?.map((comment) => {
+          {threadComments(comments ?? []).map((comment) => {
             const own = comment.authorId === currentUserId;
             return (
-              <View key={comment.id} style={styles.comment}>
+              <View
+                key={comment.id}
+                testID={`club-comment-${comment.id}`}
+                style={[styles.comment, comment.depth === 1 && styles.commentReply]}
+              >
                 <View style={styles.commentHeader}>
-                  <Text style={styles.author}>{comment.authorName}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${comment.authorName}'s profile`}
+                    onPress={() => onOpenProfile(comment.authorId)}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.author}>{comment.authorName}</Text>
+                  </Pressable>
                   <Text style={styles.meta}>{relativeTime(comment.createdAt)}</Text>
                 </View>
                 <Text style={styles.body}>{comment.body}</Text>
-                {own ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Delete your comment"
-                    onPress={async () => {
-                      if (!postId) return;
-                      if (await club.deleteComment(postId, comment.id)) {
-                        setComments((current) => (current ?? []).filter((entry) => entry.id !== comment.id));
-                      }
-                    }}
-                    style={styles.commentAction}
-                  >
-                    <Text style={styles.commentActionText}>Delete</Text>
-                  </Pressable>
-                ) : reportingId === comment.id ? (
+                <View style={styles.commentActions}>
+                  {canComment ? (
+                    <Pressable
+                      testID={`club-comment-reply-${comment.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Reply to ${comment.authorName}`}
+                      onPress={() => setReplyTo({ id: comment.id, name: comment.authorName })}
+                      style={styles.commentAction}
+                    >
+                      <Text style={styles.commentActionText}>Reply</Text>
+                    </Pressable>
+                  ) : null}
+                  {own ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete your comment"
+                      onPress={async () => {
+                        if (!postId) return;
+                        if (await club.deleteComment(postId, comment.id)) {
+                          // Its replies go with it (club_comments.parent_id cascades).
+                          setComments((current) => (current ?? []).filter((entry) =>
+                            entry.id !== comment.id && entry.parentId !== comment.id
+                          ));
+                        }
+                      }}
+                      style={styles.commentAction}
+                    >
+                      <Text style={styles.commentActionText}>Delete</Text>
+                    </Pressable>
+                  ) : reportingId === comment.id ? null : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Report ${comment.authorName}'s comment`}
+                      onPress={() => setReportingId(comment.id)}
+                      style={styles.commentAction}
+                    >
+                      <Text style={styles.commentActionText}>Report</Text>
+                    </Pressable>
+                  )}
+                </View>
+                {!own && reportingId === comment.id ? (
                   <View style={styles.chipsWrap}>
                     {clubReportReasons.map((reason) => (
                       <SpaceChip
@@ -846,47 +956,277 @@ function CommentsSheet({
                       />
                     ))}
                   </View>
-                ) : (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Report ${comment.authorName}'s comment`}
-                    onPress={() => setReportingId(comment.id)}
-                    style={styles.commentAction}
-                  >
-                    <Text style={styles.commentActionText}>Report</Text>
-                  </Pressable>
-                )}
+                ) : null}
               </View>
             );
           })}
         </ScrollView>
         {canComment ? (
-          <View style={styles.commentInputRow}>
-            <TextInput
-              testID="club-comment-input"
-              accessibilityLabel="Write a comment"
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Add a comment"
-              placeholderTextColor={equinaTheme.text.tertiary}
-              maxLength={commentLimit}
-              multiline
-              style={styles.commentInput}
-            />
-            <Pressable
-              testID="club-comment-send"
-              accessibilityRole="button"
-              accessibilityLabel="Send comment"
-              accessibilityState={{ disabled: !draft.trim() || sending }}
-              disabled={!draft.trim() || sending}
-              onPress={() => void send()}
-              style={styles.iconButton}
-            >
-              {sending
-                ? <ActivityIndicator size="small" color={equinaTheme.colors.brass} />
-                : <SendHorizontal size={20} color={draft.trim() ? equinaTheme.colors.brass : equinaTheme.text.tertiary} />}
-            </Pressable>
+          <View style={styles.commentComposer}>
+            {replyTo ? (
+              <View style={styles.replyingTo} testID="club-replying-to">
+                <Text numberOfLines={1} style={styles.replyingToText}>Replying to {replyTo.name}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop replying"
+                  onPress={() => setReplyTo(null)}
+                  hitSlop={8}
+                >
+                  <X size={16} color={equinaTheme.text.secondary} />
+                </Pressable>
+              </View>
+            ) : null}
+            <View style={styles.commentInputRow}>
+              <TextInput
+                testID="club-comment-input"
+                accessibilityLabel={replyTo ? `Reply to ${replyTo.name}` : "Write a comment"}
+                value={draft}
+                onChangeText={setDraft}
+                placeholder={replyTo ? `Reply to ${replyTo.name}` : "Add a comment"}
+                placeholderTextColor={equinaTheme.text.tertiary}
+                maxLength={commentLimit}
+                multiline
+                style={styles.commentInput}
+              />
+              <Pressable
+                testID="club-comment-send"
+                accessibilityRole="button"
+                accessibilityLabel={replyTo ? "Send reply" : "Send comment"}
+                accessibilityState={{ disabled: !draft.trim() || sending }}
+                disabled={!draft.trim() || sending}
+                onPress={() => void send()}
+                style={styles.iconButton}
+              >
+                {sending
+                  ? <ActivityIndicator size="small" color={equinaTheme.colors.brass} />
+                  : <SendHorizontal size={20} color={draft.trim() ? equinaTheme.colors.brass : equinaTheme.text.tertiary} />}
+              </Pressable>
+            </View>
           </View>
+        ) : null}
+      </View>
+    </EquinaSheet>
+  );
+}
+
+/** Another rider as the Club shows them: a name, a photo, their groups and posts. */
+function ProfileSheet({
+  riderId,
+  currentUserId,
+  club,
+  onDismiss,
+  onNotice,
+  onOpenPost,
+  onOpenGroup
+}: {
+  riderId: string | null;
+  currentUserId?: string;
+  club: ClubController;
+  onDismiss: () => void;
+  onNotice: (message: string) => void;
+  onOpenPost: (postId: string) => void;
+  onOpenGroup: (spaceId: string) => void;
+}) {
+  const [profile, setProfile] = useState<ClubRiderProfile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<"profile" | "report" | "block">("profile");
+  const [working, setWorking] = useState(false);
+
+  useEffect(() => {
+    if (!riderId) return;
+    let active = true;
+    setProfile(null);
+    setLoading(true);
+    setStep("profile");
+    setWorking(false);
+    void club.loadProfile(riderId).then((loaded) => {
+      if (!active) return;
+      setProfile(loaded);
+      setLoading(false);
+    });
+    return () => { active = false; };
+    // club.loadProfile is stable for the session.
+  }, [riderId]);
+
+  const run = async (action: () => Promise<void>) => {
+    if (working) return;
+    setWorking(true);
+    try {
+      await action();
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const own = Boolean(riderId) && riderId === currentUserId;
+  const name = profile?.displayName ?? "Rider";
+  const groups = profile ? profileGroups(club.spaces, profile.spaceIds) : [];
+  const spaceName = (spaceId: string) => club.spaces.find((space) => space.id === spaceId)?.name ?? "Club";
+  const title = step === "report"
+    ? "Why are you reporting this rider?"
+    : step === "block"
+      ? `Block ${name}?`
+      : "Rider";
+
+  return (
+    <EquinaSheet visible={Boolean(riderId)} title={title} onDismiss={onDismiss} closeTestID="club-profile-close">
+      <View style={styles.sheetBody} testID="club-profile">
+        {loading ? <ActivityIndicator color={equinaTheme.colors.brass} /> : null}
+        {!loading && !profile ? (
+          <Text style={styles.noticeBody}>This rider is no longer in the Club.</Text>
+        ) : null}
+        {profile && step === "profile" ? (
+          <>
+            <View style={styles.profileHeader}>
+              <Avatar name={name} uri={profile.avatarUrl} large />
+              <View style={styles.profileHeading}>
+                <Text accessibilityRole="header" numberOfLines={2} style={styles.profileName}>{name}</Text>
+                {own ? <Text style={styles.meta}>This is how other riders see you in the Club.</Text> : null}
+              </View>
+            </View>
+            {groups.length ? (
+              <>
+                <Text style={styles.sheetLabel}>Groups</Text>
+                <View style={styles.chipsWrap}>
+                  {groups.map((space) => (
+                    <SpaceChip
+                      key={space.id}
+                      testID={`club-profile-group-${space.slug}`}
+                      label={space.name}
+                      selected={false}
+                      onPress={() => onOpenGroup(space.id)}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : null}
+            <Text style={styles.sheetLabel}>Recent posts</Text>
+            {profile.posts.length === 0 ? (
+              <Text style={styles.noticeBody}>{own ? "You have not posted yet." : `${name} has not posted yet.`}</Text>
+            ) : (
+              <ScrollView style={styles.profilePosts} contentContainerStyle={styles.commentListContent}>
+                {profile.posts.map((entry) => (
+                  <Pressable
+                    key={entry.post.id}
+                    testID={`club-profile-post-${entry.post.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${name}'s post in ${spaceName(entry.post.spaceId)}`}
+                    onPress={() => onOpenPost(entry.post.id)}
+                    style={({ pressed }) => [styles.profilePost, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.meta}>{spaceName(entry.post.spaceId)} · {relativeTime(entry.post.createdAt)}</Text>
+                    <Text numberOfLines={3} style={styles.body}>{entry.post.body}</Text>
+                    <Text style={styles.meta}>
+                      {entry.reactionCount} {entry.reactionCount === 1 ? "like" : "likes"} · {entry.commentCount} {entry.commentCount === 1 ? "comment" : "comments"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+            {!own ? (
+              <View style={styles.profileActions}>
+                <OptionRow Icon={Flag} label={`Report ${name}`} onPress={() => setStep("report")} />
+                <OptionRow Icon={UserX} label={`Block ${name}`} destructive onPress={() => setStep("block")} />
+              </View>
+            ) : null}
+          </>
+        ) : null}
+        {profile && step === "report" ? clubReportReasons.map((reason) => (
+          <OptionRow
+            key={reason.value}
+            label={reason.label}
+            disabled={working}
+            onPress={() => void run(async () => {
+              if (await club.report({ userId: profile.id }, reason.value)) {
+                onNotice("Thanks. The team will review this rider.");
+                onDismiss();
+              }
+            })}
+          />
+        )) : null}
+        {profile && step === "block" ? (
+          <>
+            <Text style={styles.noticeBody}>
+              You will not see each other's posts or comments in Club. They are not told you blocked them.
+            </Text>
+            <EquinaButton
+              label={working ? "Blocking..." : `Block ${name}`}
+              disabled={working}
+              showArrow={false}
+              onPress={() => void run(async () => {
+                if (await club.block(profile.id)) {
+                  onNotice(`${name} is blocked. You will not see each other in Club.`);
+                  onDismiss();
+                }
+              })}
+            />
+          </>
+        ) : null}
+      </View>
+    </EquinaSheet>
+  );
+}
+
+/** Comments on the rider's posts, replies to their comments and likes. */
+function ActivitySheet({
+  visible,
+  club,
+  onDismiss,
+  onOpenPost
+}: {
+  visible: boolean;
+  club: ClubController;
+  onDismiss: () => void;
+  onOpenPost: (postId: string) => void;
+}) {
+  const [items, setItems] = useState<ClubActivityItem[] | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    let active = true;
+    setItems(null);
+    void club.loadActivity().then((loaded) => {
+      if (!active) return;
+      setItems(loaded ?? []);
+      // Read once seen. The new ones keep their mark for this look.
+      if (loaded?.some((entry) => !entry.read)) void club.markActivityRead();
+    });
+    return () => { active = false; };
+    // club.loadActivity and markActivityRead are stable for the session.
+  }, [visible]);
+
+  return (
+    <EquinaSheet visible={visible} title="Activity" onDismiss={onDismiss} closeTestID="club-activity-close">
+      <View style={styles.sheetBody}>
+        {items === null ? <ActivityIndicator color={equinaTheme.colors.brass} /> : null}
+        {items?.length === 0 ? (
+          <Text style={styles.noticeBody}>
+            Nothing yet. When riders comment on your posts, answer your comments or like your posts, it shows here.
+          </Text>
+        ) : null}
+        {items?.length ? (
+          <ScrollView style={styles.commentList} contentContainerStyle={styles.commentListContent}>
+            {items.map((entry) => (
+              <Pressable
+                key={entry.id}
+                testID={`club-activity-${entry.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${entry.actor.displayName} ${activityVerb(entry.kind)}, ${relativeTime(entry.createdAt)}${entry.read ? "" : ", new"}`}
+                onPress={() => onOpenPost(entry.postId)}
+                style={({ pressed }) => [styles.activityRow, pressed && styles.pressed]}
+              >
+                <Avatar name={entry.actor.displayName} uri={entry.actor.avatarUrl} />
+                <View style={styles.activityText}>
+                  <Text style={styles.body}>
+                    <Text style={styles.author}>{entry.actor.displayName}</Text> {activityVerb(entry.kind)}
+                  </Text>
+                  {entry.excerpt ? <Text numberOfLines={2} style={styles.noticeBody}>"{entry.excerpt}"</Text> : null}
+                  <Text style={styles.meta}>{relativeTime(entry.createdAt)}</Text>
+                </View>
+                {!entry.read ? <View style={styles.unreadDot} /> : null}
+              </Pressable>
+            ))}
+          </ScrollView>
         ) : null}
       </View>
     </EquinaSheet>
@@ -1030,11 +1370,12 @@ function SpaceChip({ label, selected, onPress, testID }: { label: string; select
   );
 }
 
-function Avatar({ name, uri }: { name: string; uri?: string }) {
-  if (uri) return <Image source={{ uri }} style={styles.avatar} accessibilityIgnoresInvertColors />;
+function Avatar({ name, uri, large = false }: { name: string; uri?: string; large?: boolean }) {
+  const size = [styles.avatar, large && styles.avatarLarge];
+  if (uri) return <Image source={{ uri }} style={size} accessibilityIgnoresInvertColors />;
   return (
-    <View style={[styles.avatar, styles.avatarFallback]} accessible={false}>
-      <Text style={styles.avatarText}>{name.trim().slice(0, 2).toUpperCase() || "R"}</Text>
+    <View style={[...size, styles.avatarFallback]} accessible={false}>
+      <Text style={[styles.avatarText, large && styles.avatarTextLarge]}>{name.trim().slice(0, 2).toUpperCase() || "R"}</Text>
     </View>
   );
 }
@@ -1167,6 +1508,32 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
+  cardAuthor: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.compact
+  },
+  bellBadge: {
+    position: "absolute",
+    top: 6,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.colors.brass
+  },
+  bellBadgeText: {
+    ...equinaTheme.typography.label,
+    fontSize: 11,
+    lineHeight: 14,
+    color: equinaTheme.colors.ink,
+    fontWeight: "700"
+  },
   author: {
     ...equinaTheme.typography.meta,
     color: equinaTheme.text.primary,
@@ -1220,6 +1587,62 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 12
+  },
+  avatarLarge: {
+    width: 64,
+    height: 64,
+    borderRadius: 20
+  },
+  avatarTextLarge: {
+    ...equinaTheme.typography.body,
+    fontWeight: "600"
+  },
+  profileHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.md
+  },
+  profileHeading: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4
+  },
+  profileName: {
+    ...equinaTheme.typography.body,
+    fontSize: 20,
+    lineHeight: 26,
+    color: equinaTheme.text.primary,
+    fontWeight: "600"
+  },
+  profilePosts: {
+    maxHeight: 280
+  },
+  profilePost: {
+    gap: 4,
+    padding: equinaTheme.spacing.compact,
+    borderRadius: equinaTheme.radius.control,
+    backgroundColor: equinaTheme.surfaces.raised
+  },
+  profileActions: {
+    gap: 2
+  },
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: equinaTheme.spacing.compact,
+    paddingVertical: equinaTheme.spacing.xs
+  },
+  activityText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    marginTop: 8,
+    borderRadius: 4,
+    backgroundColor: equinaTheme.colors.brass
   },
   avatarFallback: {
     alignItems: "center",
@@ -1387,6 +1810,40 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "baseline",
     gap: equinaTheme.spacing.sm
+  },
+  commentReply: {
+    marginLeft: equinaTheme.spacing.md,
+    paddingLeft: equinaTheme.spacing.compact,
+    borderLeftWidth: 2,
+    borderLeftColor: equinaTheme.material.separator
+  },
+  commentActions: {
+    flexDirection: "row",
+    gap: equinaTheme.spacing.md
+  },
+  commentPost: {
+    gap: 2,
+    paddingBottom: equinaTheme.spacing.compact,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: equinaTheme.material.separator
+  },
+  commentComposer: {
+    gap: equinaTheme.spacing.xs
+  },
+  replyingTo: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: equinaTheme.spacing.sm,
+    paddingHorizontal: equinaTheme.spacing.compact,
+    paddingVertical: 6,
+    borderRadius: equinaTheme.radius.control,
+    backgroundColor: equinaTheme.material.selected
+  },
+  replyingToText: {
+    ...equinaTheme.typography.label,
+    color: equinaTheme.colors.brass,
+    flexShrink: 1
   },
   commentAction: {
     alignSelf: "flex-start",

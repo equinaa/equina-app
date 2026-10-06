@@ -9,10 +9,10 @@ export const equinaFeatureFlags = {
   // require a configured provider, so a compile switch alone opens nothing.
   clubPublishing: enabled(process.env.EXPO_PUBLIC_ENABLE_CLUB_PUBLISHING),
   clubInteractions: enabled(process.env.EXPO_PUBLIC_ENABLE_CLUB_INTERACTIONS),
-  // Photos on Club posts. Nothing strips EXIF/GPS from an upload yet, and a
-  // stable photo carries its coordinates to every reader, so this stays off
-  // until the processing worker in docs/EQUINA_MEDIA_PROCESSING_BOUNDARY.md
-  // exists. The server gates the upload on club_publishing alone.
+  // Photos on Club posts. A stable photo carries its coordinates, so turn it
+  // on only where complete-upload strips metadata from Club photos (deployed
+  // with 202610060004); the app also redraws each photo as a clean JPEG first.
+  // The server gates the upload on club_publishing alone.
   clubPhotoPosts: enabled(process.env.EXPO_PUBLIC_ENABLE_CLUB_PHOTO_POSTS),
   shopTransactions: enabled(process.env.EXPO_PUBLIC_ENABLE_SHOP_TRANSACTIONS),
   shopListingCreation: enabled(process.env.EXPO_PUBLIC_ENABLE_SHOP_LISTING_CREATION),
@@ -30,7 +30,7 @@ export const featureFlagReason: Record<EquinaFeatureFlag, string> = {
   pushNotifications: "Push requires registered devices, redacted payloads, preferences, and delivery retry.",
   clubPublishing: "Posting requires authenticated persistence and moderation.",
   clubInteractions: "Social actions require persisted identities, reporting, and rollback.",
-  clubPhotoPosts: "Photos on posts require EXIF and GPS removal before any reader sees them.",
+  clubPhotoPosts: "Photos on posts need complete-upload's metadata removal deployed before any reader sees them.",
   shopTransactions: "Purchases require a live payment, shipping, tax, and webhook boundary.",
   shopListingCreation: "Listing creation requires uploads, seller verification, and moderation.",
   shopMessaging: "Messaging requires authenticated persistence, reporting, and delivery state.",

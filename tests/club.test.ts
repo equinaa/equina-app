@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { ClubFeedItem, ClubSpace } from "../src/backend/contracts";
 import { backendError } from "../src/backend/errors";
+import { activityVerb, profileGroups, threadComments, unreadLabel } from "../src/features/club/club-social";
 import {
   clubErrorMessage,
   clubReportReasons,
@@ -13,6 +14,7 @@ import {
   allScope,
   clubFilterChips,
   clubPhotoProblem,
+  clubPhotoResize,
   clubSpaceImageKey,
   composerPrompt,
   composerSpaceSlug,
@@ -188,10 +190,14 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
 // The photo rules match create-upload-ticket's club_post rule.
 {
   assert.equal(clubPhotoProblem({ mimeType: "image/jpeg", byteSize: 4 * 1024 * 1024 }), undefined);
-  assert.equal(clubPhotoProblem({ mimeType: "image/heic", byteSize: 1 }), undefined);
-  assert.match(clubPhotoProblem({ mimeType: "image/gif", byteSize: 1 }) ?? "", /JPEG, PNG or HEIC/);
-  assert.match(clubPhotoProblem({ mimeType: "video/mp4", byteSize: 1 }) ?? "", /JPEG, PNG or HEIC/, "Video waits for a later phase.");
-  assert.match(clubPhotoProblem({ mimeType: "image/png", byteSize: 50 * 1024 * 1024 + 1 }) ?? "", /50 MB/);
+  assert.match(clubPhotoProblem({ mimeType: "image/heic", byteSize: 1 }) ?? "", /could not be prepared/,
+    "Only the re-encoded JPEG goes up: the server takes JPEG alone and strips its metadata.");
+  assert.match(clubPhotoProblem({ mimeType: "video/mp4", byteSize: 1 }) ?? "", /could not be prepared/, "Video waits for a later phase.");
+  assert.match(clubPhotoProblem({ mimeType: "image/jpeg", byteSize: 15 * 1024 * 1024 + 1 }) ?? "", /15 MB/);
+  assert.equal(clubPhotoResize(4032, 3024)?.width, 2048, "A landscape photo is shrunk by its width.");
+  assert.equal(clubPhotoResize(3024, 4032)?.height, 2048, "A portrait photo by its height.");
+  assert.equal(clubPhotoResize(1200, 900), undefined, "A small photo keeps its size.");
+  assert.equal(clubPhotoResize(undefined, 900), undefined, "Unknown size: re-encoded, not resized.");
 }
 
 // Groups: the rider's discipline first, Coach Q&A last, the rest by name.
@@ -219,6 +225,39 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
   assert.equal(composerSpaceSlug({ kind: "mine" }, spaces, "dressage"), "dressage");
   assert.equal(composerSpaceSlug({ kind: "space", spaceId: "gone" }, spaces, "dressage"), "dressage",
     "A group that is no longer listed falls back to the discipline.");
+}
+
+// A thread: top comments oldest first, each followed by its replies; a reply
+// to a comment the rider cannot see stands on its own.
+{
+  const at = (minute: number) => `2026-10-06T10:${String(minute).padStart(2, "0")}:00Z`;
+  const comments = [
+    { id: "c2", createdAt: at(5) },
+    { id: "r1", parentId: "c1", createdAt: at(3) },
+    { id: "c1", createdAt: at(1) },
+    { id: "r2", parentId: "c1", createdAt: at(6) },
+    { id: "orphan", parentId: "hidden", createdAt: at(4) }
+  ];
+  assert.deepEqual(
+    threadComments(comments).map((comment) => `${comment.id}:${comment.depth}`),
+    ["c1:0", "r1:1", "r2:1", "orphan:0", "c2:0"]
+  );
+  assert.deepEqual(threadComments([]), []);
+}
+
+// Activity lines, the bell's count and a profile's groups.
+{
+  assert.equal(activityVerb("comment"), "commented on your post");
+  assert.equal(activityVerb("reply"), "replied to your comment");
+  assert.equal(activityVerb("like"), "liked your post");
+  assert.equal(unreadLabel(0), "");
+  assert.equal(unreadLabel(3), "3");
+  assert.equal(unreadLabel(120), "99+");
+  const spaces = [
+    { id: "s1", slug: "dressage", name: "Dressage", isPrivate: false },
+    { id: "s2", slug: "jumping", name: "Jumping", isPrivate: false }
+  ];
+  assert.deepEqual(profileGroups(spaces, ["s2", "gone"]).map((space) => space.name), ["Jumping"]);
 }
 
 console.log("Club rules passed.");

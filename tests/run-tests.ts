@@ -10,8 +10,10 @@ import "./revenuecat.test";
 import "./admin.test";
 import "./mux.test";
 import "./data-export.test";
+import "./image-metadata.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./paywall.test");
 await import("./beta.test");
+await import("./club-social.test");
 await import("./ride-setup.test");
 await import("./backend-migrations.test");

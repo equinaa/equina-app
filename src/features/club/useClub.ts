@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClubCommentWithAuthor, ClubFeedItem, ClubSpace, EquinaBackend, UploadAsset } from "../../backend";
+import type { ClubActivityItem, ClubCommentWithAuthor, ClubFeedItem, ClubRiderProfile, ClubSpace, EquinaBackend, UploadAsset } from "../../backend";
 import { clubErrorMessage, isDuplicateReport, type ClubReportReason } from "./club-format";
 import {
   allScope,
@@ -18,10 +18,13 @@ export type ClubPostResult = { published: boolean; photoFailed: boolean } | null
 
 export function useClub({
   backend,
-  enabled
+  enabled,
+  userId
 }: {
   backend: EquinaBackend | null;
   enabled: boolean;
+  /** The signed-in rider, whose activity inbox is counted live. */
+  userId?: string;
 }) {
   const [spaces, setSpaces] = useState<ClubSpace[]>([]);
   const [scope, setScope] = useState<ClubFeedScope>(allScope);
@@ -37,6 +40,9 @@ export function useClub({
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  // Comments on the rider's posts, replies to their comments and likes not yet
+  // seen (202610060004).
+  const [unreadActivity, setUnreadActivity] = useState(0);
   // Only the newest load may write the feed: switching spaces quickly would
   // otherwise let a slow earlier response overwrite the space now on screen.
   const latestLoad = useRef(0);
@@ -275,13 +281,15 @@ export function useClub({
   const addComment = useCallback(async (
     postId: string,
     body: string,
-    authorName: string
+    authorName: string,
+    /** The comment this answers; the database files it under its thread. */
+    parentId?: string
   ): Promise<ClubCommentWithAuthor | null> => {
     if (!backend || !enabled) return null;
     setBusy(`comment:${postId}`);
     setError("");
     try {
-      const comment = await backend.club.comment(postId, body);
+      const comment = await backend.club.comment(postId, body, parentId);
       if (comment.moderationStatus === "visible") adjustCommentCount(postId, 1);
       return { ...comment, authorName };
     } catch (cause) {
@@ -320,7 +328,7 @@ export function useClub({
   }, [backend, enabled]);
 
   const report = useCallback(async (
-    target: { postId: string } | { commentId: string },
+    target: { postId: string } | { commentId: string } | { userId: string },
     reason: ClubReportReason
   ) => {
     if (!backend || !enabled) return false;
@@ -352,6 +360,77 @@ export function useClub({
     }
   }, [backend, enabled]);
 
+  const refreshUnreadActivity = useCallback(async () => {
+    if (!backend || !enabled || !userId) return;
+    try {
+      setUnreadActivity(await backend.club.unreadActivityCount());
+    } catch {
+      // The badge keeps its last count; the inbox itself reports errors.
+    }
+  }, [backend, enabled, userId]);
+
+  // The count follows new activity as it is written, without a reload.
+  useEffect(() => {
+    if (!backend || !enabled || !userId) {
+      setUnreadActivity(0);
+      return;
+    }
+    void refreshUnreadActivity();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = backend.club.subscribeInbox(userId, () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void refreshUnreadActivity(), realtimeSettleMs);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      stop();
+    };
+  }, [backend, enabled, refreshUnreadActivity, userId]);
+
+  const loadActivity = useCallback(async (): Promise<ClubActivityItem[] | null> => {
+    if (!backend || !enabled) return null;
+    try {
+      return await backend.club.activity();
+    } catch (cause) {
+      setError(clubErrorMessage(cause, "Your Club activity could not be loaded."));
+      return null;
+    }
+  }, [backend, enabled]);
+
+  /** Opening the inbox reads it; the badge clears at once. */
+  const markActivityRead = useCallback(async () => {
+    if (!backend || !enabled) return;
+    setUnreadActivity(0);
+    try {
+      await backend.club.markActivityRead();
+    } catch {
+      void refreshUnreadActivity();
+    }
+  }, [backend, enabled, refreshUnreadActivity]);
+
+  /** A post as the feed shows it: from the feed when it is there, else read on its own. */
+  const loadPost = useCallback(async (postId: string): Promise<ClubFeedItem | null> => {
+    const onScreen = items.find((entry) => entry.post.id === postId);
+    if (onScreen) return onScreen;
+    if (!backend || !enabled) return null;
+    try {
+      return await backend.club.postItem(postId);
+    } catch (cause) {
+      setError(clubErrorMessage(cause, "This post could not be opened."));
+      return null;
+    }
+  }, [backend, enabled, items]);
+
+  const loadProfile = useCallback(async (riderId: string): Promise<ClubRiderProfile | null> => {
+    if (!backend || !enabled) return null;
+    try {
+      return await backend.club.riderProfile(riderId);
+    } catch (cause) {
+      setError(clubErrorMessage(cause, "This rider could not be loaded."));
+      return null;
+    }
+  }, [backend, enabled]);
+
   return {
     enabled,
     spaces,
@@ -380,7 +459,12 @@ export function useClub({
     deleteComment,
     deletePost,
     report,
-    block
+    block,
+    unreadActivity,
+    loadActivity,
+    markActivityRead,
+    loadPost,
+    loadProfile
   };
 }
 

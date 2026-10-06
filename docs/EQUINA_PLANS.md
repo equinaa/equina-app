@@ -34,11 +34,16 @@ Admin → Plans with no migration or release.
     one tap. Joining needs `post` access (the membership policies say so); `read` riders see the
     groups without a Join button. Member counts are not shown yet: the app only prints "Last post
     2h ago" from posts it has already loaded, never a number it cannot back. The composer can take
-    a photo, behind `EXPO_PUBLIC_ENABLE_CLUB_PHOTO_POSTS` (off): it goes through the same upload
-    tickets as every other file (type and size checked, content signature verified, malware scan
-    when configured) and re-queues the post for provider moderation, but nothing strips EXIF/GPS
-    yet, so the control stays hidden until the processing worker in
-    `EQUINA_MEDIA_PROCESSING_BOUNDARY.md` exists. Images skip the phrase filter, which is text-only.
+    a photo, behind `EXPO_PUBLIC_ENABLE_CLUB_PHOTO_POSTS`: the app redraws it as a JPEG of at most
+    2048 px, and `complete-upload` strips EXIF, XMP, IPTC and comments before the photo is
+    registered (`EQUINA_MEDIA_PROCESSING_BOUNDARY.md`). It goes through the same upload tickets as
+    every other file and re-queues the post for provider moderation. Images skip the phrase
+    filter, which is text-only.
+  - **Replies, profiles and activity** (`202610060004`). A reply answers a comment on the same
+    post, one level deep. Tapping a rider opens their profile: name, photo, groups and recent
+    posts, with Report and Block. Comments on a rider's posts, replies to their comments and likes
+    are written to `club_activity` by the database and shown behind the bell in the feed and a dot
+    on the Club tab. Push waits for the Apple account.
 - **Ralf.** One credit is one message, three with a photo. Credits are only spent while the
   `coach_credits` flag is on; the allowance always follows the plan the rider holds. Premium's
   draft says "full access"; 300 a month (about EUR 1.60 at full use) keeps the cost bounded.
