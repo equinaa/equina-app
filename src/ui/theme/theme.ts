@@ -44,6 +44,11 @@ export const equinaTheme = {
     quietPressed: "rgba(247,243,234,0.09)",
     selected: "rgba(196,160,90,0.18)",
     fieldFocused: "rgba(196,160,90,0.1)",
+    // A field has to read as a box on any ground, sheet or canvas: a lifted
+    // fill, and an edge at 3:1 against the sheet (WCAG 1.4.11). Before, the
+    // fill was the sheet's own colour and email and password ran together.
+    field: "rgba(247,243,234,0.06)",
+    fieldBorder: "rgba(247,243,234,0.36)",
     separator: "rgba(247,243,234,0.08)",
     dockFallback: "rgba(20,18,15,0.92)"
   },
