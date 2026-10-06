@@ -15,4 +15,5 @@ import "./image-metadata.test";
 await import("./paywall.test");
 await import("./beta.test");
 await import("./club-social.test");
+await import("./ride-setup.test");
 await import("./backend-migrations.test");

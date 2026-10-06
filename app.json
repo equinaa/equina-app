@@ -29,7 +29,15 @@
       "expo-notifications",
       "expo-web-browser",
       "expo-apple-authentication",
-      "./plugins/with-storekit-configuration.cjs"
+      "./plugins/with-storekit-configuration.cjs",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": false,
@@ -43,7 +51,10 @@
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#161512"
-      }
+      },
+      "permissions": [
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ]
     },
     "web": {
       "bundler": "metro"

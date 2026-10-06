@@ -55,6 +55,8 @@ type ClubTab = "feed" | "groups";
 export type ClubRideShare = {
   id: string;
   horseId?: string;
+  /** The group the ride's training belongs in, where sharing it starts. */
+  spaceSlug?: string;
   /** "Ralfy · 32 min · Rhythm · felt focused" */
   summary: string;
 };
@@ -367,7 +369,11 @@ export function ClubScreen({
       <ComposerSheet
         visible={Boolean(composer)}
         spaces={club.spaces}
-        defaultSpaceSlug={composerSpaceSlug(club.scope, club.spaces, defaultSpaceSlug)}
+        defaultSpaceSlug={
+          composer?.attachRide && rideToShare?.spaceSlug
+            ? rideToShare.spaceSlug
+            : composerSpaceSlug(club.scope, club.spaces, defaultSpaceSlug)
+        }
         ride={rideToShare}
         startWithRide={Boolean(composer?.attachRide)}
         allowPhoto={photoPosts}

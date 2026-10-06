@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Easing,
   Image,
   Platform,
@@ -17,15 +18,53 @@ import {
   CheckCircle2,
   ChevronRight,
   Pause,
+  Pencil,
   Play,
   SendHorizontal,
   Sparkles,
+  Volume2,
+  VolumeX,
   X
 } from "lucide-react-native";
+import type { RidePhaseEntry } from "../../backend";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
 import { equinaTheme } from "../../ui/theme/theme";
+import {
+  cancelRideAlerts,
+  cancelStaleRideAlerts,
+  cueFromClock,
+  cueFromTap,
+  cueVoiceOn,
+  holdScreenAwake,
+  prepareRideCues,
+  releaseRideCues,
+  scheduleRideAlerts,
+  silenceRideCues
+} from "./ride-cues";
+import {
+  isRunning,
+  pauseRun,
+  phaseAnnouncement,
+  phaseProgress,
+  phaseRemainingMs,
+  phasesDoneAnnouncement,
+  plannedMinutes,
+  reachedPhases,
+  readyRun,
+  resumeRun,
+  rideElapsedMs,
+  ridePhaseEntries,
+  rideScheduleKey,
+  rideTrainingLabel,
+  skipPhase,
+  startRun,
+  syncRun,
+  upcomingRideAlerts,
+  type RidePlan,
+  type RideRun
+} from "./ride-plan";
 
 export type RideMood = "Fresh" | "Focused" | "Tender";
 
@@ -34,11 +73,14 @@ export type RideSession = {
   startedAt: string;
   completedAt: string;
   discipline: OnboardingDiscipline;
+  /** The training's id. Absent on rides from before the setup sheet. */
+  trainingType?: string;
   focus: string;
   plannedDuration: string;
   elapsedSeconds: number;
   completedPhases: number;
   totalPhases: number;
+  phases?: RidePhaseEntry[];
   mood: RideMood;
 };
 
@@ -52,58 +94,9 @@ export type RideRecommendation = {
   image: string;
 };
 
-type RidePhase = {
-  title: string;
-  duration: string;
-  cue: string;
-};
-
-type RideBlueprint = {
-  label: string;
-  plannedDuration: string;
-  phases: readonly RidePhase[];
-};
-
-const rideBlueprints: Record<OnboardingDiscipline, RideBlueprint> = {
-  Dressage: {
-    label: "Soft contact",
-    plannedDuration: "35 min",
-    phases: [
-      { title: "Warm-up", duration: "8 min", cue: "Let the walk open, then find an easy forward trot." },
-      { title: "Contact & transitions", duration: "20 min", cue: "Keep the hand quiet. Ask once, then let your horse carry the rhythm." },
-      { title: "Cool-down", duration: "7 min", cue: "Finish on a long rein and notice what became easier." }
-    ]
-  },
-  Jumping: {
-    label: "Poles & rhythm",
-    plannedDuration: "30 min",
-    phases: [
-      { title: "Warm-up", duration: "8 min", cue: "Find one quiet canter before asking for more." },
-      { title: "Poles & rhythm", duration: "15 min", cue: "Keep the same canter. Let the line come to you." },
-      { title: "Cool-down", duration: "7 min", cue: "Walk long, check breathing, then feel both legs." }
-    ]
-  },
-  Eventing: {
-    label: "Fitness & balance",
-    plannedDuration: "40 min",
-    phases: [
-      { title: "Warm-up", duration: "10 min", cue: "Build the pace gradually and keep every turn balanced." },
-      { title: "Fitness sets", duration: "20 min", cue: "Hold the rhythm, not the speed. Recover before quality drops." },
-      { title: "Recovery", duration: "10 min", cue: "Let the breathing settle before returning to the stable." }
-    ]
-  },
-  Trail: {
-    label: "Calm miles",
-    plannedDuration: "45 min",
-    phases: [
-      { title: "Settle", duration: "10 min", cue: "Give your horse time to look, breathe, and walk forward." },
-      { title: "Calm miles", duration: "25 min", cue: "Keep a soft rhythm and reward every relaxed response." },
-      { title: "Return", duration: "10 min", cue: "Come home quieter than you left." }
-    ]
-  }
-};
-
-export const rideBlueprintFor = (discipline: OnboardingDiscipline) => rideBlueprints[discipline];
+/** What a ride was, in the words the rider chose: "Pole work", or the discipline for older rides. */
+export const rideSessionLabel = (session: Pick<RideSession, "trainingType" | "discipline">) =>
+  rideTrainingLabel(session.trainingType) ?? session.discipline;
 
 const formatElapsed = (seconds: number) => {
   const hours = Math.floor(seconds / 3600);
@@ -126,30 +119,73 @@ export const rideDurationLabel = (seconds: number) => {
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 };
 
+const tickMs = 250;
+// A gap this long between ticks means the phone slept. A phase that began
+// meanwhile was already announced by its notification, so it is not said again.
+const sleptMs = 2_500;
+const maxRideMs = 86_400_000;
+
 export function RideModeScreen({
-  horseName,
+  plan,
   discipline,
   image,
   onFinish,
-  onExit
+  onExit,
+  onEdit
 }: {
-  horseName: string;
+  plan: RidePlan;
+  /** The horse's or the rider's, for a training that has none of its own. */
   discipline: OnboardingDiscipline;
   image: string;
   onFinish: (session: RideCompletion) => void;
   onExit: () => void;
+  /** Back to the setup sheet. Only before the clock starts. */
+  onEdit: () => void;
 }) {
-  const blueprint = rideBlueprintFor(discipline);
-  const [phaseIndex, setPhaseIndex] = useState(0);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const startedAt = useRef(new Date().toISOString()).current;
+  const phases = plan.phases;
+  const [run, setRun] = useState<RideRun>(readyRun);
+  const [now, setNow] = useState(() => Date.now());
+  const [voice, setVoice] = useState(true);
+  const runRef = useRef(run);
+  const voiceRef = useRef(voice);
+  const lastTick = useRef(Date.now());
+  const alertIds = useRef<string[]>([]);
+  const alertQueue = useRef<Promise<void>>(Promise.resolve());
   const entryMotion = useRef(new Animated.Value(0)).current;
   const phaseMotion = useRef(new Animated.Value(1)).current;
   const reducedMotion = useReducedMotion();
-  const useNativePhaseDriver = Platform.OS !== "web";
-  const currentPhase = blueprint.phases[phaseIndex] ?? blueprint.phases[0];
-  const isFinalPhase = phaseIndex === blueprint.phases.length - 1;
+  const useNativeDriver = Platform.OS !== "web";
+  runRef.current = run;
+  voiceRef.current = voice;
+
+  const started = run.startedAt !== null;
+  const running = isRunning(run);
+  const done = run.phasesDone;
+  const currentPhase = phases[run.phaseIndex] ?? phases[0];
+  const nextPhase = done ? undefined : phases[run.phaseIndex + 1];
+  const isFinalPhase = run.phaseIndex >= phases.length - 1;
+  const elapsedSeconds = Math.floor(rideElapsedMs(run, now) / 1000);
+  const remainingSeconds = Math.ceil(phaseRemainingMs(run, phases, now) / 1000);
+  const progress = phaseProgress(run, phases, now);
+  const totalMinutes = plannedMinutes(phases);
+  const trainingLabel = plan.trainingType.label;
+
+  useEffect(() => {
+    void prepareRideCues();
+    void cancelStaleRideAlerts();
+    const releaseScreen = holdScreenAwake();
+    return () => {
+      releaseScreen();
+      releaseRideCues();
+      // Behind any scheduling still in flight, so alerts it lands after the
+      // ride ended are cancelled too.
+      alertQueue.current = alertQueue.current.catch(() => undefined).then(async () => {
+        const ids = alertIds.current;
+        alertIds.current = [];
+        await cancelRideAlerts(ids);
+      });
+    };
+  }, []);
 
   useEffect(() => {
     if (reducedMotion) {
@@ -161,109 +197,160 @@ export function RideModeScreen({
       toValue: 1,
       duration: 280,
       easing: Easing.bezier(0.32, 0.72, 0, 1),
-      useNativeDriver: Platform.OS !== "web"
+      useNativeDriver
     }).start();
-  }, [entryMotion, reducedMotion]);
+  }, [entryMotion, reducedMotion, useNativeDriver]);
 
+  const pulsePhase = () => {
+    if (reducedMotion || !useNativeDriver) return;
+    phaseMotion.setValue(0);
+    Animated.timing(phaseMotion, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver
+    }).start();
+  };
+
+  // The clock. Time comes from timestamps; the interval only wakes the screen
+  // to show it and to notice when a phase's minutes are up.
   useEffect(() => {
-    if (paused) return;
-    const interval = setInterval(() => setElapsedSeconds((seconds) => seconds + 1), 1000);
+    if (!running) return;
+    lastTick.current = Date.now();
+    const interval = setInterval(() => {
+      const tick = Date.now();
+      const slept = tick - lastTick.current > sleptMs;
+      lastTick.current = tick;
+      setNow(tick);
+      const step = syncRun(runRef.current, phases, tick);
+      if (step.run === runRef.current) return;
+      runRef.current = step.run;
+      setRun(step.run);
+      // Out of sight -- locked, or another app in front -- the notification
+      // already told the rider; a second voice from the background would not.
+      // "inactive" (Control Center pulled down) still runs and still speaks.
+      if (slept || AppState.currentState === "background") return;
+      if (step.finished) {
+        cueFromClock(phasesDoneAnnouncement, voiceRef.current, "done");
+      } else if (step.entered !== null) {
+        const entered = phases[step.entered];
+        if (entered) cueFromClock(phaseAnnouncement(entered), voiceRef.current, "phase");
+      }
+      pulsePhase();
+    }, tickMs);
     return () => clearInterval(interval);
-  }, [paused]);
+  }, [running, phases]);
+
+  // What a locked phone is told, kept in step with the ride: every change of
+  // phase still ahead, cleared on pause and rebuilt when the times ahead move.
+  const alertKey = rideScheduleKey(run, phases);
+  useEffect(() => {
+    alertQueue.current = alertQueue.current.then(async () => {
+      const previous = alertIds.current;
+      alertIds.current = [];
+      await cancelRideAlerts(previous);
+      alertIds.current = await scheduleRideAlerts(upcomingRideAlerts(runRef.current, phases, Date.now()));
+    });
+  }, [alertKey, phases]);
+
+  const startRide = () => {
+    const first = phases[0];
+    if (!first) return;
+    const tick = Date.now();
+    const next = startRun(run, tick);
+    runRef.current = next;
+    setRun(next);
+    setNow(tick);
+    cueFromTap(phaseAnnouncement(first), voice);
+    pulsePhase();
+  };
+
+  const togglePause = () => {
+    void Haptics.selectionAsync().catch(() => undefined);
+    const tick = Date.now();
+    const next = running ? pauseRun(run, tick) : resumeRun(run, tick);
+    if (running) silenceRideCues();
+    runRef.current = next;
+    setRun(next);
+    setNow(tick);
+  };
+
+  const moveOn = () => {
+    const tick = Date.now();
+    const next = skipPhase(run, phases, tick);
+    if (next === run) return;
+    runRef.current = next;
+    setRun(next);
+    setNow(tick);
+    const entered = phases[next.phaseIndex];
+    cueFromTap(next.phasesDone || !entered ? phasesDoneAnnouncement : phaseAnnouncement(entered), voice);
+    pulsePhase();
+  };
+
+  const toggleVoice = () => {
+    void Haptics.selectionAsync().catch(() => undefined);
+    if (voice) silenceRideCues();
+    else cueVoiceOn();
+    setVoice((value) => !value);
+  };
+
+  const finishRide = () => {
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    silenceRideCues();
+    const tick = Date.now();
+    const elapsed = Math.min(maxRideMs, rideElapsedMs(run, tick));
+    onFinish({
+      id: `ride-${tick}`,
+      startedAt: new Date(run.startedAt ?? tick).toISOString(),
+      completedAt: new Date(tick).toISOString(),
+      discipline: plan.trainingType.discipline ?? discipline,
+      trainingType: plan.trainingType.id,
+      focus: trainingLabel,
+      plannedDuration: `${totalMinutes} min`,
+      elapsedSeconds: Math.round(elapsed / 1000),
+      completedPhases: reachedPhases(run),
+      totalPhases: phases.length,
+      phases: ridePhaseEntries(run, phases, elapsed)
+    });
+  };
 
   const imageMotion = {
     opacity: entryMotion,
     transform: Platform.OS === "web"
       ? []
-      : [
-          {
-            scale: entryMotion.interpolate({
-              inputRange: [0, 1],
-              outputRange: [1.04, 1]
-            })
-          }
-        ]
+      : [{ scale: entryMotion.interpolate({ inputRange: [0, 1], outputRange: [1.04, 1] }) }]
   };
-
   const contentMotion = {
     opacity: entryMotion,
     transform: Platform.OS === "web"
       ? []
-      : [
-          {
-            translateY: entryMotion.interpolate({
-              inputRange: [0, 1],
-              outputRange: [10, 0]
-            })
-          }
-        ]
+      : [{ translateY: entryMotion.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }]
   };
-
   const phaseStyle = {
     opacity: phaseMotion,
     transform: Platform.OS === "web"
       ? []
-      : [
-          {
-            translateY: phaseMotion.interpolate({
-              inputRange: [0, 1],
-              outputRange: [5, 0]
-            })
-          }
-        ]
+      : [{ translateY: phaseMotion.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }]
   };
 
-  const advancePhase = () => {
-    if (isFinalPhase) return;
-    void Haptics.selectionAsync().catch(() => undefined);
-
-    if (reducedMotion || !useNativePhaseDriver) {
-      setPhaseIndex((index) => Math.min(index + 1, blueprint.phases.length - 1));
-      return;
-    }
-
-    Animated.timing(phaseMotion, {
-      toValue: 0,
-      duration: 90,
-      useNativeDriver: useNativePhaseDriver
-    }).start(() => {
-      setPhaseIndex((index) => Math.min(index + 1, blueprint.phases.length - 1));
-      phaseMotion.setValue(0);
-      Animated.timing(phaseMotion, {
-        toValue: 1,
-        duration: 170,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: useNativePhaseDriver
-      }).start();
-    });
-  };
-
-  const togglePause = () => {
-    void Haptics.selectionAsync().catch(() => undefined);
-    setPaused((value) => !value);
-  };
-
-  const finishRide = () => {
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    onFinish({
-      id: `ride-${Date.now()}`,
-      startedAt,
-      completedAt: new Date().toISOString(),
-      discipline,
-      focus: blueprint.label,
-      plannedDuration: blueprint.plannedDuration,
-      elapsedSeconds,
-      completedPhases: phaseIndex + 1,
-      totalPhases: blueprint.phases.length
-    });
-  };
+  // Before the start the screen shows the first phase and its full time, so
+  // the rider can get on, settle the phone and the horse, then tap Start.
+  const phaseLabel = done ? "ALL PHASES DONE" : (currentPhase?.title ?? "").toUpperCase();
+  const timerValue = done ? formatElapsed(elapsedSeconds) : formatElapsed(remainingSeconds);
+  const timerNote = !started
+    ? `Phase 1 of ${phases.length} · the clock waits for you`
+    : done
+      ? "Total ride time"
+      : !running
+        ? `Paused · phase ${run.phaseIndex + 1} of ${phases.length}`
+        : `remaining · phase ${run.phaseIndex + 1} of ${phases.length}`;
 
   return (
     <View testID="ride-mode" style={styles.rideRoot}>
       <Animated.Image source={{ uri: image }} resizeMode="cover" style={[styles.rideImage, imageMotion]} />
       <LinearGradient
         colors={["rgba(5,6,5,0.42)", "rgba(5,6,5,0.08)", "rgba(5,6,5,0.88)", "rgba(5,6,5,0.98)"]}
-        locations={[0, 0.28, 0.56, 1]}
+        locations={[0, 0.24, 0.5, 1]}
         style={StyleSheet.absoluteFillObject}
       />
 
@@ -281,50 +368,92 @@ export function RideModeScreen({
           </MotionPressable>
 
           <View style={styles.rideIdentity}>
-            <Text numberOfLines={1} style={styles.rideIdentityName}>{horseName}</Text>
-            <Text style={styles.rideIdentityMeta}>{blueprint.label} · {blueprint.plannedDuration}</Text>
+            <Text numberOfLines={1} style={styles.rideIdentityName}>{plan.horseName || "Today's ride"}</Text>
+            <Text numberOfLines={1} style={styles.rideIdentityMeta}>{trainingLabel} · {totalMinutes} min</Text>
           </View>
 
-          <MotionPressable
-            testID="ride-pause"
-            accessibilityRole="button"
-            accessibilityLabel={paused ? "Resume ride timer" : "Pause ride timer"}
-            hitSlop={6}
-            onPress={togglePause}
-            style={styles.rideIconButton}
-          >
-            {paused ? <Play size={19} color={equinaTheme.text.primary} /> : <Pause size={19} color={equinaTheme.text.primary} />}
-          </MotionPressable>
+          <View style={styles.rideTopActions}>
+            <MotionPressable
+              testID="ride-voice"
+              accessibilityRole="switch"
+              accessibilityLabel="Say each phase out loud"
+              accessibilityState={{ checked: voice }}
+              hitSlop={6}
+              onPress={toggleVoice}
+              style={styles.rideIconButton}
+            >
+              {voice ? <Volume2 size={19} color={equinaTheme.text.primary} /> : <VolumeX size={19} color={equinaTheme.text.secondary} />}
+            </MotionPressable>
+            {!started ? (
+              <MotionPressable
+                testID="ride-edit"
+                accessibilityRole="button"
+                accessibilityLabel="Change the training"
+                hitSlop={6}
+                onPress={onEdit}
+                style={styles.rideIconButton}
+              >
+                <Pencil size={18} color={equinaTheme.text.primary} />
+              </MotionPressable>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.rideBottom}>
-          <View style={styles.rideTimerBlock}>
-            <Text style={styles.rideTimerLabel}>{paused ? "PAUSED" : "RIDE TIME"}</Text>
-            <Text accessibilityLiveRegion="polite" style={styles.rideTimer}>{formatElapsed(elapsedSeconds)}</Text>
-          </View>
-
           <View style={styles.ridePhaseTrack}>
-            {blueprint.phases.map((phase, index) => (
+            {phases.map((phase, index) => (
               <View
-                key={phase.title}
-                style={[
-                  styles.ridePhaseSegment,
-                  index <= phaseIndex && styles.ridePhaseSegmentActive
-                ]}
-              />
+                key={phase.id}
+                style={[styles.ridePhaseSegment, { flex: Math.max(phase.minutes, 3) }]}
+              >
+                <View style={[styles.ridePhaseFill, { width: `${Math.round((progress[index] ?? 0) * 100)}%` }]} />
+              </View>
             ))}
           </View>
 
-          <Animated.View style={phaseStyle}>
-            <View style={styles.ridePhaseMetaRow}>
-              <Text style={styles.ridePhaseIndex}>PHASE {phaseIndex + 1} OF {blueprint.phases.length}</Text>
-              <Text style={styles.ridePhaseDuration}>{currentPhase?.duration}</Text>
-            </View>
-            <Text style={styles.ridePhaseTitle}>{currentPhase?.title}</Text>
-            <Text style={styles.ridePhaseCue}>{currentPhase?.cue}</Text>
+          <Animated.View style={[styles.ridePhaseBlock, phaseStyle]}>
+            {/* The name small above the gait, as the yard writes it; a phase
+                with no gait shows its name large instead. */}
+            {done || currentPhase?.detail ? (
+              <Text testID="ride-phase-title" accessibilityLiveRegion="polite" style={styles.rideTimerLabel}>{phaseLabel}</Text>
+            ) : null}
+            {done ? (
+              <Text style={styles.ridePhaseTitle}>Well ridden.</Text>
+            ) : currentPhase ? (
+              <Text
+                testID={currentPhase.detail ? undefined : "ride-phase-title"}
+                accessibilityLiveRegion={currentPhase.detail ? undefined : "polite"}
+                numberOfLines={2}
+                style={styles.ridePhaseTitle}
+              >
+                {currentPhase.detail || currentPhase.title}
+              </Text>
+            ) : null}
+            <Text testID="ride-countdown" style={styles.rideTimer}>{timerValue}</Text>
+            <Text style={styles.rideTimerNote}>{timerNote}</Text>
+            {done ? (
+              <Text style={styles.ridePhaseCue}>Every phase had its time. Finish when you are off the horse.</Text>
+            ) : nextPhase ? (
+              <Text numberOfLines={1} style={styles.rideNext}>
+                Next · {nextPhase.title}{nextPhase.detail ? ` · ${nextPhase.detail}` : ""} · {nextPhase.minutes} min
+              </Text>
+            ) : started ? (
+              <Text style={styles.rideNext}>Last phase</Text>
+            ) : null}
           </Animated.View>
 
-          {isFinalPhase ? (
+          {!started ? (
+            <MotionPressable
+              testID="ride-start"
+              accessibilityRole="button"
+              accessibilityLabel={`Start ${currentPhase?.title ?? "the first phase"} and the clock`}
+              onPress={startRide}
+              style={styles.ridePrimaryButton}
+            >
+              <Play size={19} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} />
+              <Text style={styles.ridePrimaryText}>Start phase</Text>
+            </MotionPressable>
+          ) : done ? (
             <MotionPressable
               testID="ride-toggle"
               accessibilityRole="button"
@@ -336,23 +465,63 @@ export function RideModeScreen({
               <Text style={styles.ridePrimaryText}>Finish ride</Text>
             </MotionPressable>
           ) : (
-            <MotionPressable
-              testID="ride-next-phase"
-              accessibilityRole="button"
-              accessibilityLabel={`Continue to ${blueprint.phases[phaseIndex + 1]?.title}`}
-              onPress={advancePhase}
-              style={styles.ridePrimaryButton}
-            >
-              <Text style={styles.ridePrimaryText}>Next phase</Text>
-              <ChevronRight size={20} color={equinaTheme.colors.ink} />
-            </MotionPressable>
+            <View style={styles.rideActions}>
+              <View style={styles.rideActionRow}>
+                {/* Big, side by side: they are pressed from the saddle. */}
+                <MotionPressable
+                  testID={running ? "ride-pause" : "ride-resume"}
+                  accessibilityRole="button"
+                  accessibilityLabel={running ? "Pause the clock" : "Resume the clock"}
+                  onPress={togglePause}
+                  style={[running ? styles.rideQuietButton : styles.ridePrimaryButton, styles.rideHalfButton]}
+                >
+                  {running
+                    ? <Pause size={19} color={equinaTheme.text.primary} />
+                    : <Play size={19} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} />}
+                  <Text style={running ? styles.rideQuietText : styles.ridePrimaryText}>{running ? "Pause" : "Resume"}</Text>
+                </MotionPressable>
+                {isFinalPhase ? (
+                  <MotionPressable
+                    testID="ride-toggle"
+                    accessibilityRole="button"
+                    accessibilityLabel="Finish ride and save recap"
+                    onPress={finishRide}
+                    style={[running ? styles.ridePrimaryButton : styles.rideQuietButton, styles.rideHalfButton]}
+                  >
+                    <CheckCircle2 size={19} color={running ? equinaTheme.colors.ink : equinaTheme.text.primary} />
+                    <Text style={running ? styles.ridePrimaryText : styles.rideQuietText}>Finish ride</Text>
+                  </MotionPressable>
+                ) : (
+                  <MotionPressable
+                    testID="ride-next-phase"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Skip to ${nextPhase?.title ?? "the next phase"}`}
+                    onPress={moveOn}
+                    style={[running ? styles.ridePrimaryButton : styles.rideQuietButton, styles.rideHalfButton]}
+                  >
+                    <Text style={running ? styles.ridePrimaryText : styles.rideQuietText}>Skip phase</Text>
+                    <ChevronRight size={19} color={running ? equinaTheme.colors.ink : equinaTheme.text.primary} />
+                  </MotionPressable>
+                )}
+              </View>
+              {!isFinalPhase ? (
+                <MotionPressable
+                  testID="ride-finish-now"
+                  accessibilityRole="button"
+                  accessibilityLabel="Finish the ride now and save it"
+                  onPress={finishRide}
+                  style={styles.rideSecondaryButton}
+                >
+                  <Text style={styles.rideSecondaryText}>Finish ride now</Text>
+                </MotionPressable>
+              ) : null}
+            </View>
           )}
         </View>
       </Animated.View>
     </View>
   );
 }
-
 const moodCopy: Record<RideMood, string> = {
   Fresh: "Forward and available",
   Focused: "Steady and listening",
@@ -464,7 +633,7 @@ export function RideRecapScreen({
             />
             <View style={styles.recapHeroContent}>
               <Text numberOfLines={1} adjustsFontSizeToFit style={styles.recapHeroTitle}>{horseName}</Text>
-              <Text style={styles.recapHeroMeta}>{session.discipline} · {session.focus}</Text>
+              <Text style={styles.recapHeroMeta}>{[rideSessionLabel(session), session.plannedDuration].filter(Boolean).join(" · ")}</Text>
             </View>
           </View>
 
@@ -478,7 +647,7 @@ export function RideRecapScreen({
             <View style={styles.recapMetricDivider} />
             <RecapFact value={`${session.completedPhases}/${session.totalPhases}`} label="phases" />
             <View style={styles.recapMetricDivider} />
-            <RecapFact value={session.discipline} label="discipline" />
+            <RecapFact value={rideSessionLabel(session)} label="training" />
           </View>
 
           <View style={styles.recapSection}>
@@ -620,6 +789,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12
   },
+  rideTopActions: {
+    flexDirection: "row",
+    gap: 8
+  },
   rideIconButton: {
     width: 44,
     height: 44,
@@ -645,69 +818,94 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 1
   },
-  rideTimerBlock: {
-    alignItems: "flex-start"
-  },
   rideTimerLabel: {
     color: equinaTheme.colors.brass,
     fontSize: 11,
     lineHeight: 15,
-    fontWeight: "600"
+    fontWeight: "600",
+    letterSpacing: 0.4
   },
   rideTimer: {
     color: equinaTheme.text.primary,
-    fontSize: 56,
-    lineHeight: 64,
+    fontSize: 64,
+    lineHeight: 72,
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
-    marginTop: 2
+    marginTop: 4
+  },
+  rideTimerNote: {
+    color: equinaTheme.text.secondary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontVariant: ["tabular-nums"]
   },
   rideBottom: {
     gap: 16
   },
   ridePhaseTrack: {
     flexDirection: "row",
-    gap: 8
+    gap: 6
   },
   ridePhaseSegment: {
-    flex: 1,
-    height: 3,
+    height: 4,
     borderRadius: 8,
+    overflow: "hidden",
     backgroundColor: "rgba(247,243,234,0.18)"
   },
-  ridePhaseSegmentActive: {
+  ridePhaseFill: {
+    height: "100%",
     backgroundColor: equinaTheme.colors.brass
-  },
-  ridePhaseMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12
-  },
-  ridePhaseIndex: {
-    color: equinaTheme.colors.brass,
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: "600"
-  },
-  ridePhaseDuration: {
-    color: equinaTheme.text.secondary,
-    fontSize: 12,
-    lineHeight: 16
   },
   ridePhaseTitle: {
     color: equinaTheme.text.primary,
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 28,
+    lineHeight: 34,
     fontWeight: "600",
-    marginTop: 7
+    marginTop: 4
   },
   ridePhaseCue: {
     color: equinaTheme.text.secondary,
     fontSize: 15,
     lineHeight: 21,
-    marginTop: 6,
+    marginTop: 4,
     maxWidth: 350
+  },
+  rideNext: {
+    color: equinaTheme.text.tertiary,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 10
+  },
+  ridePhaseBlock: {
+    alignItems: "flex-start"
+  },
+  rideActions: {
+    gap: 6
+  },
+  rideActionRow: {
+    flexDirection: "row",
+    gap: 10
+  },
+  rideHalfButton: {
+    flex: 1,
+    minHeight: 60
+  },
+  rideQuietButton: {
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(247,243,234,0.32)",
+    backgroundColor: "rgba(8,7,6,0.56)"
+  },
+  rideQuietText: {
+    color: equinaTheme.text.primary,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "600"
   },
   ridePrimaryButton: {
     minHeight: 56,
@@ -723,6 +921,17 @@ const styles = StyleSheet.create({
     color: equinaTheme.colors.ink,
     fontSize: 16,
     lineHeight: 21,
+    fontWeight: "600"
+  },
+  rideSecondaryButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  rideSecondaryText: {
+    color: equinaTheme.text.secondary,
+    fontSize: 14,
+    lineHeight: 19,
     fontWeight: "600"
   },
   recapRoot: {

@@ -91,7 +91,7 @@ const need = <T>(value: T | null, what: string): T => {
   assert.deepEqual(rides.map((entry) => rideDay(entry)), ["2026-09-21", "2026-09-27"]);
 }
 
-// The summary counts rides, days ridden, disciplines and moods from the real
+// The summary counts rides, days ridden, trainings and moods from the real
 // entries, and nothing else.
 {
   const summary = need(summarise(
@@ -108,7 +108,7 @@ const need = <T>(value: T | null, what: string): T => {
   assert.equal(summary.rides, 3, "Only this week's rides count.");
   assert.equal(summary.previousRides, 1, "The ride on the 14th lands in the previous week.");
   assert.equal(summary.daysRidden, 2, "Two rides on one day is one day ridden.");
-  assert.deepEqual(summary.disciplines, [
+  assert.deepEqual(summary.trainings, [
     { value: "dressage", rides: 2 },
     { value: "jumping", rides: 1 }
   ]);
@@ -119,6 +119,28 @@ const need = <T>(value: T | null, what: string): T => {
   assert.deepEqual(summary.focuses, ["Poles", "Transitions"], "Most recent focus first, no repeats.");
   assert.equal(summary.phasesCompleted, 9);
   assert.equal(summary.phasesPlanned, 9);
+}
+
+// Rider discipline is not training type. A jumping rider's week is mostly
+// flat work: each ride counts as what it was set up as, and a ride from before
+// the setup sheet still counts under its discipline.
+{
+  const summary = need(summarise(
+    [
+      ride({ completedAt: "2026-09-21T09:00:00Z", discipline: "jumping", trainingType: "dressage", focus: "Dressage" }),
+      ride({ completedAt: "2026-09-22T09:00:00Z", discipline: "jumping", trainingType: "flatwork", focus: "Flatwork" }),
+      ride({ completedAt: "2026-09-24T09:00:00Z", discipline: "jumping", trainingType: "jumping", focus: "Jumping" }),
+      ride({ completedAt: "2026-09-25T09:00:00Z", discipline: "jumping", trainingType: "dressage", focus: "Dressage" }),
+      ride({ completedAt: "2026-09-26T09:00:00Z", discipline: "jumping", focus: "Poles and rhythm" })
+    ],
+    "week",
+    TODAY
+  ), "a summary");
+  assert.deepEqual(summary.trainings, [
+    { value: "dressage", rides: 2 },
+    { value: "jumping", rides: 2 },
+    { value: "flatwork", rides: 1 }
+  ]);
 }
 
 // A ride with no mood recorded contributes nothing to the mood tally rather
@@ -140,7 +162,7 @@ const need = <T>(value: T | null, what: string): T => {
   const summary = need(summarise([], "week", TODAY), "a summary");
   assert.equal(summary.rides, 0);
   assert.equal(summary.daysRidden, 0);
-  assert.deepEqual(summary.disciplines, []);
+  assert.deepEqual(summary.trainings, []);
   assert.equal(describeTrend(summary), null);
   assert.equal(describeMood(summary), null);
 }

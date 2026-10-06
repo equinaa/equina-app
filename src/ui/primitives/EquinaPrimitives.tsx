@@ -538,16 +538,18 @@ const primitiveStyles = StyleSheet.create({
     borderRadius: equinaTheme.radius.control,
     paddingHorizontal: equinaTheme.spacing.md,
     color: equinaTheme.text.primary,
-    backgroundColor: equinaTheme.surfaces.raised,
+    backgroundColor: equinaTheme.material.field,
     fontSize: equinaTheme.typography.body.fontSize,
     lineHeight: equinaTheme.typography.body.lineHeight,
     fontWeight: "400",
-    borderWidth: 0,
+    borderWidth: 1,
+    borderColor: equinaTheme.material.fieldBorder,
     outlineWidth: 0,
     outlineColor: "transparent"
   },
   inputFocused: {
-    backgroundColor: equinaTheme.surfaces.elevated
+    backgroundColor: equinaTheme.material.fieldFocused,
+    borderColor: equinaTheme.colors.brass
   },
   webInput: {
     outlineStyle: "none"

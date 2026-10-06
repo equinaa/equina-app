@@ -2,13 +2,12 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { RidePeriod, RideSummary } from "../../domain/ride-stats";
 import { describeMood, describeTracked, describeTrend } from "../../domain/ride-stats";
 import { equinaTheme } from "../../ui/theme/theme";
+import { rideTrainingLabel } from "./ride-plan";
 
 const periods: ReadonlyArray<{ key: RidePeriod; label: string }> = [
   { key: "week", label: "Week" },
   { key: "month", label: "Month" }
 ];
-
-const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 export type RideSummaryCardProps = {
   summary: RideSummary | null;
@@ -34,6 +33,10 @@ export function RideSummaryCard({
   const trend = summary ? describeTrend(summary) : null;
   const mood = summary ? describeMood(summary) : null;
   const tracked = summary ? describeTracked(summary.trackedSeconds) : null;
+  // A ride set up as "Flatwork" also has "Flatwork" as its focus; the tally
+  // above already says it, so only older, freer focuses are repeated here.
+  const trainingWords = new Set(summary?.trainings.map((entry) => (rideTrainingLabel(entry.value) ?? entry.value).toLowerCase()) ?? []);
+  const workedOn = summary?.focuses.filter((focus) => !trainingWords.has(focus.toLowerCase())) ?? [];
 
   return (
     <View style={styles.card}>
@@ -82,18 +85,18 @@ export function RideSummaryCard({
           {trend ? <Text style={styles.trend}>{trend}</Text> : null}
 
           <View style={styles.facts}>
-            {summary.disciplines.length > 0 ? (
+            {summary.trainings.length > 0 ? (
               <Text style={styles.fact} numberOfLines={1}>
-                {summary.disciplines.map((entry) => `${titleCase(entry.value)} ${entry.rides}`).join(" · ")}
+                {summary.trainings.map((entry) => `${rideTrainingLabel(entry.value) ?? entry.value} ${entry.rides}`).join(" · ")}
               </Text>
             ) : null}
             {mood ? <Text style={styles.fact}>{mood}</Text> : null}
             {tracked ? <Text style={styles.fact}>{tracked}</Text> : null}
           </View>
 
-          {summary.focuses.length > 0 ? (
+          {workedOn.length > 0 ? (
             <Text style={styles.focus} numberOfLines={2}>
-              Worked on {summary.focuses.slice(0, 3).join(", ").toLowerCase()}
+              Worked on {workedOn.slice(0, 3).join(", ").toLowerCase()}
             </Text>
           ) : null}
         </View>

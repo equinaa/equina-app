@@ -244,16 +244,20 @@ const styles = StyleSheet.create({
     minHeight: 64,
     borderRadius: 14,
     overflow: "hidden",
-    backgroundColor: equinaTheme.surfaces.raised,
+    backgroundColor: equinaTheme.material.field,
+    borderWidth: 1,
+    borderColor: equinaTheme.material.fieldBorder,
     justifyContent: "center",
     marginTop: 16
   },
   codeFieldFocused: {
-    backgroundColor: equinaTheme.surfaces.elevated
+    backgroundColor: equinaTheme.material.fieldFocused,
+    borderColor: equinaTheme.colors.brass
   },
   codeFieldError: {
-    borderWidth: 1,
-    borderColor: equinaTheme.colors.danger
+    // The on-dark critical colour: danger (#9D2B2E) is 2.7:1 on the canvas,
+    // below the normal edge, so an error would look quieter than no error.
+    borderColor: equinaTheme.colorRole.criticalOnDark
   },
   codeInput: {
     color: equinaTheme.colors.ivory,
