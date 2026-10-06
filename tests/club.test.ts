@@ -130,6 +130,18 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
   const chips = clubFilterChips(spaces, ["space-jumping"]);
   assert.deepEqual(chips[2]?.scope, { kind: "space", spaceId: "space-jumping" });
   assert.equal(new Set(chips.map((chip) => chip.key)).size, chips.length, "Keys are unique.");
+  // A card tap filters the feed to a group the rider never joined: its chip
+  // appears, selected, so the filter is visible and one tap away from All.
+  assert.deepEqual(
+    clubFilterChips(spaces, ["space-jumping"], { kind: "space", spaceId: "space-coach-qa" }).map((chip) => chip.label),
+    ["All", "My groups", "Jumping", "Coach Q&A"]
+  );
+  assert.deepEqual(
+    clubFilterChips(spaces, ["space-jumping"], { kind: "space", spaceId: "space-jumping" }).map((chip) => chip.label),
+    ["All", "My groups", "Jumping"],
+    "A joined space on screen is listed once."
+  );
+  assert.deepEqual(clubFilterChips(spaces, [], mineScope).map((chip) => chip.label), ["All", "My groups"]);
 }
 
 // Activity per group comes from what is loaded, or says nothing.

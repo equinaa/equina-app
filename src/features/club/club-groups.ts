@@ -41,15 +41,22 @@ export type ClubFilterChip = { scope: ClubFeedScope; label: string; key: string 
 /**
  * "All", "My groups", then one chip per joined space in the order the spaces
  * are listed. Every other space is reached through the Groups tab, so the row
- * stays short however many spaces exist.
+ * stays short however many spaces exist. The space on screen always has a
+ * chip, joined or not: a card tap filters the feed to a group the rider never
+ * joined, and a filter nobody can see reads as the whole Club.
  */
-export const clubFilterChips = (spaces: ClubSpace[], joinedSpaceIds: string[]): ClubFilterChip[] => {
+export const clubFilterChips = (
+  spaces: ClubSpace[],
+  joinedSpaceIds: string[],
+  scope: ClubFeedScope = allScope
+): ClubFilterChip[] => {
   const joined = new Set(joinedSpaceIds);
+  const shown = (space: ClubSpace) => joined.has(space.id) || (scope.kind === "space" && scope.spaceId === space.id);
   return [
     { scope: allScope, label: "All", key: "all" },
     { scope: mineScope, label: "My groups", key: "mine" },
     ...spaces
-      .filter((space) => joined.has(space.id))
+      .filter(shown)
       .map((space) => ({ scope: { kind: "space" as const, spaceId: space.id }, label: space.name, key: space.id }))
   ];
 };

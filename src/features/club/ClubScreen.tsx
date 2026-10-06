@@ -23,6 +23,7 @@ import {
   X
 } from "lucide-react-native";
 import type { ClubAccess, ClubCommentWithAuthor, ClubFeedItem, ClubSpace, UploadAsset } from "../../backend";
+import { equinaFeatureFlags } from "../../config/feature-flags";
 import { EquinaButton, EquinaIconButton, EquinaSegmentedTabs, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import { clubReportReasons, relativeTime, type ClubReportReason } from "./club-format";
@@ -215,7 +216,7 @@ export function ClubScreen({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chips}
         >
-          {clubFilterChips(club.spaces, club.joinedSpaceIds).map((chip) => (
+          {clubFilterChips(club.spaces, club.joinedSpaceIds, club.scope).map((chip) => (
             <SpaceChip
               key={chip.key}
               testID={`club-filter-${chip.key}`}
@@ -241,11 +242,11 @@ export function ClubScreen({
         </Pressable>
       ) : null}
 
-      {tab === "feed" && !club.loaded && club.loading ? (
+      {tab === "feed" && ((!club.loaded && club.loading) || (club.scope.kind === "mine" && !club.membershipsLoaded)) ? (
         <ActivityIndicator style={styles.loading} color={equinaTheme.colors.brass} />
       ) : null}
 
-      {tab === "feed" && club.loaded && club.items.length === 0 ? (
+      {tab === "feed" && club.loaded && club.items.length === 0 && (club.scope.kind !== "mine" || club.membershipsLoaded) ? (
         <View style={styles.notice} testID="club-feed-empty">
           <Text style={styles.noticeTitle}>{emptyState.title}</Text>
           <Text style={styles.noticeBody}>{emptyState.body}</Text>
@@ -314,7 +315,7 @@ export function ClubScreen({
         defaultSpaceSlug={defaultSpaceSlug}
         ride={rideToShare}
         startWithRide={Boolean(composer?.attachRide)}
-        allowPhoto={canPost}
+        allowPhoto={canPost && equinaFeatureFlags.clubPhotoPosts}
         busy={club.busy === "post"}
         onDismiss={() => setComposer(null)}
         onSubmit={async (input) => {

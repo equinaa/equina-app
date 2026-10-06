@@ -134,7 +134,14 @@ export class ClubRepository {
   async joinSpace(spaceId: string): Promise<void> {
     const { data: auth } = await this.client.auth.getUser();
     if (!auth.user) throw backendError(new Error("Authentication required."), "Authentication required.");
-    const { error } = await this.client.from("club_memberships").upsert({ space_id: spaceId, user_id: auth.user.id, role: "member" });
+    // ON CONFLICT DO NOTHING: a membership held already (joined on another
+    // device, or a memberships read that failed) is a join that succeeded.
+    // The DO UPDATE path would be refused, since memberships have no UPDATE
+    // policy, and the rider would be told Club is closed.
+    const { error } = await this.client.from("club_memberships").upsert(
+      { space_id: spaceId, user_id: auth.user.id, role: "member" },
+      { onConflict: "space_id,user_id", ignoreDuplicates: true }
+    );
     if (error) throw backendError(error, "Club could not be joined.");
   }
 
