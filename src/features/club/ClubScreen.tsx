@@ -32,6 +32,7 @@ import {
   clubPhotoProblem,
   clubSpaceImageKey,
   composerPrompt,
+  orderClubSpaces,
   feedEmptyState,
   latestActivityLabel,
   sameScope,
@@ -295,7 +296,7 @@ export function ClubScreen({
           {!club.spaces.length && club.loading ? (
             <ActivityIndicator style={styles.loading} color={equinaTheme.colors.brass} />
           ) : null}
-          {club.spaces.map((space) => (
+          {orderClubSpaces(club.spaces, defaultSpaceSlug).map((space) => (
             <ClubGroupCard
               key={space.id}
               space={space}

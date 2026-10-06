@@ -15,6 +15,7 @@ import {
   clubPhotoProblem,
   clubSpaceImageKey,
   composerPrompt,
+  orderClubSpaces,
   feedCursor,
   feedEmptyState,
   feedQueryForScope,
@@ -190,6 +191,19 @@ const item = (id: string, spaceId: string, createdAt: string): ClubFeedItem => (
   assert.match(clubPhotoProblem({ mimeType: "image/gif", byteSize: 1 }) ?? "", /JPEG, PNG or HEIC/);
   assert.match(clubPhotoProblem({ mimeType: "video/mp4", byteSize: 1 }) ?? "", /JPEG, PNG or HEIC/, "Video waits for a later phase.");
   assert.match(clubPhotoProblem({ mimeType: "image/png", byteSize: 50 * 1024 * 1024 + 1 }) ?? "", /50 MB/);
+}
+
+// Groups: the rider's discipline first, Coach Q&A last, the rest by name.
+{
+  const spaces = [
+    { slug: "coach-qa", name: "Coach Q&A" },
+    { slug: "western", name: "Western" },
+    { slug: "dressage", name: "Dressage" },
+    { slug: "jumping", name: "Jumping" }
+  ];
+  assert.deepEqual(orderClubSpaces(spaces, "jumping").map((space) => space.slug), ["jumping", "dressage", "western", "coach-qa"]);
+  assert.deepEqual(orderClubSpaces(spaces, "unknown").map((space) => space.slug), ["dressage", "jumping", "western", "coach-qa"]);
+  assert.deepEqual(spaces[0]!.slug, "coach-qa", "The input order is left alone.");
 }
 
 console.log("Club rules passed.");

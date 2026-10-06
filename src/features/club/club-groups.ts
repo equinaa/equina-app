@@ -125,6 +125,17 @@ export const feedEmptyState = ({
 };
 
 /**
+ * The groups list: the rider's own discipline first, the other disciplines by
+ * name, and Coach Q&A last, since it is not a discipline. The database orders
+ * by name, which would put Coach Q&A first.
+ */
+export const orderClubSpaces = <T extends { slug: string; name: string }>(spaces: T[], preferredSlug: string): T[] =>
+  [...spaces].sort((a, b) => {
+    const rank = (space: T) => (space.slug === preferredSlug ? 0 : space.slug === "coach-qa" ? 2 : 1);
+    return rank(a) - rank(b) || a.name.localeCompare(b.name);
+  });
+
+/**
  * One prompt for the composer row and the sheet, inviting any kind of post.
  * It only promises a photo while photo posts are on (feature-flags.ts).
  */
