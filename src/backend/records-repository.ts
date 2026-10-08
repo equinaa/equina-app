@@ -3,6 +3,7 @@ import type { Discipline } from "../domain/types";
 import type { HorseCollaborator, HorseRecord, HorseRecordFile, HorseTimelineRecord, UploadAsset } from "./contracts";
 import { EdgeClient } from "./edge-client";
 import { backendError, requireData } from "./errors";
+import { signedUrlsFor } from "./signed-urls";
 import { UploadRepository } from "./upload-repository";
 
 const mapHorse = (row: Record<string, unknown>): HorseRecord => ({
@@ -59,11 +60,8 @@ export class RecordsRepository {
     const horses = (data ?? []).map((row) => mapHorse(row as Record<string, unknown>));
     const paths = horses.flatMap((horse) => horse.photoPath ? [horse.photoPath] : []);
     if (!paths.length) return horses;
-    const { data: signed, error: signedError } = await this.client.storage.from("horse-media").createSignedUrls(paths, 900);
+    const { urls, error: signedError } = await signedUrlsFor(this.client, "horse-media", paths);
     if (signedError) throw backendError(signedError, "Horse photos could not be loaded.");
-    const urls = new Map<string, string>((signed ?? []).flatMap((entry) =>
-      entry.path && entry.signedUrl ? [[entry.path, entry.signedUrl]] : []
-    ));
     return horses.map((horse) => horse.photoPath ? { ...horse, photoUrl: urls.get(horse.photoPath) } : horse);
   }
 
