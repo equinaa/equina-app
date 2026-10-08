@@ -62,6 +62,13 @@ export function useHorseRecords({
   const [filesByRecord, setFilesByRecord] = useState<Record<string, HorseRecordFile[]>>({});
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // The horse list has been fetched (or failed), whether or not the selected
+  // horse's timeline has arrived yet. Home needs only the horses: waiting for
+  // `loaded` held the hero photo behind every record and file in the timeline.
+  const [horsesLoaded, setHorsesLoaded] = useState(false);
+  // The horse list actually arrived. A failed load also ends horsesLoaded, but
+  // must not be read as "this rider has no horse".
+  const [horsesListed, setHorsesListed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState("");
   const [error, setError] = useState("");
@@ -109,6 +116,8 @@ export function useHorseRecords({
       setLoading(false);
       setRefreshing(false);
       setLoaded(false);
+      setHorsesLoaded(false);
+      setHorsesListed(false);
       return;
     }
     const request = ++horsesRequest.current;
@@ -123,6 +132,8 @@ export function useHorseRecords({
         ? selectedHorseId
         : nextHorses.find((horse) => horse.isPrimary)?.id ?? nextHorses[0]?.id ?? "";
       setSelectedHorseId(nextSelected);
+      setHorsesListed(true);
+      setHorsesLoaded(true);
       await loadRecords(nextSelected);
     } catch (loadError) {
       if (request === horsesRequest.current) {
@@ -133,6 +144,7 @@ export function useHorseRecords({
         setLoading(false);
         setRefreshing(false);
         setLoaded(true);
+        setHorsesLoaded(true);
       }
     }
   }, [backend, enabled, horses.length, loadRecords, selectedHorseId]);
@@ -283,6 +295,8 @@ export function useHorseRecords({
     filesByRecord,
     loading,
     loaded,
+    horsesLoaded,
+    horsesListed,
     refreshing,
     saving,
     error,

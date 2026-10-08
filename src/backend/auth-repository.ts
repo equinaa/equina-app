@@ -1,5 +1,6 @@
 import type { AuthChangeEvent, Session, SupabaseClient } from "@supabase/supabase-js";
 import { backendError } from "./errors";
+import { forgetSignedUrls } from "./signed-urls";
 
 export type AuthProvider = "apple" | "google";
 
@@ -154,6 +155,7 @@ export class AuthRepository {
   // This device only. "global" also ended the rider's session on every other
   // phone and tablet, without telling them why.
   async signOut(): Promise<void> {
+    forgetSignedUrls();
     const { error } = await this.client.auth.signOut({ scope: "local" });
     if (error) {
       // Offline, supabase-js removes the session when the server call fails --

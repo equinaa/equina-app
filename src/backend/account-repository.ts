@@ -13,6 +13,7 @@ import type {
 } from "./contracts";
 import { EdgeClient } from "./edge-client";
 import { backendError, requireData } from "./errors";
+import { signedUrlsFor } from "./signed-urls";
 import { UploadRepository } from "./upload-repository";
 
 type Row = Record<string, unknown>;
@@ -116,18 +117,29 @@ export class AccountRepository {
         .eq("is_primary", true).is("archived_at", null).maybeSingle()
     ]);
     const mappedProfile = mapProfile(requireData(profile as Row | null, profileError, "Profile could not be loaded."));
-    if (mappedProfile.avatarPath) {
-      const { data } = await this.client.storage.from("avatars").createSignedUrl(mappedProfile.avatarPath, 900);
-      mappedProfile.avatarUrl = data?.signedUrl;
-    }
+    const mappedHorse = primaryHorse
+      ? mapHorse(requireData(primaryHorse as Row | null, horseError, "Primary horse could not be loaded."))
+      : undefined;
+    // The horse photo is signed here, with the rest of the account, so Home's
+    // first paint already has it. Before, it waited for the Stable to load the
+    // horse and its whole health timeline, and Home showed a stock picture in
+    // the meantime. A photo that cannot be signed is left out, never fatal.
+    const [avatar, horsePhoto] = await Promise.all([
+      mappedProfile.avatarPath
+        ? signedUrlsFor(this.client, "avatars", [mappedProfile.avatarPath])
+        : Promise.resolve(null),
+      mappedHorse?.photoPath
+        ? signedUrlsFor(this.client, "horse-media", [mappedHorse.photoPath])
+        : Promise.resolve(null)
+    ]);
+    if (mappedProfile.avatarPath) mappedProfile.avatarUrl = avatar?.urls.get(mappedProfile.avatarPath);
+    if (mappedHorse?.photoPath) mappedHorse.photoUrl = horsePhoto?.urls.get(mappedHorse.photoPath);
     return {
       userId: user.id,
       email: user.email ?? "",
       emailVerified: Boolean(user.email_confirmed_at),
       profile: mappedProfile,
-      primaryHorse: primaryHorse
-        ? mapHorse(requireData(primaryHorse as Row | null, horseError, "Primary horse could not be loaded."))
-        : undefined,
+      primaryHorse: mappedHorse,
       preferences: mapPreferences(requireData(preferences as Row | null, preferencesError, "Preferences could not be loaded.")),
       notifications: mapNotifications(requireData(notifications as Row | null, notificationsError, "Notification settings could not be loaded.")),
       deletionRequest: deletion

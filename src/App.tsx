@@ -161,6 +161,7 @@ import {
 import { RideSetupSheet, type RideSetupHorse } from "./features/ride/RideSetupSheet";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
+import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending } from "./features/home/home-hero";
 import {
   defaultTrainingType,
   phasesFor,
@@ -1037,6 +1038,17 @@ function EquinaApp() {
     onPersist: equinaSession.refreshAccount
   });
   const rideSetupMemory = useRideSetupMemory(equinaSession.session?.user.id);
+  // The rider's own horse photo is known to exist but has no URL yet: Home
+  // holds a dark stage instead of a stock picture that the photo then replaces.
+  // Ends once the horse list is in, photo or not, so a failure never leaves
+  // the stage empty.
+  const heroPhotoPending = isHeroPhotoPending({
+    connected: accountMode === "connected",
+    authenticated: equinaSession.phase === "authenticated",
+    photoPath: equinaSession.account?.primaryHorse?.photoPath,
+    photoUrl: onboardingHorsePhoto,
+    horsesLoaded: horseRecords.horsesLoaded
+  });
   // A ride never outlives the app. Phase alerts left by one that was closed
   // mid-ride would otherwise keep calling out phases nobody is riding.
   useEffect(() => {
@@ -1309,6 +1321,14 @@ function EquinaApp() {
       setOnboardingHasHorse(true);
       setOnboardingHorseName(snapshot.primaryHorse.name);
       setOnboardingHorseBreed(snapshot.primaryHorse.breed ?? "");
+      // The photo comes signed with the account, so Home opens on the rider's
+      // own horse. Once the Stable has its horses, the selected horse's photo
+      // is set below; a later account refresh must not put the primary's back
+      // over a different horse the rider picked.
+      const primaryPhoto = snapshot.primaryHorse.photoUrl;
+      if (primaryPhoto && (!horseRecords.horsesLoaded || horseRecords.selectedHorseId === snapshot.primaryHorse.id)) {
+        setOnboardingHorsePhoto(primaryPhoto);
+      }
     } else {
       setOnboardingHasHorse(false);
       setOnboardingHorseName("");
@@ -1353,15 +1373,20 @@ function EquinaApp() {
   }, [equinaSession.account, equinaSession.phase]);
 
   useEffect(() => {
+    // The horse list is enough here. Waiting for `loaded` also waited for the
+    // selected horse's whole timeline and files before the photo appeared.
     if (
       accountMode !== "connected" ||
       equinaSession.phase !== "authenticated" ||
-      !horseRecords.loaded
+      !horseRecords.horsesLoaded
     ) {
       return;
     }
     const selectedHorse = horseRecords.selectedHorse;
     if (!selectedHorse) {
+      // Only a list that arrived empty means no horse. After a failed load the
+      // horse and photo from the account snapshot stay on Home.
+      if (!horseRecords.horsesListed) return;
       setOnboardingHasHorse(false);
       setOnboardingHorseName("");
       setOnboardingHorseBreed("");
@@ -1372,7 +1397,13 @@ function EquinaApp() {
     setOnboardingHorseName(selectedHorse.name);
     setOnboardingHorseBreed(selectedHorse.breed ?? "");
     setOnboardingHorsePhoto(selectedHorse.photoUrl ?? "");
-    setOnboardingDiscipline(toCoachDiscipline(selectedHorse.discipline));
+    // The rider's discipline is the profile's, not the horse's: a jumping
+    // rider rides a dressage horse, and picking another horse in the Stable
+    // must not change Home, the Club or the ride's default training. Before,
+    // the horse's discipline overwrote it, and a horse with none turned every
+    // rider into Jumping. The horse's fills in only for a profile with none.
+    const horseDiscipline = disciplineFromHorse(equinaSession.account?.profile.discipline, selectedHorse.discipline);
+    if (horseDiscipline) setOnboardingDiscipline(toCoachDiscipline(horseDiscipline));
     if (selectedHorse.sex) {
       const sexLabel = `${selectedHorse.sex.charAt(0).toUpperCase()}${selectedHorse.sex.slice(1)}`;
       if (horseSexes.includes(sexLabel as (typeof horseSexes)[number])) {
@@ -1389,7 +1420,8 @@ function EquinaApp() {
   }, [
     accountMode,
     equinaSession.phase,
-    horseRecords.loaded,
+    horseRecords.horsesLoaded,
+    horseRecords.horsesListed,
     horseRecords.selectedHorse
   ]);
 
@@ -2439,7 +2471,10 @@ function EquinaApp() {
             {tab === "home" && rideActive && ridePlan ? (
               <RideModeScreen
                 plan={ridePlan}
-                discipline={onboardingDiscipline}
+                // For a training with no discipline of its own (lunging,
+                // groundwork), the ride's horse's -- not the Stable selection,
+                // and no longer the rider's, which Home now keeps.
+                discipline={rideHorseRecord?.discipline ? toCoachDiscipline(rideHorseRecord.discipline) : onboardingDiscipline}
                 image={rideHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
                 onFinish={finishRide}
                 onExit={cancelRide}
@@ -2538,6 +2573,7 @@ function EquinaApp() {
                 frequency={onboardingFrequency}
                 carePriority={onboardingCarePriority}
                 horsePhoto={onboardingHorsePhoto}
+                heroPhotoPending={heroPhotoPending}
                 onToggleRide={startRide}
                 rideMeta={`${plannedMinutes(rideSetupDraft.phases)} min · ${rideSetupDraft.trainingType.label}`}
                 onLogCare={logCare}
@@ -3191,6 +3227,10 @@ function DockTabItem({
   );
 }
 
+// Hero pictures that have loaded this session, so a return to Home does not
+// fade the same picture in again.
+const shownHeroPhotos = new Set<string>();
+
 function HomeScreen({
   horse,
   rideEntries,
@@ -3203,6 +3243,7 @@ function HomeScreen({
   frequency,
   carePriority,
   horsePhoto,
+  heroPhotoPending,
   onToggleRide,
   rideMeta: plannedRideMeta,
   onLogCare,
@@ -3222,6 +3263,8 @@ function HomeScreen({
   frequency: (typeof ridingFrequencies)[number];
   carePriority: (typeof carePriorities)[number];
   horsePhoto: string;
+  /** The rider's own photo is on its way: show no stock picture meanwhile. */
+  heroPhotoPending: boolean;
   onToggleRide: () => void;
   /** The ride the setup sheet will open with: "52 min · Dressage". */
   rideMeta: string;
@@ -3390,10 +3433,46 @@ function HomeScreen({
   const usesPresetHorsePhoto = horsePhotoOptionsByDiscipline[discipline].some(
     (option) => option.value === horsePhoto
   );
-  const homeHeroPhoto =
-    horse.hasHorse && !usesPresetHorsePhoto && horsePhoto
-      ? horsePhoto
-      : disciplineVisuals[discipline].home;
+  const stockHeroPhoto = disciplineVisuals[discipline].home;
+  const ownHeroPhoto = horse.hasHorse && !usesPresetHorsePhoto && horsePhoto ? horsePhoto : "";
+  // A photo that failed (an expired link, say) falls back to the stock
+  // picture rather than leaving the stage blank.
+  const [failedHeroPhoto, setFailedHeroPhoto] = useState("");
+  const homeHeroPhoto = heroPhotoFor({
+    pending: heroPhotoPending,
+    own: ownHeroPhoto,
+    failed: failedHeroPhoto,
+    stock: stockHeroPhoto
+  });
+  // Each picture fades in once it has loaded, over the dark stage, instead of
+  // cutting from one to the next.
+  const [loadedHeroPhoto, setLoadedHeroPhoto] = useState("");
+  // What had loaded before this Home opened. Read once: onLoad adds to the
+  // shared set, and a picture loading now still gets its fade.
+  const shownBeforeOpening = useRef(new Set(shownHeroPhotos)).current;
+  const heroPhotoOpacity = useRef(new Animated.Value(shownBeforeOpening.has(homeHeroPhoto) ? 1 : 0)).current;
+  useEffect(() => {
+    // Coming back to Home: a picture already shown this session is in the
+    // image cache and returns at once, without the dark stage and fade again.
+    if (homeHeroPhoto && shownBeforeOpening.has(homeHeroPhoto)) {
+      heroPhotoOpacity.setValue(1);
+      return;
+    }
+    if (!homeHeroPhoto || loadedHeroPhoto !== homeHeroPhoto) {
+      heroPhotoOpacity.setValue(0);
+      return;
+    }
+    if (reduceHomeMotion) {
+      heroPhotoOpacity.setValue(1);
+      return;
+    }
+    Animated.timing(heroPhotoOpacity, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== "web"
+    }).start();
+  }, [heroPhotoOpacity, homeHeroPhoto, loadedHeroPhoto, reduceHomeMotion, shownBeforeOpening]);
 
   const animateRidePress = (toValue: number) => {
     Animated.spring(ridePressAnim, {
@@ -3456,7 +3535,20 @@ function HomeScreen({
       </View>
 
       <Animated.View style={[styles.homeStage, viewportHeight < 720 && styles.homeStageCompact, heroStyle]}>
-        <Animated.Image source={{ uri: homeHeroPhoto }} style={[styles.homeStageImage, heroImageStyle]} />
+        {homeHeroPhoto ? (
+          <Animated.Image
+            testID="home-hero-photo"
+            source={{ uri: homeHeroPhoto }}
+            onLoad={() => {
+              setLoadedHeroPhoto(homeHeroPhoto);
+              shownHeroPhotos.add(homeHeroPhoto);
+            }}
+            onError={() => {
+              if (homeHeroPhoto === ownHeroPhoto) setFailedHeroPhoto(homeHeroPhoto);
+            }}
+            style={[styles.homeStageImage, heroImageStyle, { opacity: heroPhotoOpacity }]}
+          />
+        ) : null}
         <LinearGradient
           colors={["rgba(5,6,5,0.26)", "rgba(5,6,5,0.06)", "rgba(5,6,5,0.92)"]}
           locations={[0, 0.42, 1]}
