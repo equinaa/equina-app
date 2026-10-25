@@ -92,6 +92,7 @@ Deno.serve(async (request) => {
       horseRecordFiles: horseRecords.then((rows) => under("horse_record_files", "record_id", idsOf(rows))),
       horseCollaborators: own("horse_collaborators", ["user_id", "invited_by"]),
       rideEntries: own("ride_entries", "rider_id"),
+      trainingPlans: own("training_plans", "user_id"),
       onboardingStarterPack: ownRow("onboarding_starter_packs", "user_id"),
       academyProgress: own("academy_progress", "user_id"),
       academyLessonPicks: own("academy_lesson_picks", "user_id"),

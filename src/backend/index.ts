@@ -13,3 +13,4 @@ export * from "./records-repository";
 export * from "./academy-repository";
 export * from "./ride-repository";
 export * from "./upload-repository";
+export * from "./training-plan-repository";

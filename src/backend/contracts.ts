@@ -446,3 +446,22 @@ export type RideEntry = {
 };
 
 export type RideEntryInput = Omit<RideEntry, "id" | "riderId" | "createdAt" | "updatedAt">;
+
+/** One day of the rider's training week. weekday: 1 = Monday ... 7 = Sunday. */
+export type TrainingPlanDay = {
+  weekday: number;
+  trainingType: string;
+  horseId?: string;
+};
+
+/**
+ * One version of the rider's training week, from effectiveFrom on. A change
+ * is a new version; the weeks before keep the version they had.
+ */
+export type TrainingPlan = {
+  id: string;
+  /** The rider's local day the version starts on, YYYY-MM-DD. */
+  effectiveFrom: string;
+  days: TrainingPlanDay[];
+  reminders: boolean;
+};

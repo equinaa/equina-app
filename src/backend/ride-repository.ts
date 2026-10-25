@@ -77,6 +77,25 @@ export class RideRepository {
     return (data ?? []).map((row) => mapRideEntry(row as Record<string, unknown>));
   }
 
+  /**
+   * When every ride ended, newest first, for the streak: it counts back
+   * through the rider's whole history, not the page the journal shows.
+   * One small column, read a thousand at a time.
+   */
+  async completions(limit = 5000): Promise<string[]> {
+    const page = 1000;
+    const ends: string[] = [];
+    for (let from = 0; from < limit; from += page) {
+      const { data, error } = await this.client.from("ride_entries")
+        .select("completed_at").order("completed_at", { ascending: false }).range(from, Math.min(from + page, limit) - 1);
+      if (error) throw backendError(error, "Your rides could not be counted.");
+      const rows = (data ?? []) as Array<{ completed_at: unknown }>;
+      ends.push(...rows.map((row) => String(row.completed_at)));
+      if (rows.length < page) break;
+    }
+    return ends;
+  }
+
   /** Every ride the rider has saved, counted on the server rather than from a page of them. */
   async count(): Promise<number> {
     const { count, error } = await this.client.from("ride_entries").select("id", { count: "exact", head: true });
