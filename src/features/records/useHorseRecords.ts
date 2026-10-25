@@ -7,6 +7,7 @@ import type {
   HorseTimelineRecord,
   UploadAsset
 } from "../../backend";
+import { horseToPromote, ownPrimary, selectionAfterLoad, withPrimary } from "./horse-selection";
 
 export type HorseInput = {
   name: string;
@@ -48,16 +49,31 @@ export function useHorseRecords({
   enabled,
   canManageHorse,
   canMutateRecords,
+  userId,
   onPersist
 }: {
   backend: EquinaBackend | null;
   enabled: boolean;
   canManageHorse: boolean;
   canMutateRecords: boolean;
+  /** The signed-in rider: only their own horses can become the main horse. */
+  userId?: string;
   onPersist?: () => Promise<unknown> | void;
 }) {
   const [horses, setHorses] = useState<HorseRecord[]>([]);
-  const [selectedHorseId, setSelectedHorseId] = useState("");
+  const [selectedHorseId, setSelectedHorseIdState] = useState("");
+  // The pick as of now, for code that runs after an await: a refresh that
+  // started before a switch must not put the old horse back.
+  const selectedRef = useRef("");
+  const setSelectedHorseId = useCallback((horseId: string) => {
+    selectedRef.current = horseId;
+    setSelectedHorseIdState(horseId);
+  }, []);
+  // The primary horse as the server last confirmed it, and the picks being
+  // saved, one at a time in tap order. A pick decided from the rendered list
+  // could skip its save while an earlier pick was still on its way.
+  const primaryRef = useRef("");
+  const switchChain = useRef<Promise<unknown>>(Promise.resolve());
   const [records, setRecords] = useState<HorseTimelineRecord[]>([]);
   const [filesByRecord, setFilesByRecord] = useState<Record<string, HorseRecordFile[]>>({});
   const [loading, setLoading] = useState(false);
@@ -107,7 +123,8 @@ export function useHorseRecords({
     }
   }, [backend, enabled]);
 
-  const refresh = useCallback(async () => {
+  /** Reloads the horses. `pick` selects a horse once a list that has it arrives. */
+  const refresh = useCallback(async (pick?: string) => {
     if (!backend || !enabled) {
       setHorses([]);
       setSelectedHorseId("");
@@ -128,9 +145,9 @@ export function useHorseRecords({
       const nextHorses = await backend.records.listHorses();
       if (request !== horsesRequest.current) return;
       setHorses(nextHorses);
-      const nextSelected = nextHorses.some((horse) => horse.id === selectedHorseId)
-        ? selectedHorseId
-        : nextHorses.find((horse) => horse.isPrimary)?.id ?? nextHorses[0]?.id ?? "";
+      primaryRef.current = ownPrimary(nextHorses, userId);
+      const wanted = pick && nextHorses.some((horse) => horse.id === pick) ? pick : selectedRef.current;
+      const nextSelected = selectionAfterLoad(nextHorses, wanted);
       setSelectedHorseId(nextSelected);
       setHorsesListed(true);
       setHorsesLoaded(true);
@@ -147,7 +164,7 @@ export function useHorseRecords({
         setHorsesLoaded(true);
       }
     }
-  }, [backend, enabled, horses.length, loadRecords, selectedHorseId]);
+  }, [backend, enabled, horses.length, loadRecords, setSelectedHorseId, userId]);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -162,10 +179,10 @@ export function useHorseRecords({
   }, [backend, enabled]);
 
   const selectHorse = useCallback((horseId: string) => {
-    if (horseId === selectedHorseId) return;
+    if (horseId === selectedRef.current) return;
     setSelectedHorseId(horseId);
     void loadRecords(horseId);
-  }, [loadRecords, selectedHorseId]);
+  }, [loadRecords, setSelectedHorseId]);
 
   const runMutation = useCallback(async <T,>(
     key: string,
@@ -186,12 +203,21 @@ export function useHorseRecords({
     }
   }, [offline]);
 
+  /**
+   * A new horse is the one the rider is about to work with, so it becomes the
+   * picked horse, and with it the primary: Home shows the last horse picked.
+   */
   const createHorse = useCallback(async (input: HorseInput, photo?: UploadAsset) => {
     if (!backend || !canManageHorse) throw new Error("Horse management is not enabled for this account.");
     return await runMutation("horse:create", async () => {
+      const wantsPrimary = input.isPrimary ?? true;
+      const firstHorse = !horses.some((horse) => !horse.archivedAt && (!userId || horse.ownerId === userId));
+      // With a photo, the new horse becomes primary only once the photo is
+      // in: a failed upload archives it, and making it primary first would
+      // have already taken the flag off the rider's current horse.
       const created = await backend.records.createHorse({
         ...input,
-        isPrimary: input.isPrimary ?? horses.length === 0
+        isPrimary: wantsPrimary && (!photo || firstHorse)
       });
       try {
         if (photo) await backend.records.uploadHorsePhoto(created.id, photo);
@@ -199,11 +225,17 @@ export function useHorseRecords({
         await backend.records.archiveHorse(created.id).catch(() => undefined);
         throw uploadError;
       }
-      await refresh();
-      await onPersist?.();
+      // The horse exists from here on: nothing below may fail the add, or a
+      // retry would create it twice. A promotion that fails leaves it as this
+      // session's pick, and the next switch saves it.
+      if (wantsPrimary && !created.isPrimary) {
+        await backend.records.updateHorse(created.id, { isPrimary: true }).catch(() => undefined);
+      }
+      await refresh(created.id);
+      await Promise.resolve(onPersist?.()).catch(() => undefined);
       return created;
     }, "Horse profile could not be created.");
-  }, [backend, canManageHorse, horses.length, onPersist, refresh, runMutation]);
+  }, [backend, canManageHorse, horses, onPersist, refresh, runMutation, userId]);
 
   const updateHorse = useCallback(async (horseId: string, input: Partial<HorseInput>, photo?: UploadAsset) => {
     if (!backend || !canManageHorse) throw new Error("Horse management is not enabled for this account.");
@@ -219,16 +251,58 @@ export function useHorseRecords({
   const setPrimaryHorse = useCallback(async (horseId: string) => {
     await updateHorse(horseId, { isPrimary: true });
     setSelectedHorseId(horseId);
-  }, [updateHorse]);
+  }, [setSelectedHorseId, updateHorse]);
+
+  /**
+   * Picking a horse, anywhere: Home, the Stable, the ride setup. The screen
+   * changes at once, and the pick is saved as the primary horse so it is
+   * still the horse on the next launch. A pick that cannot be saved is taken
+   * back, so the screen never shows a horse the account does not have.
+   * Without horse management, or for a horse someone shared, the pick is for
+   * this session only: only an owner can make a horse their main one.
+   */
+  const switchHorse = useCallback(async (horseId: string) => {
+    const previous = selectedRef.current;
+    if (!horseId || horseId === previous) return;
+    selectHorse(horseId);
+    const horse = horses.find((entry) => entry.id === horseId);
+    if (!backend || !canManageHorse || !horse || horse.ownerId !== userId) return;
+    // Saved after any pick still on its way, and only if no later pick has
+    // replaced it, so the last horse picked is the last one written.
+    const save = switchChain.current.catch(() => undefined).then(async () => {
+      if (selectedRef.current !== horseId || primaryRef.current === horseId) return false;
+      await runMutation(`horse:${horseId}`, async () => {
+        await backend.records.updateHorse(horseId, { isPrimary: true });
+      }, "That horse could not be kept as your main horse.");
+      primaryRef.current = horseId;
+      setHorses((current) => withPrimary(current, horseId));
+      return true;
+    });
+    switchChain.current = save;
+    let saved = false;
+    try {
+      saved = await save;
+    } catch (switchError) {
+      if (selectedRef.current === horseId && previous) selectHorse(previous);
+      throw switchError;
+    }
+    // The pick is saved. An account refresh that fails is only a stale
+    // snapshot, never a reason to take the pick back.
+    if (saved) await Promise.resolve(onPersist?.()).catch(() => undefined);
+  }, [backend, canManageHorse, horses, onPersist, runMutation, selectHorse, userId]);
 
   const archiveHorse = useCallback(async (horseId: string) => {
     if (!backend || !canManageHorse) throw new Error("Horse management is not enabled for this account.");
     await runMutation(`horse:${horseId}`, async () => {
+      const promote = horseToPromote(horses, horseId, selectedRef.current);
       await backend.records.archiveHorse(horseId);
-      await refresh();
-      await onPersist?.();
+      // The archive has happened; a promotion that fails leaves no primary
+      // until the next pick, which saves one. The list reloads either way.
+      if (promote) await backend.records.updateHorse(promote, { isPrimary: true }).catch(() => undefined);
+      await refresh(promote ?? undefined);
+      await Promise.resolve(onPersist?.()).catch(() => undefined);
     }, "Horse profile could not be archived.");
-  }, [backend, canManageHorse, onPersist, refresh, runMutation]);
+  }, [backend, canManageHorse, horses, onPersist, refresh, runMutation]);
 
   const createRecord = useCallback(async (input: TimelineRecordInput, asset?: UploadAsset) => {
     if (!backend || !canMutateRecords || !selectedHorseId) {
@@ -306,6 +380,7 @@ export function useHorseRecords({
     canMutateRecords,
     clearError: () => setError(""),
     selectHorse,
+    switchHorse,
     refresh,
     createHorse,
     updateHorse,

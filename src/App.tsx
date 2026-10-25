@@ -38,6 +38,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardCheck,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -161,6 +162,8 @@ import {
 } from "./features/ride/RideExperience";
 import { RideSetupSheet, type LoggedActivity, type RideSetupHorse } from "./features/ride/RideSetupSheet";
 import { RideJournalSheet } from "./features/ride/RideJournalSheet";
+import { HorseSwitcherSheet } from "./features/home/HorseSwitcherSheet";
+import { switchableHorses } from "./features/records/horse-selection";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending, snapshotSetsHomeHorse } from "./features/home/home-hero";
@@ -892,6 +895,10 @@ function EquinaApp() {
   const [addActivityOpen, setAddActivityOpen] = useState(false);
   const [rideJournalOpen, setRideJournalOpen] = useState(false);
   const [deletingRideId, setDeletingRideId] = useState("");
+  const [horseSwitcherOpen, setHorseSwitcherOpen] = useState(false);
+  const [horseCreatorOpen, setHorseCreatorOpen] = useState(false);
+  const [switchingHorseId, setSwitchingHorseId] = useState("");
+  const [horseSwitchError, setHorseSwitchError] = useState("");
   const [ridePlan, setRidePlan] = useState<RidePlan | null>(null);
   // Seeded for demo mode only. A connected account counts its real journal.
   const [localSessionCount, setLocalSessionCount] = useState(4);
@@ -1001,6 +1008,8 @@ function EquinaApp() {
     setRideSetupOpen(false);
     setAddActivityOpen(false);
     setRideJournalOpen(false);
+    setHorseSwitcherOpen(false);
+    setHorseCreatorOpen(false);
     setLastRideRecapVisible(false);
     void cancelStaleRideAlerts();
     setAccountReturnTab("home");
@@ -1040,6 +1049,7 @@ function EquinaApp() {
       accountMode === "connected" &&
       equinaSession.phase === "authenticated" &&
       equinaSession.capabilities.records,
+    userId: equinaSession.account?.userId,
     onPersist: equinaSession.refreshAccount
   });
   const rideSetupMemory = useRideSetupMemory(equinaSession.session?.user.id);
@@ -1077,7 +1087,9 @@ function EquinaApp() {
   const rideSetupDraft = rideActive && ridePlan
     ? { horseId: ridePlan.horseId, trainingType: ridePlan.trainingType, phases: ridePlan.phases }
     : {
-        horseId: rideSetupMemory.memory?.horseId ?? (horseRecords.selectedHorseId || undefined),
+        // Home's horse, the last one picked; the remembered one only before
+        // the Stable has loaded.
+        horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
         trainingType: rememberedTraining,
         phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
       };
@@ -1422,13 +1434,11 @@ function EquinaApp() {
         setOnboardingHorseSex(sexLabel as (typeof horseSexes)[number]);
       }
     }
-    if (selectedHorse.heightCm) setOnboardingHorseHeight(String(selectedHorse.heightCm));
-    if (selectedHorse.birthDate) {
-      const birthYear = Number(selectedHorse.birthDate.slice(0, 4));
-      if (Number.isFinite(birthYear)) {
-        setOnboardingHorseAge(String(Math.max(0, new Date().getFullYear() - birthYear)));
-      }
-    }
+    // A horse without a height or a birth date shows none. With more than one
+    // horse, keeping the last value put one horse's age on another.
+    setOnboardingHorseHeight(selectedHorse.heightCm ? String(selectedHorse.heightCm) : "");
+    const birthYear = selectedHorse.birthDate ? Number(selectedHorse.birthDate.slice(0, 4)) : NaN;
+    setOnboardingHorseAge(Number.isFinite(birthYear) ? String(Math.max(0, new Date().getFullYear() - birthYear)) : "");
   }, [
     accountMode,
     equinaSession.phase,
@@ -1547,6 +1557,10 @@ function EquinaApp() {
     setRidePlan(plan);
     setRideSetupOpen(false);
     rideSetupMemory.remember(plan);
+    // Riding another horse is picking it: Home shows the last horse picked.
+    if (plan.horseId && plan.horseId !== horseRecords.selectedHorseId) {
+      void horseRecords.switchHorse(plan.horseId).catch(() => undefined);
+    }
     if (rideActive) return;
     setRideActive(true);
     setLastRideRecapVisible(false);
@@ -1567,7 +1581,7 @@ function EquinaApp() {
     if (!ridePersistence) {
       refresh(
         onboardingHasHorse
-          ? `Ride captured for this preview. Add how ${primaryHorseName} felt, then choose the next useful step.`
+          ? `Ride captured for this preview. Add how ${ridePlan?.horseName || primaryHorseName} felt, then choose the next useful step.`
           : "Ride captured for this preview. Add how it felt, then choose the next useful step."
       );
       return;
@@ -1590,7 +1604,7 @@ function EquinaApp() {
         }
         refresh(
           onboardingHasHorse
-            ? `Ride saved. Add how ${primaryHorseName} felt, then choose the next useful step.`
+            ? `Ride saved. Add how ${ridePlan?.horseName || primaryHorseName} felt, then choose the next useful step.`
             : "Ride saved. Add how it felt, then choose the next useful step."
         );
       })
@@ -1628,6 +1642,21 @@ function EquinaApp() {
       }
     } finally {
       setDeletingRideId("");
+    }
+  };
+
+  const ownHorses = switchableHorses(horseRecords.horses, equinaSession.account?.userId);
+
+  const pickHorse = async (horseId: string) => {
+    setHorseSwitchError("");
+    setSwitchingHorseId(horseId);
+    try {
+      await horseRecords.switchHorse(horseId);
+      setHorseSwitcherOpen(false);
+    } catch (switchError) {
+      setHorseSwitchError(switchError instanceof Error ? switchError.message : "That horse could not be picked.");
+    } finally {
+      setSwitchingHorseId("");
     }
   };
 
@@ -2416,7 +2445,8 @@ function EquinaApp() {
   const hideGlobalHeader = focusedTask;
   const headerTitle = tabTitles[tab];
   const coachContext: CoachConversationContext = {
-    selectedHorseId: accountController.snapshot.primaryHorse?.id,
+    // The horse on Home, so Ralf talks about the one the rider picked.
+    selectedHorseId: horseRecords.selectedHorseId || accountController.snapshot.primaryHorse?.id,
     hasHorse: horseState.hasHorse,
     horseName: horseState.name,
     focus: coachGoal,
@@ -2612,6 +2642,10 @@ function EquinaApp() {
                 onAddActivity={ridePersistence && !rideActive ? () => {
                   rideJournal.clearError();
                   setAddActivityOpen(true);
+                } : undefined}
+                onOpenHorses={horseRecords.horsesListed && (ownHorses.length > 1 || horseRecords.canManageHorse) ? () => {
+                  setHorseSwitchError("");
+                  setHorseSwitcherOpen(true);
                 } : undefined}
                 onOpenJournal={ridePersistence ? () => {
                   rideJournal.clearError();
@@ -2836,6 +2870,37 @@ function EquinaApp() {
           memory={rideSetupMemory.memory}
           onLog={logActivity}
           onDismiss={() => setAddActivityOpen(false)}
+        />
+
+        <HorseSwitcherSheet
+          visible={horseSwitcherOpen}
+          horses={ownHorses}
+          selectedId={horseRecords.selectedHorseId}
+          switchingId={switchingHorseId || undefined}
+          error={horseSwitchError}
+          onPick={(horseId) => void pickHorse(horseId)}
+          onAdd={horseRecords.canManageHorse ? () => {
+            setHorseSwitcherOpen(false);
+            horseRecords.clearError();
+            setHorseCreatorOpen(true);
+          } : undefined}
+          onDismiss={() => setHorseSwitcherOpen(false)}
+        />
+
+        <HorseEditorSheet
+          visible={horseCreatorOpen}
+          horse={null}
+          saving={horseRecords.saving === "horse:create"}
+          error={horseCreatorOpen ? horseRecords.error : ""}
+          onDismiss={() => {
+            if (horseRecords.saving === "horse:create") return;
+            setHorseCreatorOpen(false);
+            horseRecords.clearError();
+          }}
+          onSave={async (input, photo) => {
+            await horseRecords.createHorse(input, photo);
+            setHorseCreatorOpen(false);
+          }}
         />
 
         <RideJournalSheet
@@ -3314,6 +3379,7 @@ function HomeScreen({
   onToggleRide,
   onAddActivity,
   onOpenJournal,
+  onOpenHorses,
   rideMeta: plannedRideMeta,
   onLogCare,
   onOpenRalf,
@@ -3336,6 +3402,8 @@ function HomeScreen({
   /** Logs a training done without the clock. Absent where rides are not saved. */
   onAddActivity?: () => void;
   onOpenJournal?: () => void;
+  /** Opens the rider's horses to pick another or add one. */
+  onOpenHorses?: () => void;
   onToggleRide: () => void;
   /** The ride the setup sheet will open with: "52 min · Dressage". */
   rideMeta: string;
@@ -3587,9 +3655,23 @@ function HomeScreen({
       <View style={styles.homeTopBar}>
         <View style={styles.homeGreetingCopy}>
           <Text numberOfLines={2} style={styles.homeGreeting}>{greeting}, {riderFirstName}</Text>
-          <Text style={styles.homeGreetingMeta}>
-            {horse.hasHorse ? horse.name : discipline}
-          </Text>
+          {onOpenHorses ? (
+            <Pressable
+              testID="home-horse-switch"
+              accessibilityRole="button"
+              accessibilityLabel={horse.hasHorse ? `${horse.name}. Switch horse` : "Add a horse"}
+              hitSlop={8}
+              onPress={onOpenHorses}
+              style={({ pressed }) => [styles.homeHorseSwitch, pressed && styles.tabItemPressed]}
+            >
+              <Text numberOfLines={1} style={[styles.homeGreetingMeta, styles.homeHorseSwitchName]}>{horse.hasHorse ? horse.name : discipline}</Text>
+              <ChevronDown size={15} color={equinaTheme.text.secondary} />
+            </Pressable>
+          ) : (
+            <Text style={styles.homeGreetingMeta}>
+              {horse.hasHorse ? horse.name : discipline}
+            </Text>
+          )}
         </View>
         <View style={styles.headerActions}>
           {onOpenRalf ? <RalfButton onPress={() => onOpenRalf()} /> : null}
@@ -4891,6 +4973,9 @@ function StableScreen({
 }) {
   const [view, setView] = useState<StableView>("overview");
   const [horseEditorVisible, setHorseEditorVisible] = useState(false);
+  // The editor also adds a horse. Before, it could only create one while
+  // none was selected, so nobody could add a second horse.
+  const [creatingHorse, setCreatingHorse] = useState(false);
   const [recordEditorVisible, setRecordEditorVisible] = useState(false);
   const [editingRecord, setEditingRecord] = useState<HorseTimelineRecord | null>(null);
   const [recordPreset, setRecordPreset] = useState<HorseTimelineRecord["recordType"]>("note");
@@ -4963,6 +5048,13 @@ function StableScreen({
 
   const openHorseEditor = () => {
     recordsController.clearError();
+    setCreatingHorse(false);
+    setHorseEditorVisible(true);
+  };
+
+  const openHorseCreator = () => {
+    recordsController.clearError();
+    setCreatingHorse(true);
     setHorseEditorVisible(true);
   };
 
@@ -4994,7 +5086,7 @@ function StableScreen({
     input: Parameters<HorseRecordsController["createHorse"]>[0],
     photo?: Parameters<HorseRecordsController["createHorse"]>[1]
   ) => {
-    if (selectedHorse) await recordsController.updateHorse(selectedHorse.id, input, photo);
+    if (selectedHorse && !creatingHorse) await recordsController.updateHorse(selectedHorse.id, input, photo);
     else await recordsController.createHorse(input, photo);
     setHorseEditorVisible(false);
   };
@@ -5102,18 +5194,18 @@ function StableScreen({
     <>
       <HorseEditorSheet
         visible={horseEditorVisible}
-        horse={selectedHorse}
+        horse={creatingHorse ? null : selectedHorse}
         saving={saving.startsWith("horse:")}
         error={error}
         onDismiss={closeHorseEditor}
         onSave={saveHorse}
-        onSetPrimary={selectedHorse && !selectedHorse.isPrimary
+        onSetPrimary={selectedHorse && !selectedHorse.isPrimary && !creatingHorse
           ? async () => {
               await recordsController.setPrimaryHorse(selectedHorse.id);
               setHorseEditorVisible(false);
             }
           : undefined}
-        onArchive={selectedHorse ? async () => confirmArchiveHorse() : undefined}
+        onArchive={selectedHorse && !creatingHorse ? async () => confirmArchiveHorse() : undefined}
       />
       <RecordEditorSheet
         visible={recordEditorVisible}
@@ -5219,7 +5311,7 @@ function StableScreen({
           </View>
         ) : null}
 
-        {connected && horses.length > 1 ? (
+        {connected && (horses.length > 1 || (canManageHorse && horses.length > 0)) ? (
           <ScrollView
             horizontal
             style={styles.stableHorseSwitcher}
@@ -5231,12 +5323,15 @@ function StableScreen({
                 key={horseOption.id}
                 testID={`stable-horse-${horseOption.id}`}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: horseOption.id === selectedHorse?.id }}
+                accessibilityState={{ selected: horseOption.id === selectedHorse?.id, disabled: saving.startsWith("horse:") }}
+                disabled={saving.startsWith("horse:")}
                 style={[
                   styles.stableHorseOption,
                   horseOption.id === selectedHorse?.id && styles.stableHorseOptionActive
                 ]}
-                onPress={() => recordsController.selectHorse(horseOption.id)}
+                // Kept as the main horse, like a pick on Home. A failure
+                // shows in the banner above and the pick springs back.
+                onPress={() => void recordsController.switchHorse(horseOption.id).catch(() => undefined)}
               >
                 <Text style={[
                   styles.stableHorseOptionText,
@@ -5244,6 +5339,18 @@ function StableScreen({
                 ]}>{horseOption.name}</Text>
               </Pressable>
             ))}
+            {canManageHorse ? (
+              <Pressable
+                testID="stable-add-another-horse"
+                accessibilityRole="button"
+                accessibilityLabel="Add a horse"
+                style={[styles.stableHorseOption, styles.stableHorseAdd]}
+                onPress={openHorseCreator}
+              >
+                <Plus size={15} color={equinaTheme.colors.brass} />
+                <Text style={styles.stableHorseAddText}>Add horse</Text>
+              </Pressable>
+            ) : null}
           </ScrollView>
         ) : null}
 
@@ -8237,6 +8344,19 @@ const styles = StyleSheet.create({
   homeAgendaRowPressed: {
     backgroundColor: equinaTheme.surfaces.elevated
   },
+  homeHorseSwitch: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    gap: 4,
+    minHeight: 28
+  },
+  // A long registered name gives way to the chevron instead of pushing it
+  // under the Ralf button.
+  homeHorseSwitchName: {
+    flexShrink: 1
+  },
   homeAddActivity: {
     minHeight: 60,
     marginTop: -6,
@@ -10577,6 +10697,20 @@ const styles = StyleSheet.create({
   },
   stableHorseOptionActive: {
     backgroundColor: equinaTheme.material.selected
+  },
+  stableHorseAdd: {
+    flexDirection: "row",
+    gap: 4,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "rgba(196,160,90,0.55)",
+    backgroundColor: "transparent"
+  },
+  stableHorseAddText: {
+    color: equinaTheme.colors.brass,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600"
   },
   stableHorseOptionText: {
     color: equinaTheme.text.secondary,
