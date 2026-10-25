@@ -117,6 +117,8 @@ export type RideSummary = {
   previousRides: number;
   /** Seconds the timer actually ran. Never presented as time in the saddle. */
   trackedSeconds: number;
+  /** Minutes a rider typed in with Add activity, in seconds. Kept apart: no clock measured them. */
+  loggedSeconds: number;
   /**
    * What was ridden, by the training each ride was set up as. A jumping rider
    * who rode dressage twice and jumped once reads "Dressage 2 · Jumping 1".
@@ -154,7 +156,8 @@ export const summarise = (
     bounds,
     rides: current.length,
     previousRides: previous ? ridesWithin(entries, previous).length : 0,
-    trackedSeconds: current.reduce((total, entry) => total + Math.max(0, entry.elapsedSeconds), 0),
+    trackedSeconds: current.reduce((total, entry) => total + (entry.source === "manual" ? 0 : Math.max(0, entry.elapsedSeconds)), 0),
+    loggedSeconds: current.reduce((total, entry) => total + (entry.source === "manual" ? Math.max(0, entry.elapsedSeconds) : 0), 0),
     trainings: tally(current.map((entry) => entry.trainingType ?? (entry.discipline as string))),
     moods: tally(current.map((entry) => entry.mood as string | undefined)),
     focuses,
@@ -181,15 +184,20 @@ export const describeTrend = (summary: RideSummary): string | null => {
   return difference > 0 ? `${difference} more than ${unit}` : `${Math.abs(difference)} fewer than ${unit}`;
 };
 
-/** Tracked time, rounded the way a person would say it. */
-export const describeTracked = (seconds: number): string | null => {
+const describeTime = (seconds: number, how: "tracked" | "logged"): string | null => {
   if (seconds < 60) return null;
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min tracked`;
+  if (minutes < 60) return `${minutes} min ${how}`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest === 0 ? `${hours} h tracked` : `${hours} h ${rest} min tracked`;
+  return rest === 0 ? `${hours} h ${how}` : `${hours} h ${rest} min ${how}`;
 };
+
+/** Tracked time, rounded the way a person would say it. */
+export const describeTracked = (seconds: number): string | null => describeTime(seconds, "tracked");
+
+/** Time the rider entered by hand. Said as logged, so it never reads as measured. */
+export const describeLogged = (seconds: number): string | null => describeTime(seconds, "logged");
 
 /**
  * How the horse felt, when the rider said so.

@@ -419,6 +419,9 @@ export type RidePhaseEntry = {
   actualSeconds?: number;
 };
 
+/** Timed by the app ("live"), or logged by hand afterwards with Add activity ("manual"). */
+export type RideSource = "live" | "manual";
+
 export type RideEntry = {
   id: string;
   riderId: string;
@@ -436,6 +439,8 @@ export type RideEntry = {
   phases?: RidePhaseEntry[];
   mood?: RideMoodRecord;
   riderNote?: string;
+  /** Absent means live: every ride before Add activity was timed. */
+  source?: RideSource;
   createdAt: string;
   updatedAt: string;
 };

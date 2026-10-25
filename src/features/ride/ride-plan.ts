@@ -1,5 +1,7 @@
 import type { RidePhaseEntry } from "../../backend";
+import { localDayOf } from "../../domain/local-day";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
+import type { RideCompletion } from "./RideExperience";
 
 /**
  * A ride as the rider sets it up before getting on: which horse, what kind of
@@ -365,3 +367,103 @@ export const rememberSetup = (memory: RideSetupMemory | null, plan: RidePlan): R
   ...(plan.horseId ? { horseId: plan.horseId } : {}),
   phasesByType: { ...(memory?.phasesByType ?? {}), [plan.trainingType.id]: cleanPhases(plan.phases) }
 });
+
+// Logging afterwards ----------------------------------------------------------
+
+/**
+ * How far back Add activity reaches, today included. The database allows a
+ * month (202610250001), so this can grow without a migration.
+ */
+export const activityWindowDays = 7;
+
+/** A training the rider did without the clock, as set in Add activity. */
+export type ActivityDraft = {
+  /** The local day it happened, YYYY-MM-DD. */
+  day: string;
+  /** When it started, in minutes after local midnight. */
+  startMinutes: number;
+  plan: RidePlan;
+};
+
+const atLocalDay = (day: string, minutes = 0) => {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, date ?? 1, 0, minutes);
+};
+
+/** Today, yesterday and back through the window, newest first, as local days. */
+export const activityDays = (now: number): string[] => {
+  const today = new Date(now);
+  return Array.from({ length: activityWindowDays }, (_, back) =>
+    localDayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() - back)) as string
+  );
+};
+
+/** The instant the activity started, on the rider's local clock. */
+export const activityStartedAt = (draft: Pick<ActivityDraft, "day" | "startMinutes">) =>
+  atLocalDay(draft.day, draft.startMinutes);
+
+/** Whether a clock time exists on that day: on the day the clocks go forward, 03:30 does not. */
+export const activityTimeExists = (day: string, minutes: number) => {
+  const at = activityStartedAt({ day, startMinutes: minutes });
+  return localDayOf(at) === day && at.getHours() * 60 + at.getMinutes() === minutes;
+};
+
+/**
+ * Where the sheet opens: the latest quarter hour from which the planned
+ * phases had already ended by now -- most riders log a training soon after,
+ * and just after midnight that is yesterday evening. Worked out from
+ * instants, so a clock change in between is counted right; clocks change on
+ * the hour, so the quarter hour it rounds down to always exists.
+ */
+export const defaultActivityStart = (now: number, totalMinutes: number): { day: string; startMinutes: number } => {
+  const latest = new Date(now - totalMinutes * 60_000);
+  return {
+    day: localDayOf(latest) as string,
+    startMinutes: Math.floor((latest.getHours() * 60 + latest.getMinutes()) / 15) * 15
+  };
+};
+
+/** "07:30". The yards this is for read the 24-hour clock. */
+export const formatActivityTime = (minutes: number) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+/** What stops the rider from saving, in their words. Null when it can be saved. */
+export const activityProblem = (draft: ActivityDraft, now: number) => {
+  const phases = ridePlanProblem(draft.plan.phases);
+  if (phases) return phases;
+  if (!activityDays(now).includes(draft.day)) return `Activities can be added up to ${activityWindowDays - 1} days back.`;
+  if (!activityTimeExists(draft.day, draft.startMinutes)) return "The clocks went forward at that time. Pick another start time.";
+  const length = plannedMinutes(draft.plan.phases) * 60_000;
+  if (atLocalDay(draft.day).getTime() + length > now) return "That can't have finished today yet. Pick an earlier day.";
+  if (activityStartedAt(draft).getTime() + length > now) return "That hasn't finished yet. Pick an earlier start time.";
+  return null;
+};
+
+/**
+ * The activity in the shape a timed ride is saved in. Every phase was done
+ * for the minutes the rider entered: those minutes are the record, and the
+ * journal shows them as logged, never as tracked.
+ */
+export const activityCompletion = (draft: ActivityDraft, fallbackDiscipline: OnboardingDiscipline): RideCompletion => {
+  const phases = cleanPhases(draft.plan.phases);
+  const total = plannedMinutes(phases);
+  const startedAt = activityStartedAt(draft);
+  return {
+    id: `activity-${startedAt.getTime()}`,
+    startedAt: startedAt.toISOString(),
+    completedAt: new Date(startedAt.getTime() + total * 60_000).toISOString(),
+    discipline: draft.plan.trainingType.discipline ?? fallbackDiscipline,
+    trainingType: draft.plan.trainingType.id,
+    focus: draft.plan.trainingType.label,
+    plannedDuration: `${total} min`,
+    elapsedSeconds: total * 60,
+    completedPhases: phases.length,
+    totalPhases: phases.length,
+    phases: phases.map((phase) => ({
+      title: phase.title,
+      ...(phase.detail ? { detail: phase.detail } : {}),
+      plannedSeconds: phase.minutes * 60,
+      actualSeconds: phase.minutes * 60
+    }))
+  };
+};

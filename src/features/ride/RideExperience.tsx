@@ -81,7 +81,8 @@ export type RideSession = {
   completedPhases: number;
   totalPhases: number;
   phases?: RidePhaseEntry[];
-  mood: RideMood;
+  /** Absent when no feeling was recorded: a logged activity can leave it out. */
+  mood?: RideMood;
 };
 
 export type RideCompletion = Omit<RideSession, "mood">;
@@ -672,7 +673,7 @@ export function RideRecapScreen({
                 );
               })}
             </View>
-            <Text style={styles.recapMoodSelection}>{moodCopy[mood]}</Text>
+            {mood ? <Text style={styles.recapMoodSelection}>{moodCopy[mood]}</Text> : null}
           </View>
 
           {recommendation || ralfAvailable ? (
