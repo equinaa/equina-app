@@ -32,6 +32,7 @@ import {
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import { cadenceOf, isCareType, nextDueOn } from "../../domain/care-schedule";
+import { localToday } from "../../domain/local-day";
 import type { HorseInput, TimelineRecordInput } from "./useHorseRecords";
 
 /**
@@ -75,7 +76,7 @@ const recordTypes: Array<{
   { type: "note", label: "Note", Icon: NotebookPen }
 ];
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localToday();
 
 const assetSize = async (uri: string, knownSize?: number | null) => {
   if (knownSize && knownSize > 0) return knownSize;

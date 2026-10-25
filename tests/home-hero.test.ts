@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { forgetSignedUrls, signedUrlsFor } from "../src/backend/signed-urls";
-import { disciplineFromHorse, heroPhotoFor, heroPhotoPending } from "../src/features/home/home-hero";
+import { disciplineFromHorse, heroPhotoFor, heroPhotoPending, snapshotSetsHomeHorse } from "../src/features/home/home-hero";
 
 // After sign-in, Home showed a stock picture and then swapped to the rider's
 // own horse photo. These are the rules that keep the swap from happening.
@@ -34,6 +34,37 @@ import { disciplineFromHorse, heroPhotoFor, heroPhotoPending } from "../src/feat
     heroPhotoFor({ pending: false, own: "https://signed/2", failed: "https://signed/1", stock }),
     "https://signed/2",
     "A new URL gets its own chance."
+  );
+}
+
+// --- Which horse Home shows ------------------------------------------------------------------
+
+{
+  assert.equal(
+    snapshotSetsHomeHorse({ horsesLoaded: false, primaryHorseId: "daimon" }),
+    true,
+    "Before the Stable loads, the account's primary horse is Home's horse."
+  );
+  assert.equal(
+    snapshotSetsHomeHorse({ horsesLoaded: true, selectedHorseId: "luna", primaryHorseId: "daimon" }),
+    false,
+    "An account refresh does not put the primary's name over another horse the rider picked."
+  );
+  assert.equal(
+    snapshotSetsHomeHorse({ horsesLoaded: true, selectedHorseId: "daimon", primaryHorseId: "daimon" }),
+    true,
+    "The picked horse is the primary: the refreshed account can update it."
+  );
+  assert.equal(
+    snapshotSetsHomeHorse({ horsesLoaded: true, selectedHorseId: "luna" }),
+    false,
+    "No primary in the account no longer clears a horse the Stable still has."
+  );
+  assert.equal(snapshotSetsHomeHorse({ horsesLoaded: false }), true, "A rider with no horse at all: the account says so.");
+  assert.equal(
+    snapshotSetsHomeHorse({ horsesLoaded: true, selectedHorseId: "", primaryHorseId: "" }),
+    false,
+    "Empty ids never match each other."
   );
 }
 

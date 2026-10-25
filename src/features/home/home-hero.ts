@@ -21,6 +21,21 @@ export const heroPhotoPending = (input: {
   !input.photoUrl &&
   !input.horsesLoaded;
 
+/**
+ * Whether the account snapshot decides Home's horse.
+ *
+ * The snapshot carries only the primary horse, signed with the account so
+ * Home opens on it. Once the Stable's list is in, the selected horse is
+ * Home's horse. An account refresh -- any Account save, any horse edit --
+ * used to put the primary's name and breed back over the photo of a
+ * different horse the rider had picked.
+ */
+export const snapshotSetsHomeHorse = (input: {
+  horsesLoaded: boolean;
+  selectedHorseId?: string;
+  primaryHorseId?: string;
+}) => !input.horsesLoaded || (Boolean(input.primaryHorseId) && input.selectedHorseId === input.primaryHorseId);
+
 /** The picture on the stage: nothing while pending, the rider's own unless it failed, else stock. */
 export const heroPhotoFor = (input: { pending: boolean; own: string; failed: string; stock: string }) =>
   input.pending ? "" : input.own && input.own !== input.failed ? input.own : input.stock;

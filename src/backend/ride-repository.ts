@@ -57,6 +57,32 @@ export class RideRepository {
     return (data ?? []).map((row) => mapRideEntry(row as Record<string, unknown>));
   }
 
+  /**
+   * At least the newest `minimum` rides, and every ride since `since`.
+   *
+   * The month summary compares this month with the last one, so it needs
+   * every ride of both. The newest 30 used to be all the journal held, and a
+   * rider out five times a week lost the start of last month from the
+   * comparison. Most riders fit in the first read; only a busy one needs the
+   * second.
+   */
+  async listSince(since: string, minimum = 30): Promise<RideEntry[]> {
+    const newest = await this.list(minimum);
+    const oldest = newest[newest.length - 1];
+    if (newest.length < minimum || !oldest || Date.parse(oldest.completedAt) < Date.parse(since)) return newest;
+    const { data, error } = await this.client.from("ride_entries")
+      .select("*").gte("completed_at", since).order("completed_at", { ascending: false }).limit(1000);
+    if (error) throw backendError(error, "Rides could not be loaded.");
+    return (data ?? []).map((row) => mapRideEntry(row as Record<string, unknown>));
+  }
+
+  /** Every ride the rider has saved, counted on the server rather than from a page of them. */
+  async count(): Promise<number> {
+    const { count, error } = await this.client.from("ride_entries").select("id", { count: "exact", head: true });
+    if (error) throw backendError(error, "Rides could not be counted.");
+    return count ?? 0;
+  }
+
   /** The single most recent ride, for the home recap. Null when none exists yet. */
   async latest(): Promise<RideEntry | null> {
     const { data, error } = await this.client.from("ride_entries")
