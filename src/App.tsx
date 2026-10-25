@@ -167,6 +167,10 @@ import { TrainingWeekCard } from "./features/home/TrainingWeek";
 import { StreakScreen } from "./features/home/StreakScreen";
 import { TrainingPlanSheet } from "./features/home/TrainingPlanSheet";
 import { useTrainingPlan } from "./features/ride/useTrainingPlan";
+import { plannedRideFor } from "./features/ride/planned-rides";
+import { TrainingProgram } from "./features/records/TrainingProgram";
+import { HorseTimeOffSheet } from "./features/records/HorseTimeOffSheet";
+import type { HorseTimeOff, TrainingPlanDay } from "./backend";
 import type { StreakSummary } from "./domain/training-streak";
 import { switchableHorses } from "./features/records/horse-selection";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
@@ -903,6 +907,9 @@ function EquinaApp() {
   const [horseSwitcherOpen, setHorseSwitcherOpen] = useState(false);
   const [streakOpen, setStreakOpen] = useState(false);
   const [trainingPlanOpen, setTrainingPlanOpen] = useState(false);
+  // The plan opened from a horse edits that horse's days only.
+  const [planScopeHorseId, setPlanScopeHorseId] = useState<string | undefined>(undefined);
+  const [timeOffHorseId, setTimeOffHorseId] = useState("");
   const [horseCreatorOpen, setHorseCreatorOpen] = useState(false);
   const [switchingHorseId, setSwitchingHorseId] = useState("");
   const [horseSwitchError, setHorseSwitchError] = useState("");
@@ -1019,6 +1026,8 @@ function EquinaApp() {
     setHorseCreatorOpen(false);
     setStreakOpen(false);
     setTrainingPlanOpen(false);
+    setPlanScopeHorseId(undefined);
+    setTimeOffHorseId("");
     setLastRideRecapVisible(false);
     void cancelStaleRideAlerts();
     setAccountReturnTab("home");
@@ -1110,7 +1119,10 @@ function EquinaApp() {
     rideTrainingTypeById(rideSetupMemory.memory?.trainingTypeId) ?? defaultTrainingType(onboardingDiscipline);
   // Today's day in the training plan, when it has one. Its horse only while
   // the rider still has it.
-  const todayPlanned = trainingPlan.streak.todayPlanned;
+  // With more than one horse today, the one on Home first.
+  const ridableToday = trainingPlan.streak.todayPlanned.filter((entry) => !entry.horseId || horseNames[entry.horseId]);
+  const todayPlanned = plannedRideFor(ridableToday, horseRecords.selectedHorseId || undefined)
+    ?? trainingPlan.streak.todayPlanned[0];
   const todayTraining = todayPlanned ? rideTrainingTypeById(todayPlanned.trainingType) : undefined;
   const todayHorseId = todayPlanned?.horseId && horseNames[todayPlanned.horseId] ? todayPlanned.horseId : undefined;
   const nextTraining = todayTraining ?? rememberedTraining;
@@ -2677,6 +2689,7 @@ function EquinaApp() {
                 onOpenStreak={() => setStreakOpen(true)}
                 onPlanWeek={() => {
                   trainingPlan.clearError();
+                  setPlanScopeHorseId(undefined);
                   setTrainingPlanOpen(true);
                 }}
                 onOpenJournal={ridePersistence ? () => {
@@ -2763,6 +2776,26 @@ function EquinaApp() {
                 onOpenRalf={ralfAvailable ? openRalf : undefined}
                 onToggleNutritionMeal={toggleNutritionMeal}
                 onLogNutritionWater={logNutritionWater}
+                program={ridePersistence ? {
+                  planDays: trainingPlan.currentPlan?.days ?? [],
+                  timeOff: trainingPlan.timeOff,
+                  failed: !trainingPlan.loaded && trainingPlan.failed,
+                  loading: !trainingPlan.loaded && !trainingPlan.failed,
+                  userId: equinaSession.account?.userId,
+                  onEditPlan: (horseId) => {
+                    trainingPlan.clearError();
+                    setPlanScopeHorseId(horseId);
+                    setTrainingPlanOpen(true);
+                  },
+                  onAddTimeOff: setTimeOffHorseId,
+                  onEndTimeOff: async (id) => {
+                    await trainingPlan.endTimeOff(id);
+                  },
+                  onRemoveTimeOff: async (id) => {
+                    await trainingPlan.removeTimeOff(id);
+                  },
+                  onRetry: () => void trainingPlan.refresh()
+                } : undefined}
               />
             )}
             {!ralfOpen && tab === "assistant" && (
@@ -2941,6 +2974,7 @@ function EquinaApp() {
           onEditPlan={() => {
             setStreakOpen(false);
             trainingPlan.clearError();
+            setPlanScopeHorseId(undefined);
             setTrainingPlanOpen(true);
           }}
           onClose={() => setStreakOpen(false)}
@@ -2951,15 +2985,37 @@ function EquinaApp() {
           days={trainingPlan.currentPlan?.days ?? []}
           reminders={trainingPlan.currentPlan?.reminders ?? true}
           horses={ownHorses.map((record) => ({ id: record.id, name: record.name }))}
+          scopeHorseId={planScopeHorseId}
+          horseNames={horseNames}
           defaultHorseId={horseRecords.selectedHorseId || undefined}
           defaultTrainingType={rememberedTraining.id}
           saving={trainingPlan.saving}
           error={trainingPlanOpen ? trainingPlan.error : undefined}
           onSave={async (days, reminders) => {
-            await trainingPlan.save(days, reminders);
+            // Opened from a horse, only that horse's days come from the sheet;
+            // every other horse's are taken from the plan as it is now, in
+            // case it changed while the sheet was open.
+            const toSave = planScopeHorseId
+              ? [
+                  ...(trainingPlan.currentPlan?.days ?? []).filter((day) => day.horseId !== planScopeHorseId),
+                  ...days.filter((day) => day.horseId === planScopeHorseId)
+                ]
+              : days;
+            await trainingPlan.save(toSave, reminders);
             setTrainingPlanOpen(false);
           }}
           onDismiss={() => setTrainingPlanOpen(false)}
+        />
+
+        <HorseTimeOffSheet
+          visible={Boolean(timeOffHorseId)}
+          horseId={timeOffHorseId}
+          horseName={horseNames[timeOffHorseId] ?? "Your horse"}
+          onSave={async (input) => {
+            await trainingPlan.addTimeOff(input);
+            setTimeOffHorseId("");
+          }}
+          onDismiss={() => setTimeOffHorseId("")}
         />
 
         <RideJournalSheet
@@ -5046,7 +5102,8 @@ function StableScreen({
   nutritionAvailable,
   onOpenRalf,
   onToggleNutritionMeal,
-  onLogNutritionWater
+  onLogNutritionWater,
+  program
 }: {
   connected: boolean;
   recordsController: HorseRecordsController;
@@ -5066,8 +5123,24 @@ function StableScreen({
   onOpenRalf?: (prompt?: string) => void;
   onToggleNutritionMeal: (mealId: NutritionMealId) => void;
   onLogNutritionWater: () => void;
+  /** The rider's training week seen from each horse. Absent where rides are not saved. */
+  program?: {
+    planDays: readonly TrainingPlanDay[];
+    timeOff: readonly HorseTimeOff[];
+    failed: boolean;
+    loading: boolean;
+    userId?: string;
+    onEditPlan: (horseId: string) => void;
+    onAddTimeOff: (horseId: string) => void;
+    onEndTimeOff: (id: string) => Promise<void>;
+    onRemoveTimeOff: (id: string) => Promise<void>;
+    onRetry: () => void;
+  };
 }) {
   const [view, setView] = useState<StableView>("overview");
+  // The tab opens on the rider's horses; a horse's page is one tap in, with
+  // a way back. Without an account there is one sample horse and no list.
+  const [stableMode, setStableMode] = useState<"list" | "profile">("list");
   const [horseEditorVisible, setHorseEditorVisible] = useState(false);
   // The editor also adds a horse. Before, it could only create one while
   // none was selected, so nobody could add a second horse.
@@ -5142,9 +5215,15 @@ function StableScreen({
     });
   };
 
-  const openHorseEditor = () => {
+  // The horse the editor is for: the one whose "…" was tapped, not whichever
+  // is selected when a save lands.
+  const [editingHorseId, setEditingHorseId] = useState<string | null>(null);
+  const editingHorse = horses.find((horse) => horse.id === editingHorseId) ?? null;
+
+  const openHorseEditor = (horseId = selectedHorse?.id ?? null) => {
     recordsController.clearError();
     setCreatingHorse(false);
+    setEditingHorseId(horseId);
     setHorseEditorVisible(true);
   };
 
@@ -5182,7 +5261,7 @@ function StableScreen({
     input: Parameters<HorseRecordsController["createHorse"]>[0],
     photo?: Parameters<HorseRecordsController["createHorse"]>[1]
   ) => {
-    if (selectedHorse && !creatingHorse) await recordsController.updateHorse(selectedHorse.id, input, photo);
+    if (editingHorse && !creatingHorse) await recordsController.updateHorse(editingHorse.id, input, photo);
     else await recordsController.createHorse(input, photo);
     setHorseEditorVisible(false);
   };
@@ -5202,16 +5281,17 @@ function StableScreen({
   };
 
   const confirmArchiveHorse = () => {
-    if (!selectedHorse) return;
+    const horseToArchive = editingHorse;
+    if (!horseToArchive) return;
     Alert.alert(
-      `Archive ${selectedHorse.name}?`,
+      `Archive ${horseToArchive.name}?`,
       "Its records stay private and can be restored by support.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Archive",
           style: "destructive",
-          onPress: () => void recordsController.archiveHorse(selectedHorse.id).then(() => {
+          onPress: () => void recordsController.archiveHorse(horseToArchive.id).then(() => {
             setHorseEditorVisible(false);
           })
         }
@@ -5290,18 +5370,18 @@ function StableScreen({
     <>
       <HorseEditorSheet
         visible={horseEditorVisible}
-        horse={creatingHorse ? null : selectedHorse}
-        saving={saving.startsWith("horse:")}
+        horse={creatingHorse ? null : editingHorse}
+        saving={creatingHorse ? saving === "horse:create" : Boolean(editingHorse) && saving === `horse:${editingHorse?.id}`}
         error={error}
         onDismiss={closeHorseEditor}
         onSave={saveHorse}
-        onSetPrimary={selectedHorse && !selectedHorse.isPrimary && !creatingHorse
+        onSetPrimary={editingHorse && !editingHorse.isPrimary && !creatingHorse
           ? async () => {
-              await recordsController.setPrimaryHorse(selectedHorse.id);
+              await recordsController.setPrimaryHorse(editingHorse.id);
               setHorseEditorVisible(false);
             }
           : undefined}
-        onArchive={selectedHorse && !creatingHorse ? async () => confirmArchiveHorse() : undefined}
+        onArchive={editingHorse && !creatingHorse ? async () => confirmArchiveHorse() : undefined}
       />
       <RecordEditorSheet
         visible={recordEditorVisible}
@@ -5378,7 +5458,7 @@ function StableScreen({
                 accessibilityRole="button"
                 accessibilityLabel="Add a horse"
                 style={styles.stablePrimaryAction}
-                onPress={openHorseEditor}
+                onPress={openHorseCreator}
               >
                 <Text style={styles.stablePrimaryActionText}>Add a horse</Text>
                 <Plus size={18} color={equinaTheme.colors.ink} />
@@ -5391,63 +5471,113 @@ function StableScreen({
     );
   }
 
+  const connectionBanner = connected && (offline || error) ? (
+    <View style={styles.stableConnectionState}>
+      <Text accessibilityRole="alert" numberOfLines={2} style={styles.stableConnectionText}>
+        {offline ? "Offline. Saved records stay visible; changes wait for a connection." : error}
+      </Text>
+      {!offline ? (
+        <Pressable accessibilityRole="button" onPress={() => void recordsController.refresh()}>
+          <Text style={styles.stableConnectionAction}>{refreshing ? "Refreshing..." : "Retry"}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  ) : null;
+
+  // Opening a horse picks it, as on Home: Home shows the last horse picked.
+  // Offline, or if saving the pick fails, the profile still opens on it; it
+  // just does not become the main horse.
+  const openHorse = (horseId: string) => {
+    void recordsController.switchHorse(horseId, { keepOnFailure: true }).catch(() => undefined);
+    setView("overview");
+    setStableMode("profile");
+  };
+
+  if (connected && stableMode === "list") {
+    return (
+      <>
+        <View style={styles.screen} testID="stable-horse-list">
+          {connectionBanner}
+          <View style={styles.stableHorseList}>
+            {horses.map((horseOption) => {
+              const age = horseOption.birthDate
+                ? Math.max(0, new Date().getFullYear() - Number(horseOption.birthDate.slice(0, 4)))
+                : null;
+              const sex = horseOption.sex && horseOption.sex !== "unknown"
+                ? `${horseOption.sex.charAt(0).toUpperCase()}${horseOption.sex.slice(1)}`
+                : "";
+              const meta = [horseOption.breed, sex, age !== null && Number.isFinite(age) ? `${age} years` : "", horseOption.heightCm ? `${horseOption.heightCm} cm` : ""]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <Pressable
+                  key={horseOption.id}
+                  testID={`stable-horse-${horseOption.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${horseOption.name}${meta ? `, ${meta}` : ""}`}
+                  accessibilityHint="Opens this horse's profile"
+                  onPress={() => openHorse(horseOption.id)}
+                  style={({ pressed }) => [styles.stableHorseCard, pressed && styles.tabItemPressed]}
+                >
+                  <View style={styles.stablePortraitWrap}>
+                    <Image source={{ uri: horseOption.photoUrl || equinaImages.stable }} style={styles.stablePortrait} />
+                    <View style={styles.stablePortraitMark}>
+                      <HeartPulse size={13} color={equinaTheme.colors.ivory} />
+                    </View>
+                  </View>
+                  <View style={styles.stableProfileCopy}>
+                    <Text style={styles.stableKicker}>{toCoachDiscipline(horseOption.discipline)} horse</Text>
+                    <Text numberOfLines={1} style={styles.stableHorseCardName}>{horseOption.name}</Text>
+                    {meta ? <Text numberOfLines={1} style={styles.stableMeta}>{meta}</Text> : null}
+                  </View>
+                  {canManageHorse ? (
+                    <EquinaIconButton
+                      Icon={Ellipsis}
+                      testID={`stable-manage-${horseOption.id}`}
+                      label={`Manage ${horseOption.name}`}
+                      tone="glass"
+                      onPress={() => openHorseEditor(horseOption.id)}
+                    />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+          {canManageHorse ? (
+            <MotionPressable
+              testID="stable-add-horse"
+              accessibilityRole="button"
+              accessibilityLabel="Add a horse"
+              style={styles.stableAddHorseCard}
+              onPress={openHorseCreator}
+            >
+              <Plus size={22} color={equinaTheme.colors.brass} />
+              <Text style={styles.stableAddHorseText}>Add horse</Text>
+            </MotionPressable>
+          ) : null}
+        </View>
+        {recordSheets}
+      </>
+    );
+  }
+
   return (
     <>
       <View style={styles.screen}>
-        {connected && (offline || error) ? (
-          <View style={styles.stableConnectionState}>
-            <Text accessibilityRole="alert" numberOfLines={2} style={styles.stableConnectionText}>
-              {offline ? "Offline. Saved records stay visible; changes wait for a connection." : error}
-            </Text>
-            {!offline ? (
-              <Pressable accessibilityRole="button" onPress={() => void recordsController.refresh()}>
-                <Text style={styles.stableConnectionAction}>{refreshing ? "Refreshing..." : "Retry"}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
+        {connectionBanner}
 
-        {connected && (horses.length > 1 || (canManageHorse && horses.length > 0)) ? (
-          <ScrollView
-            horizontal
-            style={styles.stableHorseSwitcher}
-            contentContainerStyle={styles.stableHorseSwitcherContent}
-            showsHorizontalScrollIndicator={false}
+        {connected ? (
+          <Pressable
+            testID="stable-back"
+            accessibilityRole="button"
+            accessibilityLabel="Back to your horses"
+            hitSlop={8}
+            onPress={() => setStableMode("list")}
+            style={({ pressed }) => [styles.stableBack, pressed && styles.tabItemPressed]}
           >
-            {horses.map((horseOption) => (
-              <Pressable
-                key={horseOption.id}
-                testID={`stable-horse-${horseOption.id}`}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: horseOption.id === selectedHorse?.id, disabled: saving.startsWith("horse:") }}
-                disabled={saving.startsWith("horse:")}
-                style={[
-                  styles.stableHorseOption,
-                  horseOption.id === selectedHorse?.id && styles.stableHorseOptionActive
-                ]}
-                // Kept as the main horse, like a pick on Home. A failure
-                // shows in the banner above and the pick springs back.
-                onPress={() => void recordsController.switchHorse(horseOption.id).catch(() => undefined)}
-              >
-                <Text style={[
-                  styles.stableHorseOptionText,
-                  horseOption.id === selectedHorse?.id && styles.stableHorseOptionTextActive
-                ]}>{horseOption.name}</Text>
-              </Pressable>
-            ))}
-            {canManageHorse ? (
-              <Pressable
-                testID="stable-add-another-horse"
-                accessibilityRole="button"
-                accessibilityLabel="Add a horse"
-                style={[styles.stableHorseOption, styles.stableHorseAdd]}
-                onPress={openHorseCreator}
-              >
-                <Plus size={15} color={equinaTheme.colors.brass} />
-                <Text style={styles.stableHorseAddText}>Add horse</Text>
-              </Pressable>
-            ) : null}
-          </ScrollView>
+            <ChevronLeft size={20} color={equinaTheme.text.secondary} />
+            <Text style={styles.stableBackText}>Horses</Text>
+          </Pressable>
         ) : null}
 
         <View style={styles.stableProfileHeader}>
@@ -5472,7 +5602,7 @@ function StableScreen({
               testID="stable-manage-horse"
               label={`Manage ${resolvedName}`}
               tone="glass"
-              onPress={openHorseEditor}
+              onPress={() => openHorseEditor()}
             />
           ) : null}
         </View>
@@ -5520,27 +5650,26 @@ function StableScreen({
                 </View>
               </View>
 
-              <View style={styles.documentStack}>
-                <DocumentRow
-                  Icon={Stethoscope}
-                  title="Care"
-                  body={careSchedule.length
-                    ? `${careSchedule.length} tracked · ${healthRecords.length} health ${healthRecords.length === 1 ? "record" : "records"}`
-                    : healthRecords.length
-                      ? `${healthRecords.length} health ${healthRecords.length === 1 ? "record" : "records"}`
-                      : "Farrier, vaccinations, vet and dental"}
-                  status=""
-                  onPress={() => openView("care")}
+              {/* Care and Documents live in the tabs above; the overview
+                  shows the horse's week instead. */}
+              {program && selectedHorse ? (
+                <TrainingProgram
+                  horseId={selectedHorse.id}
+                  horseName={selectedHorse.name}
+                  planDays={program.planDays}
+                  timeOff={program.timeOff}
+                  today={todayIso}
+                  failed={program.failed}
+                  loading={program.loading}
+                  canEditPlan={!program.userId || selectedHorse.ownerId === program.userId}
+                  canEditTimeOff={canManageHorse && (!program.userId || selectedHorse.ownerId === program.userId)}
+                  onEditPlan={() => program.onEditPlan(selectedHorse.id)}
+                  onAddTimeOff={() => program.onAddTimeOff(selectedHorse.id)}
+                  onEndTimeOff={program.onEndTimeOff}
+                  onRemoveTimeOff={program.onRemoveTimeOff}
+                  onRetry={program.onRetry}
                 />
-                <DocumentRow
-                  Icon={FileText}
-                  title="Documents"
-                  body={savedRecordCount ? `${savedRecordCount} private ${savedRecordCount === 1 ? "record" : "records"}` : "Passport, vet notes and lab results"}
-                  status=""
-                  last
-                  onPress={() => openView("docs")}
-                />
-              </View>
+              ) : null}
 
               {records.length > 0 ? (
                 <>
@@ -10775,47 +10904,55 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: "600"
   },
-  stableHorseSwitcher: {
-    flexGrow: 0,
-    marginHorizontal: -16
+  stableHorseList: {
+    gap: 10,
+    marginTop: 4
   },
-  stableHorseSwitcherContent: {
-    paddingHorizontal: 16,
-    gap: 8
-  },
-  stableHorseOption: {
-    minHeight: 40,
-    borderRadius: equinaTheme.radius.control,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: equinaTheme.material.quiet
-  },
-  stableHorseOptionActive: {
-    backgroundColor: equinaTheme.material.selected
-  },
-  stableHorseAdd: {
+  stableHorseCard: {
+    minHeight: 98,
     flexDirection: "row",
-    gap: 4,
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 8
+  },
+  stableHorseCardName: {
+    color: equinaTheme.colors.ivory,
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: "600",
+    marginTop: 1
+  },
+  stableAddHorseCard: {
+    minHeight: 72,
+    marginTop: 16,
+    borderRadius: equinaTheme.radius.card,
     borderWidth: 1,
     borderStyle: "dashed",
     borderColor: "rgba(196,160,90,0.55)",
-    backgroundColor: "transparent"
+    backgroundColor: equinaTheme.surfaces.raised,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10
   },
-  stableHorseAddText: {
+  stableAddHorseText: {
     color: equinaTheme.colors.brass,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: "600"
   },
-  stableHorseOptionText: {
+  stableBack: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 2,
+    minHeight: 36,
+    marginLeft: -4
+  },
+  stableBackText: {
+    ...equinaTheme.typography.meta,
     color: equinaTheme.text.secondary,
-    fontSize: 12,
-    lineHeight: 16,
     fontWeight: "600"
-  },
-  stableHorseOptionTextActive: {
-    color: equinaTheme.colors.brass
   },
   stableCoachLink: {
     minHeight: 52,

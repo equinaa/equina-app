@@ -80,6 +80,7 @@ Deno.serve(async (request) => {
       notificationPreferences: ownRow("notification_preferences", "user_id"),
       horses,
       horseRecords,
+      horseTimeOff: horses.then((rows) => under("horse_time_off", "horse_id", idsOf(rows))),
       coachConversations,
       coachMessages: coachConversations.then((rows) => under("coach_messages", "conversation_id", idsOf(rows))),
       marketplaceConversations,

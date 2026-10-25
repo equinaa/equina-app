@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   addDays,
+  dueOn,
   isoWeekday,
   planOn,
   plannedOn,
@@ -37,9 +38,9 @@ const plan: PlanVersion = {
   assert.equal(isoWeekday(TODAY), 7, "and the 25th a Sunday.");
   assert.equal(addDays("2026-10-31", 1), "2026-11-01");
   assert.equal(addDays("2026-03-29", -1), "2026-03-28", "Day arithmetic ignores the clock change.");
-  assert.equal(plannedOn([plan], "2026-10-21")?.trainingType, "jumping");
-  assert.equal(plannedOn([plan], "2026-10-22"), null, "Thursday is a day off.");
-  assert.equal(plannedOn([plan], "2026-10-04"), null, "Before the plan nothing is planned.");
+  assert.equal(plannedOn([plan], "2026-10-21")[0]?.trainingType, "jumping");
+  assert.deepEqual(plannedOn([plan], "2026-10-22"), [], "Thursday is a day off.");
+  assert.deepEqual(plannedOn([plan], "2026-10-04"), [], "Before the plan nothing is planned.");
 }
 
 // Every planned day ridden for three weeks: 9 training days.
@@ -55,7 +56,7 @@ const faithful = [
   assert.equal(streak.best, 9);
   assert.equal(streak.startedOn, "2026-10-05");
   assert.equal(streak.hasPlan, true);
-  assert.equal(streak.todayPlanned, null, "Sunday is a day off.");
+  assert.deepEqual(streak.todayPlanned, [], "Sunday is a day off.");
   assert.equal(streak.nextMilestone, 10);
   assert.equal(streak.previousMilestone, 5);
 }
@@ -79,7 +80,7 @@ const faithful = [
   // Monday 26: planned, not ridden yet. The day is still going.
   const monday = trainingStreak([plan], faithful, "2026-10-26");
   assert.equal(monday.current, 9, "Today's planned ride, not done yet, breaks nothing.");
-  assert.equal(monday.todayPlanned?.trainingType, "dressage");
+  assert.equal(monday.todayPlanned[0]?.trainingType, "dressage");
   assert.equal(monday.todayRidden, false);
   // Tuesday 27: Monday is gone without a ride.
   assert.equal(trainingStreak([plan], faithful, "2026-10-27").current, 0, "The day after, a missed plan breaks it.");
@@ -134,9 +135,51 @@ const faithful = [
   );
   const lazy = trainingWeek([plan], rideDays([ride("2026-10-19")]), "2026-10-23");
   assert.deepEqual(
-    lazy.filter((day) => day.planned).map((day) => [day.day, day.state, day.isToday]),
+    lazy.filter((day) => day.planned.length > 0).map((day) => [day.day, day.state, day.isToday]),
     [["2026-10-19", "ridden", false], ["2026-10-21", "missed", false], ["2026-10-24", "planned", false]],
     "A planned day gone by without a ride is missed; the ones to come are still planned."
+  );
+}
+
+// Two horses on Monday, Luna added on top of Daimon. The day needs a ride,
+// and one ride on either horse keeps the streak: it counts training days.
+{
+  const twoHorses: PlanVersion = {
+    effectiveFrom: "2026-10-05",
+    days: [...plan.days, { weekday: 1, trainingType: "jumping", horseId: "luna" }]
+  };
+  assert.equal(plannedOn([twoHorses], "2026-10-19").length, 2);
+  assert.equal(trainingStreak([twoHorses], faithful, TODAY).current, 9);
+  assert.deepEqual(
+    trainingStreak([twoHorses], faithful, "2026-10-26").todayPlanned.map((entry) => entry.horseId),
+    ["daimon", "luna"],
+    "Today lists every horse still to ride."
+  );
+}
+
+// Daimon on stall rest from Monday 19 to Wednesday 21: his Monday and
+// Wednesday are not due, so skipping them breaks nothing.
+{
+  const stallRest = [{ horseId: "daimon", kind: "stall-rest", startsOn: "2026-10-19", endsOn: "2026-10-21" }];
+  const rested = faithful.filter((value) => !value.startsWith("2026-10-19") && !value.startsWith("2026-10-21"));
+  assert.equal(trainingStreak([plan], rested, TODAY).current, 1, "Without the time off, the missed days break it.");
+  const streak = trainingStreak([plan], rested, TODAY, stallRest);
+  assert.equal(streak.current, 7, "With the horse off, the streak carries on over those days.");
+  const week = trainingWeek([plan], rideDays(rested), TODAY, stallRest);
+  assert.deepEqual(
+    week.slice(0, 3).map((day) => day.state),
+    ["off", "rest", "off"],
+    "The days the horse is off show as off, not missed."
+  );
+  // Saturday's hack has no horse, so time off on Daimon does not touch it.
+  assert.equal(dueOn([plan], stallRest, "2026-10-24").length, 1);
+  // The other horse on the same day is still due.
+  const twoHorses: PlanVersion = { effectiveFrom: "2026-10-05", days: [...plan.days, { weekday: 1, trainingType: "jumping", horseId: "luna" }] };
+  assert.deepEqual(dueOn([twoHorses], stallRest, "2026-10-19").map((entry) => entry.horseId), ["luna"]);
+  assert.deepEqual(
+    upcomingPlannedDays([plan], [], "2026-10-19", 7, stallRest).map((entry) => entry.day),
+    ["2026-10-24"],
+    "No reminder for a horse that is off."
   );
 }
 

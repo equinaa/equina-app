@@ -19,7 +19,7 @@ export const reminderWindowDays = 21;
 const reminderRoute = "training-day";
 const reminderChannel = "training-days";
 
-export type TrainingReminder = { day: string; planned: TrainingPlanDay; title: string; body: string };
+export type TrainingReminder = { day: string; planned: TrainingPlanDay[]; title: string; body: string };
 
 /** 08:00 on a local YYYY-MM-DD day. */
 export const reminderTime = (day: string) => {

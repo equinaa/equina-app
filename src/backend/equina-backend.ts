@@ -12,6 +12,7 @@ import { RecordsRepository } from "./records-repository";
 import { AcademyRepository } from "./academy-repository";
 import { RideRepository } from "./ride-repository";
 import { TrainingPlanRepository } from "./training-plan-repository";
+import { HorseTimeOffRepository } from "./horse-time-off-repository";
 import { forgetStoredSession, getSupabaseClient } from "./supabase-client";
 
 export class EquinaBackend {
@@ -21,6 +22,7 @@ export class EquinaBackend {
   readonly records: RecordsRepository;
   readonly rides: RideRepository;
   readonly trainingPlans: TrainingPlanRepository;
+  readonly horseTimeOff: HorseTimeOffRepository;
   readonly academy: AcademyRepository;
   readonly club: ClubRepository;
   readonly marketplace: MarketplaceRepository;
@@ -37,6 +39,7 @@ export class EquinaBackend {
     this.records = new RecordsRepository(client);
     this.rides = new RideRepository(client);
     this.trainingPlans = new TrainingPlanRepository(client);
+    this.horseTimeOff = new HorseTimeOffRepository(client);
     this.academy = new AcademyRepository(client);
     this.club = new ClubRepository(client);
     this.marketplace = new MarketplaceRepository(client);

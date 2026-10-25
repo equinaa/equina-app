@@ -261,7 +261,7 @@ export function useHorseRecords({
    * Without horse management, or for a horse someone shared, the pick is for
    * this session only: only an owner can make a horse their main one.
    */
-  const switchHorse = useCallback(async (horseId: string) => {
+  const switchHorse = useCallback(async (horseId: string, options: { keepOnFailure?: boolean } = {}) => {
     const previous = selectedRef.current;
     if (!horseId || horseId === previous) return;
     selectHorse(horseId);
@@ -283,7 +283,9 @@ export function useHorseRecords({
     try {
       saved = await save;
     } catch (switchError) {
-      if (selectedRef.current === horseId && previous) selectHorse(previous);
+      // Opened to look at (the Horse tab), it stays on screen; picked on
+      // Home, a pick that was not kept is taken back.
+      if (!options.keepOnFailure && selectedRef.current === horseId && previous) selectHorse(previous);
       throw switchError;
     }
     // The pick is saved. An account refresh that fails is only a stale

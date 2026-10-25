@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Platform, StyleSheet, Switch, Text, View } from "react-native";
-import { ChevronDown, ChevronUp } from "lucide-react-native";
+import { ChevronDown, ChevronUp, Plus, X } from "lucide-react-native";
 import type { TrainingPlanDay } from "../../backend";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
@@ -13,16 +13,25 @@ const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satur
 
 export type PlanHorse = { id: string; name: string };
 
+/** The rides of one weekday, in the order they were added. */
+const entriesOf = (days: readonly TrainingPlanDay[], weekday: number) => days.filter((day) => day.weekday === weekday);
+
 /**
- * The rider's training week: for each day, ride or rest, and on a riding day
- * the training and the horse. Saved from today on; the weeks before keep the
- * plan they had.
+ * The rider's training week: for each day, rest or one ride or more, each with
+ * its training and horse. Saved from today on; the weeks before keep the plan
+ * they had.
+ *
+ * Opened from a horse (`scopeHorseId`), it shows and edits only that horse's
+ * days -- the same plan, seen from the horse. The other horses' rides stay as
+ * they are and are named under each day.
  */
 export function TrainingPlanSheet({
   visible,
   days: initialDays,
   reminders: initialReminders,
   horses,
+  horseNames = {},
+  scopeHorseId,
   defaultHorseId,
   defaultTrainingType,
   saving,
@@ -33,7 +42,12 @@ export function TrainingPlanSheet({
   visible: boolean;
   days: readonly TrainingPlanDay[];
   reminders: boolean;
+  /** The rider's own horses: the ones a day can be planned with. */
   horses: readonly PlanHorse[];
+  /** Every horse the rider can see, for naming rides on a shared or archived horse. */
+  horseNames?: Record<string, string>;
+  /** Edits only this horse's days. */
+  scopeHorseId?: string;
   /** Home's horse: a new riding day starts with it. */
   defaultHorseId?: string;
   /** The rider's usual training: a new riding day starts with it. */
@@ -55,56 +69,81 @@ export function TrainingPlanSheet({
     // Opening is the reset point; edits while open must survive re-renders.
   }, [visible]);
 
-  const dayOf = (weekday: number) => days.find((day) => day.weekday === weekday);
-  const knownHorse = (id?: string) => (id && horses.some((horse) => horse.id === id) ? id : undefined);
+  const scoped = Boolean(scopeHorseId);
+  const horseName = (id?: string) => (id ? horses.find((horse) => horse.id === id)?.name ?? horseNames[id] : undefined);
+  const scopeName = horseName(scopeHorseId);
+  const known = (id?: string) => (id && horses.some((horse) => horse.id === id) ? id : undefined);
+  // In the horse's view a day is that horse's ride; in the week, all of them.
+  const shownOf = (weekday: number) =>
+    entriesOf(days, weekday).filter((entry) => !scoped || entry.horseId === scopeHorseId);
+  const othersOf = (weekday: number) =>
+    scoped ? entriesOf(days, weekday).filter((entry) => entry.horseId !== scopeHorseId) : [];
 
   const toggle = (weekday: number) => {
     selectionHaptic();
-    if (dayOf(weekday)) {
-      setDays((current) => current.filter((day) => day.weekday !== weekday));
+    if (shownOf(weekday).length) {
+      setDays((current) => current.filter((entry) => entry.weekday !== weekday || (scoped && entry.horseId !== scopeHorseId)));
       if (open === weekday) setOpen(null);
       return;
     }
-    const horseId = knownHorse(defaultHorseId) ?? horses[0]?.id;
-    setDays((current) => [
-      ...current,
-      { weekday, trainingType: defaultTrainingType, ...(horseId ? { horseId } : {}) }
-    ]);
+    const used = new Set(entriesOf(days, weekday).map((entry) => entry.horseId));
+    const horseId = scopeHorseId
+      ?? [known(defaultHorseId), ...horses.map((horse) => horse.id)].find((id) => id && !used.has(id));
+    setDays((current) => [...current, { weekday, trainingType: defaultTrainingType, ...(horseId ? { horseId } : {}) }]);
     setOpen(weekday);
   };
 
-  const change = (weekday: number, patch: Partial<TrainingPlanDay>) =>
-    setDays((current) => current.map((day) => (day.weekday === weekday ? { ...day, ...patch } : day)));
-
-  const horseName = (id?: string) => horses.find((horse) => horse.id === id)?.name;
+  // Entries are told apart by weekday and horse, which the database keeps unique.
+  const same = (entry: TrainingPlanDay, target: TrainingPlanDay) =>
+    entry.weekday === target.weekday && entry.horseId === target.horseId;
+  const change = (target: TrainingPlanDay, patch: Partial<TrainingPlanDay>) =>
+    setDays((current) => current.map((entry) => (same(entry, target) ? { ...entry, ...patch } : entry)));
+  const remove = (target: TrainingPlanDay) => setDays((current) => current.filter((entry) => !same(entry, target)));
+  const addHorse = (weekday: number) => {
+    const used = new Set(entriesOf(days, weekday).map((entry) => entry.horseId));
+    const horseId = horses.find((horse) => !used.has(horse.id))?.id;
+    if (!horseId) return;
+    selectionHaptic();
+    setDays((current) => [...current, { weekday, trainingType: defaultTrainingType, horseId }]);
+  };
 
   return (
     <EquinaSheet
       visible={visible}
-      title="Training week"
+      title={scoped && scopeName ? `${scopeName}'s training` : "Training week"}
       onDismiss={saving ? () => undefined : onDismiss}
       closeTestID="training-plan-close"
     >
       <View style={styles.body} testID="training-plan">
-        <Text style={styles.intro}>The days you plan to ride, and what each one is for. Your streak counts them.</Text>
+        <Text style={styles.intro}>
+          {scoped
+            ? "The days this horse is ridden in your week, and the training for each. Your streak counts them."
+            : "The days you plan to ride, with the horse and the training for each. Your streak counts them."}
+        </Text>
 
         <View style={styles.days}>
           {dayNames.map((name, index) => {
             const weekday = index + 1;
-            const day = dayOf(weekday);
-            const expanded = open === weekday && Boolean(day);
-            const summary = day
-              ? [rideTrainingLabel(day.trainingType), horseName(day.horseId)].filter(Boolean).join(" · ")
+            const shown = shownOf(weekday);
+            const others = othersOf(weekday);
+            const on = shown.length > 0;
+            const expanded = open === weekday && on;
+            const summary = on
+              ? shown.map((entry) => [rideTrainingLabel(entry.trainingType), scoped ? undefined : horseName(entry.horseId)].filter(Boolean).join(" · ")).join(", ")
               : "Rest";
+            const usedHorses = new Set(entriesOf(days, weekday).map((entry) => entry.horseId));
+            const othersText = others
+              .map((entry) => [rideTrainingLabel(entry.trainingType), horseName(entry.horseId)].filter(Boolean).join(" · "))
+              .join(", ");
             return (
-              <View key={name} style={[styles.day, day && styles.dayOn]}>
+              <View key={name} style={[styles.day, on && styles.dayOn]}>
                 <View style={styles.dayTop}>
                   <MotionPressable
                     testID={`training-plan-day-${weekday}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`${name}: ${summary}`}
-                    accessibilityHint={day ? "Shows the training and horse for this day" : undefined}
-                    disabled={!day}
+                    accessibilityLabel={`${name}: ${summary}${othersText ? `. Also ${othersText}` : ""}`}
+                    accessibilityHint={on ? "Shows the training for this day" : undefined}
+                    disabled={!on}
                     onPress={() => {
                       selectionHaptic();
                       setOpen(expanded ? null : weekday);
@@ -112,17 +151,18 @@ export function TrainingPlanSheet({
                     style={styles.dayCopy}
                   >
                     <Text style={styles.dayName}>{name}</Text>
-                    <Text numberOfLines={1} style={[styles.daySummary, !day && styles.dayRest]}>{summary}</Text>
+                    <Text numberOfLines={2} style={[styles.daySummary, !on && styles.dayRest]}>{summary}</Text>
+                    {othersText ? <Text numberOfLines={1} style={styles.dayOthers}>Also {othersText}</Text> : null}
                   </MotionPressable>
-                  {day ? (
+                  {on ? (
                     expanded
                       ? <ChevronUp size={18} color={equinaTheme.text.secondary} />
                       : <ChevronDown size={18} color={equinaTheme.text.secondary} />
                   ) : null}
                   <Switch
                     testID={`training-plan-toggle-${weekday}`}
-                    accessibilityLabel={`Ride on ${name}`}
-                    value={Boolean(day)}
+                    accessibilityLabel={scoped && scopeName ? `Ride ${scopeName} on ${name}` : `Ride on ${name}`}
+                    value={on}
                     onValueChange={() => toggle(weekday)}
                     trackColor={{ false: equinaTheme.surfaces.elevated, true: equinaTheme.colorRole.positive }}
                     thumbColor={equinaTheme.colors.ivory}
@@ -130,57 +170,92 @@ export function TrainingPlanSheet({
                   />
                 </View>
 
-                {expanded && day ? (
+                {expanded ? (
                   <View style={styles.dayEdit}>
-                    <Text style={styles.label}>Training</Text>
-                    <View accessibilityRole="radiogroup" style={styles.chips}>
-                      {rideTrainingTypes.map((type) => {
-                        const selected = type.id === day.trainingType;
-                        return (
-                          <MotionPressable
-                            key={type.id}
-                            testID={`training-plan-${weekday}-${type.id}`}
-                            accessibilityRole="radio"
-                            accessibilityLabel={type.label}
-                            accessibilityState={{ selected }}
-                            pressedScale={0.97}
-                            onPress={() => {
-                              if (!selected) selectionHaptic();
-                              change(weekday, { trainingType: type.id });
-                            }}
-                            style={[styles.chip, selected && styles.chipSelected]}
-                          >
-                            <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{type.label}</Text>
-                          </MotionPressable>
-                        );
-                      })}
-                    </View>
-                    {horses.length > 0 ? (
-                      <>
-                        <Text style={styles.label}>Horse</Text>
+                    {shown.map((entry, entryIndex) => (
+                      <View key={`${entry.weekday}-${entry.horseId ?? "none"}`} style={[styles.entry, entryIndex > 0 && styles.entryNext]}>
+                        {!scoped && horses.length > 0 ? (
+                          <>
+                            <View style={styles.entryTop}>
+                              <Text style={styles.label}>Horse</Text>
+                              {shown.length > 1 ? (
+                                <MotionPressable
+                                  testID={`training-plan-${weekday}-remove-${entry.horseId ?? "none"}`}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Remove ${horseName(entry.horseId) ?? "this ride"} from ${name}`}
+                                  hitSlop={6}
+                                  onPress={() => {
+                                    selectionHaptic();
+                                    remove(entry);
+                                  }}
+                                  style={styles.removeButton}
+                                >
+                                  <X size={16} color={equinaTheme.text.secondary} />
+                                </MotionPressable>
+                              ) : null}
+                            </View>
+                            <View accessibilityRole="radiogroup" style={styles.chips}>
+                              {horses.map((horse) => {
+                                const selected = horse.id === entry.horseId;
+                                const taken = !selected && usedHorses.has(horse.id);
+                                return (
+                                  <MotionPressable
+                                    key={horse.id}
+                                    testID={`training-plan-${weekday}-horse-${horse.id}`}
+                                    accessibilityRole="radio"
+                                    accessibilityLabel={horse.name}
+                                    accessibilityState={{ selected, disabled: taken }}
+                                    disabled={taken}
+                                    pressedScale={0.97}
+                                    onPress={() => {
+                                      if (!selected) selectionHaptic();
+                                      change(entry, { horseId: horse.id });
+                                    }}
+                                    style={[styles.chip, selected && styles.chipSelected, taken && styles.chipTaken]}
+                                  >
+                                    <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{horse.name}</Text>
+                                  </MotionPressable>
+                                );
+                              })}
+                            </View>
+                          </>
+                        ) : null}
+                        <Text style={styles.label}>Training</Text>
                         <View accessibilityRole="radiogroup" style={styles.chips}>
-                          {horses.map((horse) => {
-                            const selected = horse.id === day.horseId;
+                          {rideTrainingTypes.map((type) => {
+                            const selected = type.id === entry.trainingType;
                             return (
                               <MotionPressable
-                                key={horse.id}
-                                testID={`training-plan-${weekday}-horse-${horse.id}`}
+                                key={type.id}
+                                testID={`training-plan-${weekday}-${entry.horseId ?? "none"}-${type.id}`}
                                 accessibilityRole="radio"
-                                accessibilityLabel={horse.name}
+                                accessibilityLabel={type.label}
                                 accessibilityState={{ selected }}
                                 pressedScale={0.97}
                                 onPress={() => {
                                   if (!selected) selectionHaptic();
-                                  change(weekday, { horseId: horse.id });
+                                  change(entry, { trainingType: type.id });
                                 }}
                                 style={[styles.chip, selected && styles.chipSelected]}
                               >
-                                <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{horse.name}</Text>
+                                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{type.label}</Text>
                               </MotionPressable>
                             );
                           })}
                         </View>
-                      </>
+                      </View>
+                    ))}
+                    {!scoped && horses.some((horse) => !usedHorses.has(horse.id)) ? (
+                      <MotionPressable
+                        testID={`training-plan-${weekday}-add-horse`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Ride another horse on ${name}`}
+                        onPress={() => addHorse(weekday)}
+                        style={styles.addHorse}
+                      >
+                        <Plus size={16} color={equinaTheme.colors.brass} />
+                        <Text style={styles.addHorseText}>Another horse</Text>
+                      </MotionPressable>
                     ) : null}
                   </View>
                 ) : null}
@@ -253,7 +328,23 @@ const styles = StyleSheet.create({
   dayName: { ...equinaTheme.typography.body, color: equinaTheme.text.primary, fontWeight: "600" },
   daySummary: { ...equinaTheme.typography.meta, color: equinaTheme.colors.brass },
   dayRest: { color: equinaTheme.text.tertiary },
+  dayOthers: { ...equinaTheme.typography.meta, color: equinaTheme.text.tertiary },
   dayEdit: { gap: equinaTheme.spacing.sm, paddingBottom: equinaTheme.spacing.xs },
+  entry: { gap: equinaTheme.spacing.sm },
+  entryNext: {
+    borderTopWidth: 1,
+    borderTopColor: equinaTheme.material.separator,
+    paddingTop: equinaTheme.spacing.compact
+  },
+  entryTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  removeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: equinaTheme.material.quietPressed
+  },
   label: {
     ...equinaTheme.typography.label,
     color: equinaTheme.text.secondary,
@@ -272,8 +363,22 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   chipSelected: { borderColor: equinaTheme.colors.brass, backgroundColor: equinaTheme.material.selected },
+  chipTaken: { opacity: 0.35 },
   chipText: { ...equinaTheme.typography.meta, color: equinaTheme.text.primary, fontWeight: "600" },
   chipTextSelected: { color: equinaTheme.colors.brass },
+  addHorse: {
+    minHeight: 40,
+    alignSelf: "flex-start",
+    paddingHorizontal: 14,
+    borderRadius: equinaTheme.radius.control,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "rgba(196,160,90,0.55)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.sm
+  },
+  addHorseText: { ...equinaTheme.typography.meta, color: equinaTheme.colors.brass, fontWeight: "600" },
   reminders: {
     flexDirection: "row",
     alignItems: "center",

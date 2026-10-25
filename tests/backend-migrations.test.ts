@@ -900,6 +900,115 @@ const strangerPlans = await db.query("select id from public.training_plans where
 assert.equal(strangerPlans.rows.length, 0, "Another rider never reads a training plan.");
 await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 
+// The training program seen per horse (202610250003): several horses on one
+// day, and a horse's time off.
+const twoHorsesMonday = JSON.stringify([
+  { weekday: 1, training_type: "dressage", horse_id: horseId },
+  { weekday: 1, training_type: "jumping", horse_id: "00000000-0000-4000-8000-0000000000aa" },
+  { weekday: 3, training_type: "hack" }
+]);
+const twoHorses = await db.query(
+  "update public.training_plans set days = $2::jsonb where user_id = $1 and effective_from = current_date returning id",
+  [riderA, twoHorsesMonday]
+);
+assert.equal(twoHorses.rows.length, 1, "A rider can ride two horses on the same day.");
+await assert.rejects(
+  db.query(
+    "update public.training_plans set days = $2::jsonb where user_id = $1 and effective_from = current_date",
+    [riderA, JSON.stringify([{ weekday: 1, training_type: "dressage", horse_id: horseId }, { weekday: 1, training_type: "hack", horse_id: horseId }])]
+  ),
+  /training_plans_days_valid/,
+  "The same horse appears once on a day."
+);
+
+const stallRest = await db.query<{ id: string }>(
+  "insert into public.horse_time_off(horse_id, kind, starts_on, ends_on, note) values ($1, 'stall-rest', current_date - 2, current_date + 12, 'Abscess, vet said two weeks') returning id",
+  [horseId]
+);
+assert.ok(stallRest.rows[0]?.id, "The owner can put a horse on stall rest, from a couple of days back.");
+await assert.rejects(
+  db.query("insert into public.horse_time_off(horse_id, kind, starts_on, ends_on) values ($1, 'rest', current_date - 20, current_date - 15)", [horseId]),
+  /up to a week back/,
+  "Time off cannot be entered far into the past."
+);
+await assert.rejects(
+  db.query("insert into public.horse_time_off(horse_id, kind, starts_on, ends_on) values ($1, 'rest', current_date + 5, current_date + 2)", [horseId]),
+  /horse_time_off_in_order/,
+  "A period ends after it starts."
+);
+await assert.rejects(
+  db.query("insert into public.horse_time_off(horse_id, kind, starts_on, ends_on) values ($1, 'Stall rest!', current_date, current_date)", [horseId]),
+  /horse_time_off_kind_shape/,
+  "The kind is the app's id."
+);
+await assert.rejects(
+  db.query("update public.horse_time_off set ends_on = current_date + 30 where id = $1", [stallRest.rows[0]?.id]),
+  /only be ended early/,
+  "A period is not stretched in place: a new one extends it."
+);
+await assert.rejects(
+  db.query("update public.horse_time_off set kind = 'rest' where id = $1", [stallRest.rows[0]?.id]),
+  /permission denied/,
+  "Only the last day can change after the fact."
+);
+// Periods entered a while ago: one over, one under way, one to come.
+await db.exec(`
+  reset role;
+  alter table public.horse_time_off disable trigger horse_time_off_dates_guard;
+  insert into public.horse_time_off(horse_id, kind, starts_on, ends_on, created_at) values
+    ('${horseId}', 'break', current_date - 40, current_date - 30, now() - interval '41 days'),
+    ('${horseId}', 'injury', current_date - 10, current_date + 10, now() - interval '10 days'),
+    ('${horseId}', 'vet', current_date + 3, current_date + 5, now() - interval '3 days');
+  alter table public.horse_time_off enable trigger horse_time_off_dates_guard;
+  set role authenticated;
+  select set_config('request.jwt.claim.sub', '${riderA}', false);
+`);
+await assert.rejects(
+  db.query("delete from public.horse_time_off where horse_id = $1 and kind = 'break'", [horseId]),
+  /ended early, not taken back/,
+  "A time off that is over cannot be taken back: it decided past days."
+);
+await assert.rejects(
+  db.query("update public.horse_time_off set ends_on = current_date - 31 where horse_id = $1 and kind = 'break'", [horseId]),
+  /is over stays as it was/,
+  "Nor can its last day be moved."
+);
+await assert.rejects(
+  db.query("delete from public.horse_time_off where horse_id = $1 and kind = 'injury'", [horseId]),
+  /ended early, not taken back/,
+  "A period under way is not deleted: its past days stay covered."
+);
+const endedEarly = await db.query<{ ends_on: string }>(
+  "update public.horse_time_off set ends_on = current_date - 1 where horse_id = $1 and kind = 'injury' returning ends_on::text",
+  [horseId]
+);
+assert.equal(endedEarly.rows.length, 1, "A horse back in work early ends its time off yesterday.");
+await assert.rejects(
+  db.query("update public.horse_time_off set ends_on = current_date - 5 where horse_id = $1 and kind = 'vet'", [horseId]),
+  /yesterday at the earliest/,
+  "Ending early never reaches back into days already counted."
+);
+const notStarted = await db.query("delete from public.horse_time_off where horse_id = $1 and kind = 'vet' returning id", [horseId]);
+assert.equal(notStarted.rows.length, 1, "A period that has not started can be taken back whole.");
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderB}', false);`);
+const viewerTimeOff = await db.query("select id from public.horse_time_off where horse_id = $1", [horseId]);
+assert.equal(viewerTimeOff.rows.length, 3, "A collaborator who can see the horse sees its time off.");
+const viewerEnd = await db.query("update public.horse_time_off set ends_on = current_date - 1 where id = $1 returning id", [stallRest.rows[0]?.id]);
+assert.equal(viewerEnd.rows.length, 0, "A viewer cannot end a horse's time off.");
+await assert.rejects(
+  db.query("insert into public.horse_time_off(horse_id, kind, starts_on, ends_on) values ($1, 'rest', current_date, current_date)", [horseId]),
+  /row-level security/,
+  "A viewer cannot put the horse on time off."
+);
+const viewerDelete = await db.query("delete from public.horse_time_off where id = $1 returning id", [stallRest.rows[0]?.id]);
+assert.equal(viewerDelete.rows.length, 0, "A viewer cannot take a horse's time off away.");
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderC}', false);`);
+const strangerTimeOff = await db.query("select id from public.horse_time_off where horse_id = $1", [horseId]);
+assert.equal(strangerTimeOff.rows.length, 0, "Someone with no access to the horse never sees its time off.");
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+const ownerDelete = await db.query("delete from public.horse_time_off where id = $1 returning id", [stallRest.rows[0]?.id]);
+assert.equal(ownerDelete.rows.length, 1, "The owner can take back a time off that is not over.");
+
 
 // --- Ralf credit ledger -----------------------------------------------------
 
@@ -1522,6 +1631,7 @@ const clientWrites: Record<string, ClientWrites> = {
   },
   saved_listings: { insert: ["user_id", "listing_id"], update: ["user_id", "listing_id"], delete: true },
   training_plans: { insert: ["user_id", "effective_from", "days", "reminders"], update: ["days", "reminders"] },
+  horse_time_off: { insert: ["horse_id", "kind", "starts_on", "ends_on", "note"], update: ["ends_on"], delete: true },
   user_blocks: { insert: ["blocker_id", "blocked_id"], update: ["blocker_id", "blocked_id"], delete: true },
   user_preferences: {
     insert: ["user_id", "academy_discipline", "academy_level", "academy_focus", "use_rider_profile", "use_selected_horse", "use_ride_history", "reduced_personalization"],

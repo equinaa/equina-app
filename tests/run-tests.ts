@@ -13,6 +13,7 @@ import "./data-export.test";
 import "./image-metadata.test";
 import "./horse-selection.test";
 import "./training-streak.test";
+import "./time-off.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./home-hero.test");
 await import("./paywall.test");

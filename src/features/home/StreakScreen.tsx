@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { ChevronLeft, Info } from "lucide-react-native";
+import { ChevronLeft, Info, Moon } from "lucide-react-native";
 import { longDayLabel } from "../../domain/local-day";
 import type { StreakSummary, WeekDay } from "../../domain/training-streak";
 import { EquinaButton } from "../../ui/primitives/EquinaPrimitives";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { equinaTheme } from "../../ui/theme/theme";
 import { StreakFlame } from "./StreakFlame";
+import { weekStateWords } from "./TrainingWeek";
 
 const dayNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
-const stateWords = { ridden: "trained", missed: "planned, missed", planned: "planned", rest: "rest day" } as const;
+const stateWords = weekStateWords;
 
-/** "2 of 3": the planned days of this week trained so far; rides alone when the week has none planned. */
+/**
+ * "2 of 3": the planned days of this week trained so far, not counting days
+ * whose horses are all off; rides alone when the week has none planned.
+ */
 export const weekProgress = (week: readonly WeekDay[]) => {
-  const planned = week.filter((day) => day.planned);
+  const planned = week.filter((day) => day.due.length > 0);
   const ridden = week.filter((day) => day.state === "ridden");
   if (planned.length === 0) return { value: String(ridden.length), label: ridden.length === 1 ? "Ride this week" : "Rides this week" };
   const done = planned.filter((day) => day.state === "ridden").length;
@@ -129,6 +133,8 @@ export function StreakScreen({
                       <StreakFlame size={22} muted />
                     ) : day.state === "planned" ? (
                       <View style={styles.plannedRing} />
+                    ) : day.state === "off" ? (
+                      <Moon size={20} color={equinaTheme.text.tertiary} />
                     ) : (
                       <View style={styles.restDot} />
                     )}

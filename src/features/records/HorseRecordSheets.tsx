@@ -137,7 +137,9 @@ export function HorseEditorSheet({
     setHeight(horse?.heightCm ? String(horse.heightCm) : "");
     setPhoto(undefined);
     setLocalError("");
-  }, [horse, visible]);
+    // Keyed on the horse, not its object: a refreshed list hands over a new
+    // object for the same horse, and that must not wipe what is being typed.
+  }, [horse?.id, visible]);
 
   const pickPhoto = async () => {
     setLocalError("");

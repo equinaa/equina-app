@@ -1,24 +1,20 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { ChevronRight, Flame } from "lucide-react-native";
+import { ChevronRight, Flame, Moon } from "lucide-react-native";
 import type { StreakSummary, WeekDay } from "../../domain/training-streak";
 import { equinaTheme } from "../../ui/theme/theme";
-import { rideTrainingLabel } from "../ride/ride-plan";
+import { plannedRidesLabel } from "../ride/planned-rides";
 import { StreakFlame } from "./StreakFlame";
 
 const letters = ["M", "T", "W", "T", "F", "S", "S"] as const;
 const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
-const stateWords = { ridden: "trained", missed: "planned, missed", planned: "planned", rest: "rest day" } as const;
-
-/** What a planned day is, in the rider's words: "Dressage with Daimon". */
-export const plannedDayLabel = (
-  planned: { trainingType: string; horseId?: string } | null,
-  horseNames: Record<string, string>
-) => {
-  if (!planned) return null;
-  const training = rideTrainingLabel(planned.trainingType) ?? "Training";
-  const horse = planned.horseId ? horseNames[planned.horseId] : undefined;
-  return horse ? `${training} with ${horse}` : training;
-};
+export const weekStateWords = {
+  ridden: "trained",
+  missed: "planned, missed",
+  planned: "planned",
+  off: "horse off",
+  rest: "rest day"
+} as const;
+const stateWords = weekStateWords;
 
 /** Monday to Sunday: a flame on a day trained, an outline on one still planned, a dot on a rest day. */
 export function WeekRow({ week, size = "compact" }: { week: readonly WeekDay[]; size?: "compact" | "large" }) {
@@ -45,6 +41,8 @@ export function WeekRow({ week, size = "compact" }: { week: readonly WeekDay[]; 
           >
             {day.state === "rest" ? (
               <View style={styles.restDot} />
+            ) : day.state === "off" ? (
+              <Moon size={large ? 18 : 14} color={equinaTheme.text.tertiary} />
             ) : day.state === "ridden" ? (
               <StreakFlame size={large ? 20 : 15} />
             ) : (
@@ -99,7 +97,7 @@ export function TrainingWeekCard({
     );
   }
 
-  const today = plannedDayLabel(streak.todayPlanned, horseNames);
+  const today = streak.todayPlanned.length ? plannedRidesLabel(streak.todayPlanned, horseNames) : null;
   const todayLine = streak.todayRidden
     ? "Today's training is in the journal."
     : today

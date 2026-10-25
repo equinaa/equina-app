@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
-import type { EquinaBackend, TrainingPlan, TrainingPlanDay } from "../../backend";
+import type { EquinaBackend, HorseTimeOff, HorseTimeOffInput, TrainingPlan, TrainingPlanDay } from "../../backend";
 import { localToday } from "../../domain/local-day";
-import { planOn, trainingStreak, upcomingPlannedDays } from "../../domain/training-streak";
-import { rideTrainingLabel } from "./ride-plan";
+import { addDays, planOn, trainingStreak, upcomingPlannedDays } from "../../domain/training-streak";
+import { plannedRidesLabel } from "./planned-rides";
 import { cancelTrainingReminders, reminderWindowDays, syncTrainingReminders } from "./training-reminders";
 
 const messageFor = (error: unknown, fallback: string) => {
@@ -37,6 +37,8 @@ export function useTrainingPlan({
   horseNames: Record<string, string>;
 }) {
   const [versions, setVersions] = useState<TrainingPlan[]>([]);
+  // Every horse's time off: a planned ride on a horse that is off is not due.
+  const [timeOff, setTimeOff] = useState<HorseTimeOff[]>([]);
   const [completions, setCompletions] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -53,19 +55,22 @@ export function useTrainingPlan({
     const current = ++request.current;
     if (!backend || !enabled) {
       setVersions([]);
+      setTimeOff([]);
       setCompletions([]);
       setLoaded(false);
       setFailed(false);
       return;
     }
     try {
-      const [nextVersions, nextCompletions] = await Promise.all([
+      const [nextVersions, nextCompletions, nextTimeOff] = await Promise.all([
         backend.trainingPlans.list(),
-        backend.rides.completions()
+        backend.rides.completions(),
+        backend.horseTimeOff.list()
       ]);
       if (current !== request.current) return;
       setVersions(nextVersions);
       setCompletions(nextCompletions);
+      setTimeOff(nextTimeOff);
       setLoaded(true);
       setFailed(false);
       setError("");
@@ -103,13 +108,17 @@ export function useTrainingPlan({
   }, [backend, enabled, journalTotal]);
 
   const today = localToday();
-  const streak = useMemo(() => trainingStreak(versions, completions, today), [versions, completions, today]);
+  const streak = useMemo(
+    () => trainingStreak(versions, completions, today, timeOff),
+    [versions, completions, today, timeOff]
+  );
   const currentPlan = planOn(versions, today) as TrainingPlan | null;
 
   // The morning reminders follow the plan and the journal, from a plan that
   // was actually read. Turned off in the plan, they are cancelled.
   const reminderKey = JSON.stringify([
     currentPlan?.reminders ? currentPlan.days : null,
+    timeOff.map((period) => [period.horseId, period.startsOn, period.endsOn]),
     completions[0] ?? "",
     today,
     horseNames
@@ -122,16 +131,12 @@ export function useTrainingPlan({
       void cancelTrainingReminders();
       return;
     }
-    const reminders = upcomingPlannedDays(versions, completions, today, reminderWindowDays).map(({ day, planned }) => {
-      const training = rideTrainingLabel(planned.trainingType) ?? "Training";
-      const horse = planned.horseId ? horseNames[planned.horseId] : undefined;
-      return {
-        day,
-        planned,
-        title: "Training day",
-        body: horse ? `${training} with ${horse} is on your plan today.` : `${training} is on your plan today.`
-      };
-    });
+    const reminders = upcomingPlannedDays(versions, completions, today, reminderWindowDays, timeOff).map(({ day, planned }) => ({
+      day,
+      planned,
+      title: "Training day",
+      body: `${plannedRidesLabel(planned, horseNames)} ${planned.length === 1 ? "is" : "are"} on your plan today.`
+    }));
     void syncTrainingReminders(reminders, ask);
   }, [enabled, loaded, reminderKey, saveTick]);
 
@@ -168,8 +173,45 @@ export function useTrainingPlan({
     }
   }, [backend, enabled, loaded, refresh]);
 
+  /** Puts a horse on time off. Only someone who can edit the horse can. */
+  const addTimeOff = useCallback(async (input: HorseTimeOffInput) => {
+    if (!backend || !enabled) throw new Error("Ride logging is not enabled for this account.");
+    try {
+      const created = await backend.horseTimeOff.create(input);
+      setTimeOff((current) => [created, ...current]);
+      return created;
+    } catch (saveError) {
+      throw new Error(messageFor(saveError, "The time off could not be saved."));
+    }
+  }, [backend, enabled]);
+
+  /** The horse is back in work: the period ends yesterday, and the days it covered stay covered. */
+  const endTimeOff = useCallback(async (id: string) => {
+    if (!backend || !enabled) throw new Error("Ride logging is not enabled for this account.");
+    try {
+      const ended = await backend.horseTimeOff.end(id, addDays(localToday(), -1));
+      setTimeOff((current) => current.map((period) => (period.id === id ? ended : period)));
+    } catch (endError) {
+      throw new Error(messageFor(endError, "The time off could not be ended."));
+    }
+  }, [backend, enabled]);
+
+  const removeTimeOff = useCallback(async (id: string) => {
+    if (!backend || !enabled) throw new Error("Ride logging is not enabled for this account.");
+    try {
+      await backend.horseTimeOff.remove(id);
+      setTimeOff((current) => current.filter((period) => period.id !== id));
+    } catch (removeError) {
+      throw new Error(messageFor(removeError, "The time off could not be removed."));
+    }
+  }, [backend, enabled]);
+
   return {
     versions,
+    timeOff,
+    addTimeOff,
+    endTimeOff,
+    removeTimeOff,
     currentPlan,
     streak,
     loaded,
