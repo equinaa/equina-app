@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Platform, StyleSheet, Switch, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { ChevronDown, ChevronUp, Plus, X } from "lucide-react-native";
 import type { TrainingPlanDay } from "../../backend";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
@@ -99,6 +99,10 @@ export function TrainingPlanSheet({
   const change = (target: TrainingPlanDay, patch: Partial<TrainingPlanDay>) =>
     setDays((current) => current.map((entry) => (same(entry, target) ? { ...entry, ...patch } : entry)));
   const remove = (target: TrainingPlanDay) => setDays((current) => current.filter((entry) => !same(entry, target)));
+  const remindersDetail = Platform.OS === "web"
+    ? `At ${String(reminderHour).padStart(2, "0")}:00 on training days, on the Equina app on your phone.`
+    : `At ${String(reminderHour).padStart(2, "0")}:00 on training days you have not logged yet.`;
+
   const addHorse = (weekday: number) => {
     const used = new Set(entriesOf(days, weekday).map((entry) => entry.horseId));
     const horseId = horses.find((horse) => !used.has(horse.id))?.id;
@@ -159,15 +163,27 @@ export function TrainingPlanSheet({
                       ? <ChevronUp size={18} color={equinaTheme.text.secondary} />
                       : <ChevronDown size={18} color={equinaTheme.text.secondary} />
                   ) : null}
-                  <Switch
+                  {/* Only drawn, as in SettingsRow. Touched directly, iOS's switch plays
+                      its press animation first and catches up after the day has opened;
+                      here the tap flips the day and the switch slides with it. */}
+                  <Pressable
                     testID={`training-plan-toggle-${weekday}`}
+                    accessibilityRole="switch"
                     accessibilityLabel={scoped && scopeName ? `Ride ${scopeName} on ${name}` : `Ride on ${name}`}
-                    value={on}
-                    onValueChange={() => toggle(weekday)}
-                    trackColor={{ false: equinaTheme.surfaces.elevated, true: equinaTheme.colorRole.positive }}
-                    thumbColor={equinaTheme.colors.ivory}
-                    ios_backgroundColor={equinaTheme.surfaces.elevated}
-                  />
+                    accessibilityState={{ checked: on }}
+                    hitSlop={8}
+                    onPress={() => toggle(weekday)}
+                  >
+                    <View pointerEvents="none" accessible={false}>
+                      <Switch
+                        accessible={false}
+                        value={on}
+                        trackColor={{ false: equinaTheme.surfaces.elevated, true: equinaTheme.colorRole.positive }}
+                        thumbColor={equinaTheme.colors.ivory}
+                        ios_backgroundColor={equinaTheme.surfaces.elevated}
+                      />
+                    </View>
+                  </Pressable>
                 </View>
 
                 {expanded ? (
@@ -264,28 +280,32 @@ export function TrainingPlanSheet({
           })}
         </View>
 
-        <View style={styles.reminders}>
+        <Pressable
+          testID="training-plan-reminders"
+          accessibilityRole="switch"
+          accessibilityLabel="Morning reminders"
+          accessibilityHint={remindersDetail}
+          accessibilityState={{ checked: reminders }}
+          onPress={() => {
+            selectionHaptic();
+            setReminders((current) => !current);
+          }}
+          style={styles.reminders}
+        >
           <View style={styles.remindersCopy}>
             <Text style={styles.remindersTitle}>Morning reminders</Text>
-            <Text style={styles.remindersDetail}>
-              {Platform.OS === "web"
-                ? `At ${String(reminderHour).padStart(2, "0")}:00 on training days, on the Equina app on your phone.`
-                : `At ${String(reminderHour).padStart(2, "0")}:00 on training days you have not logged yet.`}
-            </Text>
+            <Text style={styles.remindersDetail}>{remindersDetail}</Text>
           </View>
-          <Switch
-            testID="training-plan-reminders"
-            accessibilityLabel="Morning reminders"
-            value={reminders}
-            onValueChange={(value) => {
-              selectionHaptic();
-              setReminders(value);
-            }}
-            trackColor={{ false: equinaTheme.surfaces.elevated, true: equinaTheme.colorRole.positive }}
-            thumbColor={equinaTheme.colors.ivory}
-            ios_backgroundColor={equinaTheme.surfaces.elevated}
-          />
-        </View>
+          <View pointerEvents="none" accessible={false}>
+            <Switch
+              accessible={false}
+              value={reminders}
+              trackColor={{ false: equinaTheme.surfaces.elevated, true: equinaTheme.colorRole.positive }}
+              thumbColor={equinaTheme.colors.ivory}
+              ios_backgroundColor={equinaTheme.surfaces.elevated}
+            />
+          </View>
+        </Pressable>
 
         <Text style={styles.note}>Changes count from today. The weeks you have already trained keep the plan they had.</Text>
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
