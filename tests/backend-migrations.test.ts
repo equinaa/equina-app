@@ -814,6 +814,92 @@ const turnedLogged = await db.query("update public.ride_entries set source = 'ma
 assert.ok(turnedLogged instanceof Error, "A timed ride must not be relabelled as logged afterwards.");
 await db.query("delete from public.ride_entries where rider_id = $1 and focus in ('Hack', 'Fast clock')", [riderA]);
 
+// Training plan (202610250002): the rider's week, kept as versions so a
+// change never rewrites a week already ridden.
+const mondayDressage = JSON.stringify([
+  { weekday: 1, training_type: "dressage", horse_id: horseId },
+  { weekday: 3, training_type: "jumping" },
+  { weekday: 6, training_type: "hack", horse_id: null }
+]);
+const todaysPlan = await db.query<{ id: string; reminders: boolean }>(
+  "insert into public.training_plans(user_id, effective_from, days) values ($1, current_date, $2::jsonb) returning id, reminders",
+  [riderA, mondayDressage]
+);
+assert.equal(todaysPlan.rows[0]?.reminders, true, "Reminders start on.");
+const changedToday = await db.query(
+  "update public.training_plans set days = '[{\"weekday\": 2, \"training_type\": \"flatwork\"}]'::jsonb, reminders = false where id = $1 returning id",
+  [todaysPlan.rows[0]?.id]
+);
+assert.equal(changedToday.rows.length, 1, "Today's plan can still change.");
+await assert.rejects(
+  db.query("insert into public.training_plans(user_id, effective_from, days) values ($1, current_date, '[]'::jsonb)", [riderA]),
+  /training_plans_one_per_day/,
+  "One version per day: saving again changes it."
+);
+await assert.rejects(
+  db.query("insert into public.training_plans(user_id, effective_from, days) values ($1, current_date - 5, '[]'::jsonb)", [riderA]),
+  /starts today/,
+  "A plan cannot be written into the past."
+);
+await assert.rejects(
+  db.query("insert into public.training_plans(user_id, effective_from, days) values ($1, current_date + 1, '[]'::jsonb)", [riderB]),
+  /row-level security/,
+  "A rider cannot write someone else's plan."
+);
+await assert.rejects(
+  db.query(
+    "insert into public.training_plans(user_id, effective_from, days) values ($1, current_date + 1, '[{\"weekday\": 1, \"training_type\": \"dressage\"}, {\"weekday\": 1, \"training_type\": \"hack\"}]'::jsonb)",
+    [riderA]
+  ),
+  /training_plans_days_valid/,
+  "A weekday appears once."
+);
+await assert.rejects(
+  db.query("insert into public.training_plans(user_id, effective_from, days) values ($1, current_date + 1, '[{\"weekday\": 8, \"training_type\": \"dressage\"}]'::jsonb)", [riderA]),
+  /training_plans_days_valid/,
+  "Weekdays are 1 to 7."
+);
+await assert.rejects(
+  db.query("insert into public.training_plans(user_id, effective_from, days) values ($1, current_date + 1, '[{\"weekday\": 2, \"training_type\": \"Dressage!\"}]'::jsonb)", [riderA]),
+  /training_plans_days_valid/,
+  "A training type is the app's id."
+);
+await assert.rejects(
+  db.query("insert into public.training_plans(user_id, effective_from, days) values ($1, current_date + 1, '[{\"weekday\": 2, \"training_type\": \"hack\", \"horse_id\": \"daimon\"}]'::jsonb)", [riderA]),
+  /training_plans_days_valid/,
+  "A horse is named by its id."
+);
+await assert.rejects(
+  db.query("update public.training_plans set effective_from = current_date - 3 where id = $1", [todaysPlan.rows[0]?.id]),
+  /permission denied/,
+  "The day a version started is not a column the rider can change."
+);
+await db.exec(`
+  reset role;
+  alter table public.training_plans disable trigger training_plans_dates_guard;
+  insert into public.training_plans(user_id, effective_from, days)
+  values ('${riderA}', current_date - 14, '[{"weekday": 1, "training_type": "dressage"}]'::jsonb);
+  alter table public.training_plans enable trigger training_plans_dates_guard;
+  set role authenticated;
+  select set_config('request.jwt.claim.sub', '${riderA}', false);
+`);
+await assert.rejects(
+  db.query("update public.training_plans set days = '[]'::jsonb where user_id = $1 and effective_from = current_date - 14", [riderA]),
+  /past week/,
+  "A past week's plan stays as it was."
+);
+const ownPlans = await db.query<{ count: number }>("select count(*)::int as count from public.training_plans where user_id = $1", [riderA]);
+assert.equal(ownPlans.rows[0]?.count, 2, "The rider reads every version of their own plan.");
+await assert.rejects(
+  db.query("delete from public.training_plans where user_id = $1", [riderA]),
+  /permission denied/,
+  "Versions are history: a rider cannot delete them."
+);
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderC}', false);`);
+const strangerPlans = await db.query("select id from public.training_plans where user_id = $1", [riderA]);
+assert.equal(strangerPlans.rows.length, 0, "Another rider never reads a training plan.");
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+
 
 // --- Ralf credit ledger -----------------------------------------------------
 
@@ -1435,6 +1521,7 @@ const clientWrites: Record<string, ClientWrites> = {
     delete: true
   },
   saved_listings: { insert: ["user_id", "listing_id"], update: ["user_id", "listing_id"], delete: true },
+  training_plans: { insert: ["user_id", "effective_from", "days", "reminders"], update: ["days", "reminders"] },
   user_blocks: { insert: ["blocker_id", "blocked_id"], update: ["blocker_id", "blocked_id"], delete: true },
   user_preferences: {
     insert: ["user_id", "academy_discipline", "academy_level", "academy_focus", "use_rider_profile", "use_selected_horse", "use_ride_history", "reduced_personalization"],
@@ -2178,7 +2265,7 @@ await db.query(
   "insert into public.feature_flag_overrides(user_id, key, enabled, expires_at) values ($1, 'ride_logging', true, now() + interval '30 days')",
   [riderA]
 );
-const beforeErasure = await db.query<{ rides: number; progress: number; horses: number; conversations: number; packs: number; picks: number; plans: number }>(`
+const beforeErasure = await db.query<{ rides: number; progress: number; horses: number; conversations: number; packs: number; picks: number; plans: number; training_plans: number }>(`
   select
     (select count(*)::int from public.ride_entries where rider_id = $1) as rides,
     (select count(*)::int from public.academy_progress where user_id = $1) as progress,
@@ -2186,7 +2273,8 @@ const beforeErasure = await db.query<{ rides: number; progress: number; horses: 
     (select count(*)::int from public.coach_conversations where user_id = $1) as conversations,
     (select count(*)::int from public.onboarding_starter_packs where user_id = $1) as packs,
     (select count(*)::int from public.academy_lesson_picks where user_id = $1) as picks,
-    (select count(*)::int from public.plan_subscriptions where user_id = $1) as plans
+    (select count(*)::int from public.plan_subscriptions where user_id = $1) as plans,
+    (select count(*)::int from public.training_plans where user_id = $1) as training_plans
 `, [riderA]);
 for (const [name, count] of Object.entries(beforeErasure.rows[0] ?? {})) {
   assert.ok(count > 0, `The erasure test needs rider A to have ${name} before erasing.`);

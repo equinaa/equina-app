@@ -45,3 +45,10 @@ export const shortDayLabel = (day: string): string | null => {
   if (!match) return null;
   return `${Number(match[3])} ${monthNames[Number(match[2]) - 1]}`;
 };
+
+/** "Oct 5, 2026": a local day, the way a start date reads. Null if it is not one. */
+export const longDayLabel = (day: string): string | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) return null;
+  return `${monthNames[Number(match[2]) - 1]} ${Number(match[3])}, ${match[1]}`;
+};

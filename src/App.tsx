@@ -163,6 +163,11 @@ import {
 import { RideSetupSheet, type LoggedActivity, type RideSetupHorse } from "./features/ride/RideSetupSheet";
 import { RideJournalSheet } from "./features/ride/RideJournalSheet";
 import { HorseSwitcherSheet } from "./features/home/HorseSwitcherSheet";
+import { TrainingWeekCard } from "./features/home/TrainingWeek";
+import { StreakScreen } from "./features/home/StreakScreen";
+import { TrainingPlanSheet } from "./features/home/TrainingPlanSheet";
+import { useTrainingPlan } from "./features/ride/useTrainingPlan";
+import type { StreakSummary } from "./domain/training-streak";
 import { switchableHorses } from "./features/records/horse-selection";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
@@ -896,6 +901,8 @@ function EquinaApp() {
   const [rideJournalOpen, setRideJournalOpen] = useState(false);
   const [deletingRideId, setDeletingRideId] = useState("");
   const [horseSwitcherOpen, setHorseSwitcherOpen] = useState(false);
+  const [streakOpen, setStreakOpen] = useState(false);
+  const [trainingPlanOpen, setTrainingPlanOpen] = useState(false);
   const [horseCreatorOpen, setHorseCreatorOpen] = useState(false);
   const [switchingHorseId, setSwitchingHorseId] = useState("");
   const [horseSwitchError, setHorseSwitchError] = useState("");
@@ -1010,6 +1017,8 @@ function EquinaApp() {
     setRideJournalOpen(false);
     setHorseSwitcherOpen(false);
     setHorseCreatorOpen(false);
+    setStreakOpen(false);
+    setTrainingPlanOpen(false);
     setLastRideRecapVisible(false);
     void cancelStaleRideAlerts();
     setAccountReturnTab("home");
@@ -1081,24 +1090,6 @@ function EquinaApp() {
   const rideHorsePhoto = rideHorseRecord
     ? rideHorseRecord.photoUrl || (rideHorseRecord.id === horseRecords.selectedHorseId ? onboardingHorsePhoto : "")
     : ridePlan?.horseId ? "" : onboardingHorsePhoto;
-  const rememberedTraining =
-    rideTrainingTypeById(rideSetupMemory.memory?.trainingTypeId) ?? defaultTrainingType(onboardingDiscipline);
-  // Editing is only offered before the clock starts, so an open plan is the one to edit.
-  const rideSetupDraft = rideActive && ridePlan
-    ? { horseId: ridePlan.horseId, trainingType: ridePlan.trainingType, phases: ridePlan.phases }
-    : {
-        // Home's horse, the last one picked; the remembered one only before
-        // the Stable has loaded.
-        horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
-        trainingType: rememberedTraining,
-        phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
-      };
-  // Add activity opens on Home's horse: the last one the rider picked.
-  const activityDraft = {
-    horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
-    trainingType: rememberedTraining,
-    phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
-  };
   const ridePersistence =
     accountMode === "connected" &&
     equinaSession.phase === "authenticated" &&
@@ -1107,6 +1098,38 @@ function EquinaApp() {
     backend: equinaSession.backend,
     enabled: ridePersistence
   });
+  const horseNames = Object.fromEntries(horseRecords.horses.map((record) => [record.id, record.name]));
+  // The rider's training week and the streak counted against it.
+  const trainingPlan = useTrainingPlan({
+    backend: equinaSession.backend,
+    enabled: ridePersistence,
+    journalTotal: rideJournal.total,
+    horseNames
+  });
+  const rememberedTraining =
+    rideTrainingTypeById(rideSetupMemory.memory?.trainingTypeId) ?? defaultTrainingType(onboardingDiscipline);
+  // Today's day in the training plan, when it has one. Its horse only while
+  // the rider still has it.
+  const todayPlanned = trainingPlan.streak.todayPlanned;
+  const todayTraining = todayPlanned ? rideTrainingTypeById(todayPlanned.trainingType) : undefined;
+  const todayHorseId = todayPlanned?.horseId && horseNames[todayPlanned.horseId] ? todayPlanned.horseId : undefined;
+  const nextTraining = todayTraining ?? rememberedTraining;
+  // Editing is only offered before the clock starts, so an open plan is the one to edit.
+  const rideSetupDraft = rideActive && ridePlan
+    ? { horseId: ridePlan.horseId, trainingType: ridePlan.trainingType, phases: ridePlan.phases }
+    : {
+        // The plan's horse for today, else Home's horse -- the last one
+        // picked -- and the remembered one only before the Stable has loaded.
+        horseId: todayHorseId ?? (horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId),
+        trainingType: nextTraining,
+        phases: phasesFor(rideSetupMemory.memory, nextTraining)
+      };
+  // Add activity opens on Home's horse: the last one the rider picked.
+  const activityDraft = {
+    horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
+    trainingType: rememberedTraining,
+    phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
+  };
   // While ride_logging is off the recap still works, it just does not outlive
   // the session. That difference is stated in the copy rather than hidden.
   // The ride just finished is shown from local state until the journal holds
@@ -2647,6 +2670,15 @@ function EquinaApp() {
                   setHorseSwitchError("");
                   setHorseSwitcherOpen(true);
                 } : undefined}
+                trainingStreak={ridePersistence && trainingPlan.loaded ? trainingPlan.streak : undefined}
+                trainingPlanFailed={ridePersistence && !trainingPlan.loaded && trainingPlan.failed}
+                onRetryTrainingPlan={() => void trainingPlan.refresh()}
+                horseNames={horseNames}
+                onOpenStreak={() => setStreakOpen(true)}
+                onPlanWeek={() => {
+                  trainingPlan.clearError();
+                  setTrainingPlanOpen(true);
+                }}
                 onOpenJournal={ridePersistence ? () => {
                   rideJournal.clearError();
                   setRideJournalOpen(true);
@@ -2903,11 +2935,38 @@ function EquinaApp() {
           }}
         />
 
+        <StreakScreen
+          visible={streakOpen}
+          streak={trainingPlan.streak}
+          onEditPlan={() => {
+            setStreakOpen(false);
+            trainingPlan.clearError();
+            setTrainingPlanOpen(true);
+          }}
+          onClose={() => setStreakOpen(false)}
+        />
+
+        <TrainingPlanSheet
+          visible={trainingPlanOpen}
+          days={trainingPlan.currentPlan?.days ?? []}
+          reminders={trainingPlan.currentPlan?.reminders ?? true}
+          horses={ownHorses.map((record) => ({ id: record.id, name: record.name }))}
+          defaultHorseId={horseRecords.selectedHorseId || undefined}
+          defaultTrainingType={rememberedTraining.id}
+          saving={trainingPlan.saving}
+          error={trainingPlanOpen ? trainingPlan.error : undefined}
+          onSave={async (days, reminders) => {
+            await trainingPlan.save(days, reminders);
+            setTrainingPlanOpen(false);
+          }}
+          onDismiss={() => setTrainingPlanOpen(false)}
+        />
+
         <RideJournalSheet
           visible={rideJournalOpen}
           entries={rideJournal.entries}
           total={rideJournal.total}
-          horseNames={Object.fromEntries(horseRecords.horses.map((record) => [record.id, record.name]))}
+          horseNames={horseNames}
           deletingId={deletingRideId || undefined}
           error={rideJournalOpen ? rideJournal.error : undefined}
           onDelete={deleteJournalRide}
@@ -3380,6 +3439,12 @@ function HomeScreen({
   onAddActivity,
   onOpenJournal,
   onOpenHorses,
+  trainingStreak,
+  trainingPlanFailed,
+  onRetryTrainingPlan,
+  horseNames,
+  onOpenStreak,
+  onPlanWeek,
   rideMeta: plannedRideMeta,
   onLogCare,
   onOpenRalf,
@@ -3404,6 +3469,14 @@ function HomeScreen({
   onOpenJournal?: () => void;
   /** Opens the rider's horses to pick another or add one. */
   onOpenHorses?: () => void;
+  /** Absent where rides are not saved: there is nothing to count. */
+  trainingStreak?: StreakSummary;
+  /** The plan could not be read: offer to try again, never to plan a week from scratch. */
+  trainingPlanFailed: boolean;
+  onRetryTrainingPlan: () => void;
+  horseNames: Record<string, string>;
+  onOpenStreak: () => void;
+  onPlanWeek: () => void;
   onToggleRide: () => void;
   /** The ride the setup sheet will open with: "52 min · Dressage". */
   rideMeta: string;
@@ -3778,6 +3851,29 @@ function HomeScreen({
             <View style={styles.homeBriefingCopy}>
               <Text style={styles.homeAddActivityTitle}>Add activity</Text>
               <Text numberOfLines={1} style={styles.homeAddActivityMeta}>Log a training you did without the clock</Text>
+            </View>
+            <ChevronRight size={17} color={nightTheme.faint} />
+          </Pressable>
+        ) : null}
+
+        {trainingStreak ? (
+          <TrainingWeekCard
+            streak={trainingStreak}
+            horseNames={horseNames}
+            onOpen={onOpenStreak}
+            onPlan={onPlanWeek}
+          />
+        ) : trainingPlanFailed ? (
+          <Pressable
+            testID="training-week-retry"
+            accessibilityRole="button"
+            accessibilityLabel="Your streak could not load. Try again"
+            style={({ pressed }) => [styles.homeAddActivity, pressed && styles.homeAgendaRowPressed]}
+            onPress={onRetryTrainingPlan}
+          >
+            <View style={styles.homeBriefingCopy}>
+              <Text style={styles.homeAddActivityTitle}>Your streak could not load</Text>
+              <Text numberOfLines={1} style={styles.homeAddActivityMeta}>Tap to try again</Text>
             </View>
             <ChevronRight size={17} color={nightTheme.faint} />
           </Pressable>
