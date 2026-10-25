@@ -129,7 +129,11 @@ export function useRideJournal({
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      setOffline(state.isConnected === false || state.isInternetReachable === false);
+      // Only a phone with no network at all is refused up front. NetInfo's
+      // "internet reachable" pings Google, which a yard's Wi-Fi or a VPN can
+      // block while Equina answers fine: it refused every save in that case.
+      // A real outage still fails the request, with the same message.
+      setOffline(state.isConnected === false);
     });
     return unsubscribe;
   }, []);

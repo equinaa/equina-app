@@ -151,7 +151,8 @@ export function useHorseRecords({
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      setOffline(state.isConnected === false || state.isInternetReachable === false);
+      // Only no network at all; see useRideJournal for why reachability is not trusted.
+      setOffline(state.isConnected === false);
     });
     return unsubscribe;
   }, []);

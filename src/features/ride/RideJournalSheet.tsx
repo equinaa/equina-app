@@ -65,7 +65,9 @@ export function RideJournalSheet({
           const training = rideTrainingLabel(entry.trainingType)
             ?? `${entry.discipline.charAt(0).toUpperCase()}${entry.discipline.slice(1)}`;
           const horse = entry.horseId ? horseNames[entry.horseId] : undefined;
-          const meta = [localMomentLabel(entry.completedAt), durationOf(entry), horse].filter(Boolean).join(" · ");
+          // When it started, as the rider enters it in Add activity and as a
+          // yard thinks of a ride: "the 12:45 hack", not when it ended.
+          const meta = [localMomentLabel(entry.startedAt), durationOf(entry), horse].filter(Boolean).join(" · ");
           const asking = confirming === entry.id;
           const deleting = deletingId === entry.id;
           return (
