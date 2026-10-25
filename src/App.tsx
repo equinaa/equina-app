@@ -142,6 +142,7 @@ import type { ClubSpaceImageKey } from "./features/club/club-groups";
 import { useClub } from "./features/club/useClub";
 import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
+import { localDayOf, localToday } from "./domain/local-day";
 import type { RideEntry } from "./backend/contracts";
 import { buildCareSchedule, completionFor, type CareItem } from "./domain/care-schedule";
 import {
@@ -161,7 +162,7 @@ import {
 import { RideSetupSheet, type RideSetupHorse } from "./features/ride/RideSetupSheet";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
-import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending } from "./features/home/home-hero";
+import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending, snapshotSetsHomeHorse } from "./features/home/home-hero";
 import {
   defaultTrainingType,
   phasesFor,
@@ -203,7 +204,6 @@ type RiderContext = {
   level: RiderLevel;
   discipline: CoachDiscipline;
   goal: RiderGoal;
-  frequency: string;
 };
 type MoodOption = RideMood;
 type ChatMessage = {
@@ -411,7 +411,6 @@ const coachDisciplines: CoachDiscipline[] = ["Dressage", "Jumping", "Eventing", 
 const coachGoalsByDiscipline: Record<CoachDiscipline, readonly string[]> = trainingFocusByDiscipline;
 const riderLevels: readonly RiderLevel[] = ["Beginner", "Intermediate", "Advanced", "Pro"];
 const onboardingGoals: readonly RiderGoal[] = ["Daily training", "Competition", "Horse care", "Learn faster"];
-const ridingFrequencies = ["2 rides/week", "3-4 rides/week", "5+ rides/week"] as const;
 const horsePhotoOptionsByDiscipline = {
   Dressage: [
     { id: "portrait", label: "Wide", image: disciplineVisuals.Dressage.home, value: "sample:dressage:wide" },
@@ -868,7 +867,6 @@ function EquinaApp() {
   const [onboardingHorseAge, setOnboardingHorseAge] = useState("");
   const [onboardingHorseHeight, setOnboardingHorseHeight] = useState("");
   const [onboardingRideFeel, setOnboardingRideFeel] = useState<(typeof horseRideFeels)[number]>("Extra energy");
-  const [onboardingFrequency, setOnboardingFrequency] = useState<(typeof ridingFrequencies)[number]>("3-4 rides/week");
   const [onboardingCarePriority, setOnboardingCarePriority] = useState<(typeof carePriorities)[number]>("Training plan");
   const [onboardingAppPriority, setOnboardingAppPriority] = useState<(typeof appPriorities)[number]>("Ride plan");
   const [tab, setTab] = useState<Tab>("home");
@@ -1096,7 +1094,7 @@ function EquinaApp() {
     : journalRide ?? localLastRide;
   // The app states this number back to the rider as fact ("N rides are now in
   // your journal"), so it has to come from the journal, never from a seed.
-  const sessionCount = ridePersistence ? rideJournal.entries.length : localSessionCount;
+  const sessionCount = ridePersistence ? rideJournal.total : localSessionCount;
   // The rider's plan (202610060001): which paid lessons are open and how much
   // of the Club. Until plans are enforced it says everything is open.
   const planController = usePlan({
@@ -1248,8 +1246,7 @@ function EquinaApp() {
     name: riderDisplayName,
     level: onboardingLevel,
     discipline: onboardingDiscipline,
-    goal: onboardingGoal,
-    frequency: onboardingFrequency
+    goal: onboardingGoal
   };
   // A connected account reads the published catalogue; demo mode keeps the
   // preview. An empty catalogue is real, and the Academy opens on Ralf.
@@ -1317,19 +1314,21 @@ function EquinaApp() {
     setOnboardingEmail(snapshot.email);
     setOnboardingDiscipline(toCoachDiscipline(snapshot.profile.discipline));
     setOnboardingLevel(toRiderLevel(snapshot.profile.skillLevel));
-    if (snapshot.primaryHorse) {
+    // The photo comes signed with the account, so Home opens on the rider's
+    // own horse. Once the Stable has its horses, the selected horse is set
+    // below; a later account refresh must not put the primary back over a
+    // different horse the rider picked, nor clear a horse the list still has.
+    const snapshotDecides = snapshotSetsHomeHorse({
+      horsesLoaded: horseRecords.horsesLoaded,
+      selectedHorseId: horseRecords.selectedHorseId,
+      primaryHorseId: snapshot.primaryHorse?.id
+    });
+    if (snapshot.primaryHorse && snapshotDecides) {
       setOnboardingHasHorse(true);
       setOnboardingHorseName(snapshot.primaryHorse.name);
       setOnboardingHorseBreed(snapshot.primaryHorse.breed ?? "");
-      // The photo comes signed with the account, so Home opens on the rider's
-      // own horse. Once the Stable has its horses, the selected horse's photo
-      // is set below; a later account refresh must not put the primary's back
-      // over a different horse the rider picked.
-      const primaryPhoto = snapshot.primaryHorse.photoUrl;
-      if (primaryPhoto && (!horseRecords.horsesLoaded || horseRecords.selectedHorseId === snapshot.primaryHorse.id)) {
-        setOnboardingHorsePhoto(primaryPhoto);
-      }
-    } else {
+      if (snapshot.primaryHorse.photoUrl) setOnboardingHorsePhoto(snapshot.primaryHorse.photoUrl);
+    } else if (!snapshot.primaryHorse && snapshotDecides) {
       setOnboardingHasHorse(false);
       setOnboardingHorseName("");
       setOnboardingHorseBreed("");
@@ -1910,12 +1909,6 @@ function EquinaApp() {
   };
 
   const applyOnboardingCompletion = () => {
-    const loadFromFrequency =
-      onboardingFrequency === "2 rides/week"
-        ? "Light week"
-        : onboardingFrequency === "5+ rides/week"
-          ? "Heavy week"
-          : defaultCoachLoad;
     const starterFocus = coachGoalsByDiscipline[onboardingDiscipline][0] ?? defaultCoachGoal;
     const starterLesson = recommendedLessonFor(academyLessons, riderContext, starterFocus);
     setAccountCreated(true);
@@ -1925,7 +1918,7 @@ function EquinaApp() {
     setCareLogged(false);
     setCoachDiscipline(onboardingDiscipline);
     setCoachGoal(starterFocus);
-    setCoachLoad(loadFromFrequency);
+    setCoachLoad(defaultCoachLoad);
     setCoachOnboarded(false);
     setAcademyProgress(0);
     setAcademyMode("home");
@@ -2313,7 +2306,6 @@ function EquinaApp() {
     setOnboardingHorseAge("9");
     setOnboardingHorseHeight("166");
     setOnboardingRideFeel("Extra energy");
-    setOnboardingFrequency("3-4 rides/week");
     setOnboardingCarePriority("Training plan");
     setOnboardingAppPriority("Ride plan");
     setCoachDiscipline("Jumping");
@@ -2570,7 +2562,6 @@ function EquinaApp() {
                 showRecap={lastRideRecapVisible}
                 mood={dailyMood}
                 discipline={onboardingDiscipline}
-                frequency={onboardingFrequency}
                 carePriority={onboardingCarePriority}
                 horsePhoto={onboardingHorsePhoto}
                 heroPhotoPending={heroPhotoPending}
@@ -3240,7 +3231,6 @@ function HomeScreen({
   showRecap,
   mood,
   discipline,
-  frequency,
   carePriority,
   horsePhoto,
   heroPhotoPending,
@@ -3260,7 +3250,6 @@ function HomeScreen({
   showRecap: boolean;
   mood: MoodOption;
   discipline: CoachDiscipline;
-  frequency: (typeof ridingFrequencies)[number];
   carePriority: (typeof carePriorities)[number];
   horsePhoto: string;
   /** The rider's own photo is on its way: show no stock picture meanwhile. */
@@ -3378,7 +3367,9 @@ function HomeScreen({
       plan: "Easy outside miles with a calm rhythm."
     }
   }[discipline];
-  const loadNote = frequency === "5+ rides/week" ? "Keep today's load light." : frequency === "2 rides/week" ? "Make this one count, then recover." : "Keep today's plan simple.";
+  // The riding frequency this used to vary by was never asked: every rider
+  // read "3-4 rides/week". The planned week replaces it.
+  const loadNote = "Keep today's plan simple.";
   const careLine = !horse.hasHorse
     ? horse.careLogged
       ? "Your ride note is saved. Nothing else is needed now."
@@ -3426,10 +3417,9 @@ function HomeScreen({
   // Derived on every render from the entries themselves, so a deleted ride
   // leaves the summary the moment it is deleted and there is no total to drift.
   const [summaryPeriod, setSummaryPeriod] = useState<RidePeriod>("week");
-  const rideSummary = summarise(rideEntries, summaryPeriod, new Date().toISOString().slice(0, 10));
-  const lastRideDay = rideEntries.length
-    ? [...rideEntries].sort((left, right) => right.completedAt.localeCompare(left.completedAt))[0]?.completedAt.slice(0, 10)
-    : undefined;
+  const rideSummary = summarise(rideEntries, summaryPeriod, localToday());
+  const newestEntry = [...rideEntries].sort((left, right) => right.completedAt.localeCompare(left.completedAt))[0];
+  const lastRideDay = newestEntry ? localDayOf(newestEntry.completedAt) ?? undefined : undefined;
   const usesPresetHorsePhoto = horsePhotoOptionsByDiscipline[discipline].some(
     (option) => option.value === horsePhoto
   );
@@ -3516,7 +3506,7 @@ function HomeScreen({
         <View style={styles.homeGreetingCopy}>
           <Text numberOfLines={2} style={styles.homeGreeting}>{greeting}, {riderFirstName}</Text>
           <Text style={styles.homeGreetingMeta}>
-            {horse.hasHorse ? horse.name : discipline} · {frequency.toLowerCase()}
+            {horse.hasHorse ? horse.name : discipline}
           </Text>
         </View>
         <View style={styles.headerActions}>
@@ -4845,7 +4835,7 @@ function StableScreen({
 
   // Derived from the due dates on every render, so a vaccination that lapsed
   // in March reports itself as lapsed. The stored status column never moves.
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localToday();
   const careSchedule = buildCareSchedule(records, todayIso);
   const horseNames = Object.fromEntries(horses.map((horse) => [horse.id, horse.name]));
 
@@ -6736,7 +6726,6 @@ function ProfileScreen({
   discipline,
   level,
   goal,
-  frequency,
   horseBreed,
   horseSex,
   horseAge,
@@ -6756,7 +6745,6 @@ function ProfileScreen({
   discipline: CoachDiscipline;
   level: (typeof riderLevels)[number];
   goal: (typeof onboardingGoals)[number];
-  frequency: (typeof ridingFrequencies)[number];
   horseBreed: string;
   horseSex: (typeof horseSexes)[number];
   horseAge: string;
@@ -6802,7 +6790,7 @@ function ProfileScreen({
             <Text numberOfLines={1} adjustsFontSizeToFit style={styles.profileHorseFeatureTitle}>{horseName}</Text>
             <Text style={styles.profileHorseFeatureMeta}>{discipline} · {horseBreed || "Breed"} · {horseSex}</Text>
             <Text style={styles.profileHorseFeatureDetail}>
-              {[level, frequency, horseAge ? `${horseAge} years` : "", horseHeight ? `${horseHeight} cm` : ""]
+              {[level, horseAge ? `${horseAge} years` : "", horseHeight ? `${horseHeight} cm` : ""]
                 .filter(Boolean)
                 .join(" · ")}
             </Text>

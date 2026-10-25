@@ -1,4 +1,5 @@
 import type { RideEntry } from "../backend/contracts";
+import { localDayOf } from "./local-day";
 
 /**
  * Summarising the ride journal by week and by month.
@@ -26,13 +27,28 @@ const parseDay = (value: string): number | null => {
   return Number.isNaN(parsed) ? null : parsed;
 };
 
+// Back from a parseDay value to YYYY-MM-DD. UTC on both sides, so the
+// arithmetic between two calendar days never shifts with a time zone.
 const toDay = (timestamp: number): string => new Date(timestamp).toISOString().slice(0, 10);
 
-/** The calendar day a ride belongs to, from its completion timestamp. */
-export const rideDay = (entry: RideEntry): string | null => {
-  const parsed = Date.parse(entry.completedAt);
-  return Number.isNaN(parsed) ? null : toDay(parsed);
-};
+/**
+ * The calendar day a ride belongs to: the rider's local day when it ended.
+ * In UTC, a Monday 01:30 ride in Bucharest landed on Sunday, in the week
+ * before, and a 22:00 ride in Sao Paulo landed on tomorrow.
+ */
+export const rideDay = (entry: RideEntry): string | null => localDayOf(entry.completedAt);
+
+const byNewest = (left: RideEntry, right: RideEntry) =>
+  Date.parse(right.completedAt) - Date.parse(left.completedAt);
+
+/**
+ * The journal with one ride added or replaced, newest first by when each ride
+ * ended. Putting a new ride on top was right while every ride was saved the
+ * moment it ended; a ride logged afterwards belongs further down, and on top
+ * it would become "your last ride" on Home and in the Stable.
+ */
+export const withRide = (entries: readonly RideEntry[], entry: RideEntry): RideEntry[] =>
+  [...entries.filter((current) => current.id !== entry.id), entry].sort(byNewest);
 
 export type PeriodBounds = { start: string; endExclusive: string };
 

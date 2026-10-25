@@ -17,4 +17,5 @@ await import("./paywall.test");
 await import("./beta.test");
 await import("./club-social.test");
 await import("./ride-setup.test");
+await import("./ride-journal.test");
 await import("./backend-migrations.test");

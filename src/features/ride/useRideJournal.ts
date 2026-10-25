@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import NetInfo from "@react-native-community/netinfo";
 import type { EquinaBackend, RideEntry, RideMoodRecord } from "../../backend";
+import { startOfPreviousMonth } from "../../domain/local-day";
+import { withRide } from "../../domain/ride-stats";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
 import type { RideCompletion, RideMood, RideSession } from "./RideExperience";
 
@@ -75,6 +77,8 @@ export function useRideJournal({
   enabled: boolean;
 }) {
   const [entries, setEntries] = useState<RideEntry[]>([]);
+  // Every ride saved, not just the ones loaded: Home states it back as fact.
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,6 +90,7 @@ export function useRideJournal({
   const refresh = useCallback(async () => {
     if (!backend || !enabled) {
       setEntries([]);
+      setTotal(0);
       setLoading(false);
       setRefreshing(false);
       setLoaded(false);
@@ -96,9 +101,15 @@ export function useRideJournal({
     else setRefreshing(true);
     setError("");
     try {
-      const next = await backend.rides.list();
+      // Back to the start of last month, so the month summary can compare.
+      // A failed count is not a failed journal: it falls back to what loaded.
+      const [next, counted] = await Promise.all([
+        backend.rides.listSince(startOfPreviousMonth().toISOString()),
+        backend.rides.count().catch(() => null)
+      ]);
       if (request !== entriesRequest.current) return;
       setEntries(next);
+      setTotal(Math.max(counted ?? 0, next.length));
     } catch (loadError) {
       if (request === entriesRequest.current) {
         setError(messageFor(loadError, "Your ride journal could not be loaded."));
@@ -160,7 +171,8 @@ export function useRideJournal({
         mood: moodToRecord[input.mood],
         riderNote: input.riderNote
       });
-      setEntries((current) => [created, ...current]);
+      setEntries((current) => withRide(current, created));
+      setTotal((current) => current + 1);
       return created;
     }, "The ride could not be saved.");
   }, [backend, enabled, runMutation]);
@@ -188,6 +200,7 @@ export function useRideJournal({
     await runMutation(`ride:${id}`, async () => {
       await backend.rides.remove(id);
       setEntries((current) => current.filter((entry) => entry.id !== id));
+      setTotal((current) => Math.max(0, current - 1));
     }, "The ride could not be removed.");
   }, [backend, enabled, runMutation]);
 
@@ -195,6 +208,7 @@ export function useRideJournal({
 
   return {
     entries,
+    total,
     latestEntry,
     /** The most recent ride in the shape the home recap already renders. */
     lastRide: latestEntry ? rideSessionFrom(latestEntry) : null,

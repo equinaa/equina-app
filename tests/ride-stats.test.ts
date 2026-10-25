@@ -8,8 +8,10 @@ import {
   previousBounds,
   rideDay,
   ridesWithin,
-  summarise
+  summarise,
+  withRide
 } from "../src/domain/ride-stats";
+import { localDayOf, localToday, startOfPreviousMonth } from "../src/domain/local-day";
 
 // A Sunday, chosen on purpose: the week must still start on the Monday before.
 const TODAY = "2026-09-27";
@@ -33,6 +35,23 @@ const ride = (patch: Partial<RideEntry> = {}): RideEntry => ({
 const need = <T>(value: T | null, what: string): T => {
   assert.ok(value !== null, `expected ${what}`);
   return value as T;
+};
+
+// Days are the rider's local calendar. The fixtures below are written in UTC,
+// so the file runs in UTC and puts the machine's zone back at the end; the
+// checks about other zones set their own.
+const machineZone = process.env.TZ;
+process.env.TZ = "UTC";
+
+const withTimeZone = <T>(zone: string, run: () => T): T => {
+  const previous = process.env.TZ;
+  process.env.TZ = zone;
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
 };
 
 // Weeks start on Monday -- the convention every yard and competition calendar
@@ -76,7 +95,7 @@ const need = <T>(value: T | null, what: string): T => {
 
 // The boundary is inclusive at the start and exclusive at the end, so a ride
 // at the first instant of the next week belongs to that week, not this one.
-{
+withTimeZone("UTC", () => {
   const week = need(periodBounds("week", TODAY), "a week");
   const rides = ridesWithin(
     [
@@ -89,6 +108,55 @@ const need = <T>(value: T | null, what: string): T => {
   );
   assert.equal(rides.length, 2);
   assert.deepEqual(rides.map((entry) => rideDay(entry)), ["2026-09-21", "2026-09-27"]);
+});
+
+// A ride belongs to the day the rider was living in when it ended, not the
+// UTC day. The same instant is Monday in Bucharest and still Sunday in Sao
+// Paulo, so it lands in different weeks for the two riders.
+{
+  const lateSunday = ride({ completedAt: "2026-09-20T22:30:00Z" });
+  const week = need(periodBounds("week", TODAY), "a week");
+
+  withTimeZone("Europe/Bucharest", () => {
+    assert.equal(rideDay(lateSunday), "2026-09-21", "01:30 on Monday in Bucharest is Monday.");
+    assert.equal(ridesWithin([lateSunday], week).length, 1, "and it counts in that Monday's week.");
+  });
+  withTimeZone("America/Sao_Paulo", () => {
+    assert.equal(rideDay(lateSunday), "2026-09-20", "19:30 on Sunday in Sao Paulo is Sunday.");
+    assert.equal(ridesWithin([lateSunday], week).length, 0, "and it belongs to the week before.");
+  });
+}
+
+// "Today" is local too: at 22:00 in Sao Paulo it is still today there, even
+// though UTC has moved on to tomorrow.
+withTimeZone("America/Sao_Paulo", () => {
+  assert.equal(localToday(Date.parse("2026-10-25T01:00:00Z")), "2026-10-24");
+  assert.equal(localDayOf("not a date"), null);
+});
+
+// The journal loads back to local midnight on the first of last month, which
+// is where the month summary's comparison starts.
+withTimeZone("Europe/Bucharest", () => {
+  const since = startOfPreviousMonth(Date.parse("2026-10-25T09:00:00Z"));
+  assert.equal(localDayOf(since), "2026-09-01");
+  assert.equal(since.getHours(), 0);
+  assert.equal(localDayOf(startOfPreviousMonth(Date.parse("2026-01-10T09:00:00Z"))), "2025-12-01", "January looks back into last year.");
+});
+
+// A ride logged after the fact goes where it belongs in the journal, not on
+// top, so it never becomes "your last ride".
+{
+  const today = ride({ id: "today", completedAt: "2026-09-27T09:30:00Z" });
+  const monday = ride({ id: "monday", completedAt: "2026-09-21T09:30:00Z" });
+  const wednesday = ride({ id: "wednesday", completedAt: "2026-09-23T18:00:00+00:00" });
+  const journal = withRide([today, monday], wednesday);
+  assert.deepEqual(journal.map((entry) => entry.id), ["today", "wednesday", "monday"]);
+  assert.deepEqual(
+    withRide(journal, { ...wednesday, mood: "fresh" }).map((entry) => entry.id),
+    ["today", "wednesday", "monday"],
+    "Saving the same ride again replaces it rather than adding a second."
+  );
+  assert.equal(withRide([], today)[0]?.id, "today");
 }
 
 // The summary counts rides, days ridden, trainings and moods from the real
@@ -224,5 +292,8 @@ const need = <T>(value: T | null, what: string): T => {
   assert.equal(summary.phasesCompleted, 0);
   assert.equal(summary.phasesPlanned, 3);
 }
+
+if (machineZone === undefined) delete process.env.TZ;
+else process.env.TZ = machineZone;
 
 console.log("Ride journal summaries passed.");
