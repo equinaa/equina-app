@@ -1,4 +1,4 @@
-import type { TrainingPlan, TrainingPlanDay } from "../backend/contracts";
+import type { HorseTimeOff, TrainingPlan, TrainingPlanDay } from "../backend/contracts";
 import { localDayOf } from "./local-day";
 
 /**
@@ -15,11 +15,16 @@ import { localDayOf } from "./local-day";
  * Changing the plan applies from that day on (each version has its
  * effectiveFrom), so a change never breaks or rebuilds a week already ridden.
  *
+ * A day can plan more than one horse. A planned ride on a horse that is off
+ * that day (rest, break, stall rest, injury, vet treatment) is not due: it
+ * neither needs a ride nor breaks the streak.
+ *
  * Days are the rider's local calendar days, as YYYY-MM-DD. The arithmetic
  * between them is done in UTC on those strings, which have no time zone.
  */
 
 export type PlanVersion = Pick<TrainingPlan, "effectiveFrom" | "days">;
+export type TimeOffPeriod = Pick<HorseTimeOff, "horseId" | "kind" | "startsOn" | "endsOn">;
 
 const MS_PER_DAY = 86_400_000;
 const parseDay = (day: string) => Date.parse(`${day}T00:00:00Z`);
@@ -39,20 +44,31 @@ export const planOn = (versions: readonly PlanVersion[], day: string): PlanVersi
   return current;
 };
 
-/** What the plan says for a day: the training and horse, or null for a day off. */
-export const plannedOn = (versions: readonly PlanVersion[], day: string): TrainingPlanDay | null =>
-  planOn(versions, day)?.days.find((entry) => entry.weekday === isoWeekday(day)) ?? null;
+/** What the plan says for a day: each horse and its training. Empty on a rest day. */
+export const plannedOn = (versions: readonly PlanVersion[], day: string): TrainingPlanDay[] =>
+  planOn(versions, day)?.days.filter((entry) => entry.weekday === isoWeekday(day)) ?? [];
+
+/** The time off a horse is on that day, if any. */
+export const timeOffOn = (periods: readonly TimeOffPeriod[], horseId: string | undefined, day: string) =>
+  horseId ? periods.find((period) => period.horseId === horseId && period.startsOn <= day && day <= period.endsOn) ?? null : null;
+
+/** The planned rides that still need doing: those whose horse is not off that day. */
+export const dueOn = (versions: readonly PlanVersion[], periods: readonly TimeOffPeriod[], day: string) =>
+  plannedOn(versions, day).filter((entry) => !timeOffOn(periods, entry.horseId, day));
 
 /** The local days the rider rode on, from when each ride ended. */
 export const rideDays = (completedAt: readonly string[]) =>
   new Set(completedAt.map((value) => localDayOf(value)).filter((day): day is string => day !== null));
 
-export type WeekDayState = "ridden" | "missed" | "planned" | "rest";
+export type WeekDayState = "ridden" | "missed" | "planned" | "off" | "rest";
 
 export type WeekDay = {
   day: string;
   weekday: number;
-  planned: TrainingPlanDay | null;
+  /** Every horse the plan has that day, due or not. */
+  planned: TrainingPlanDay[];
+  /** The ones still to ride: their horse is not off. */
+  due: TrainingPlanDay[];
   state: WeekDayState;
   isToday: boolean;
 };
@@ -60,19 +76,25 @@ export type WeekDay = {
 /**
  * Monday to Sunday of the week holding `today`. A ride shows on any day; a
  * planned day before today without one is missed; today and the days after
- * are still to come.
+ * are still to come; a planned day whose horses are all off is off.
  */
-export const trainingWeek = (versions: readonly PlanVersion[], ridden: ReadonlySet<string>, today: string): WeekDay[] => {
+export const trainingWeek = (
+  versions: readonly PlanVersion[],
+  ridden: ReadonlySet<string>,
+  today: string,
+  periods: readonly TimeOffPeriod[] = []
+): WeekDay[] => {
   const monday = addDays(today, 1 - isoWeekday(today));
   return Array.from({ length: 7 }, (_, index) => {
     const day = addDays(monday, index);
     const planned = plannedOn(versions, day);
+    const due = planned.filter((entry) => !timeOffOn(periods, entry.horseId, day));
     const state: WeekDayState = ridden.has(day)
       ? "ridden"
-      : planned
+      : due.length
         ? day < today ? "missed" : "planned"
-        : "rest";
-    return { day, weekday: index + 1, planned, state, isToday: day === today };
+        : planned.length ? "off" : "rest";
+    return { day, weekday: index + 1, planned, due, state, isToday: day === today };
   });
 };
 
@@ -86,16 +108,22 @@ export type StreakSummary = {
   best: number;
   /** The first ride of the current streak. */
   startedOn?: string;
-  todayPlanned: TrainingPlanDay | null;
+  /** Today's planned rides still to do: their horse is not off. */
+  todayPlanned: TrainingPlanDay[];
   todayRidden: boolean;
   week: WeekDay[];
   previousMilestone: number;
   nextMilestone: number;
 };
 
-export const trainingStreak = (versions: readonly PlanVersion[], completedAt: readonly string[], today: string): StreakSummary => {
+export const trainingStreak = (
+  versions: readonly PlanVersion[],
+  completedAt: readonly string[],
+  today: string,
+  periods: readonly TimeOffPeriod[] = []
+): StreakSummary => {
   const ridden = rideDays(completedAt);
-  const week = trainingWeek(versions, ridden, today);
+  const week = trainingWeek(versions, ridden, today, periods);
   const start = versions.reduce<string | null>(
     (earliest, version) => (!earliest || version.effectiveFrom < earliest ? version.effectiveFrom : earliest),
     null
@@ -110,7 +138,7 @@ export const trainingStreak = (versions: readonly PlanVersion[], completedAt: re
         if (current === 0) startedOn = day;
         current += 1;
         best = Math.max(best, current);
-      } else if (day !== today && plannedOn(versions, day)) {
+      } else if (day !== today && dueOn(versions, periods, day).length) {
         current = 0;
         startedOn = undefined;
       }
@@ -124,7 +152,7 @@ export const trainingStreak = (versions: readonly PlanVersion[], completedAt: re
     current,
     best,
     ...(startedOn ? { startedOn } : {}),
-    todayPlanned: plannedOn(versions, today),
+    todayPlanned: dueOn(versions, periods, today),
     todayRidden: ridden.has(today),
     week,
     previousMilestone,
@@ -132,19 +160,24 @@ export const trainingStreak = (versions: readonly PlanVersion[], completedAt: re
   };
 };
 
-/** The next `count` planned days from `today` on, for the reminders. Days already ridden are skipped. */
+/**
+ * The planned days in the next `count` days from `today` on, for the
+ * reminders, with the rides still due. Days already ridden, and rides on a
+ * horse that is off, are skipped.
+ */
 export const upcomingPlannedDays = (
   versions: readonly PlanVersion[],
   completedAt: readonly string[],
   today: string,
-  count: number
-): Array<{ day: string; planned: TrainingPlanDay }> => {
+  count: number,
+  periods: readonly TimeOffPeriod[] = []
+): Array<{ day: string; planned: TrainingPlanDay[] }> => {
   const ridden = rideDays(completedAt);
-  const days: Array<{ day: string; planned: TrainingPlanDay }> = [];
+  const days: Array<{ day: string; planned: TrainingPlanDay[] }> = [];
   for (let offset = 0; offset < count; offset += 1) {
     const day = addDays(today, offset);
-    const planned = plannedOn(versions, day);
-    if (planned && !ridden.has(day)) days.push({ day, planned });
+    const planned = dueOn(versions, periods, day);
+    if (planned.length && !ridden.has(day)) days.push({ day, planned });
   }
   return days;
 };

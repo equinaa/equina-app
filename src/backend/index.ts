@@ -14,3 +14,4 @@ export * from "./academy-repository";
 export * from "./ride-repository";
 export * from "./upload-repository";
 export * from "./training-plan-repository";
+export * from "./horse-time-off-repository";

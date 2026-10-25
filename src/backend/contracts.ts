@@ -447,6 +447,25 @@ export type RideEntry = {
 
 export type RideEntryInput = Omit<RideEntry, "id" | "riderId" | "createdAt" | "updatedAt">;
 
+/**
+ * A horse off work for a stretch of days: resting, on a break, on stall rest,
+ * injured, under vet treatment. Its planned rides on those days are not missed.
+ * kind is the app's id (src/features/records/time-off.ts).
+ */
+export type HorseTimeOff = {
+  id: string;
+  horseId: string;
+  kind: string;
+  /** The first and last local day, YYYY-MM-DD, both included. */
+  startsOn: string;
+  endsOn: string;
+  note?: string;
+  /** When it was entered: a period can be taken back whole on that day. */
+  createdAt?: string;
+};
+
+export type HorseTimeOffInput = Omit<HorseTimeOff, "id" | "createdAt">;
+
 /** One day of the rider's training week. weekday: 1 = Monday ... 7 = Sunday. */
 export type TrainingPlanDay = {
   weekday: number;

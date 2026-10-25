@@ -65,6 +65,10 @@ export class TrainingPlanRepository {
     const { data, error } = await this.client.from("training_plans")
       .insert({ user_id: auth.user.id, effective_from: effectiveFrom, days: daysRow(days), reminders })
       .select(columns).single();
+    if (error?.code === "23514") {
+      // The raw check name means nothing to a rider.
+      throw backendError({ code: error.code }, "That week has more rides than a plan can hold. Take a few out and save again.");
+    }
     // Another device wrote today's version in between: change that one.
     if (error?.code === "23505") {
       const raced = await updateToday();
