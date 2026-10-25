@@ -1434,13 +1434,11 @@ function EquinaApp() {
         setOnboardingHorseSex(sexLabel as (typeof horseSexes)[number]);
       }
     }
-    if (selectedHorse.heightCm) setOnboardingHorseHeight(String(selectedHorse.heightCm));
-    if (selectedHorse.birthDate) {
-      const birthYear = Number(selectedHorse.birthDate.slice(0, 4));
-      if (Number.isFinite(birthYear)) {
-        setOnboardingHorseAge(String(Math.max(0, new Date().getFullYear() - birthYear)));
-      }
-    }
+    // A horse without a height or a birth date shows none. With more than one
+    // horse, keeping the last value put one horse's age on another.
+    setOnboardingHorseHeight(selectedHorse.heightCm ? String(selectedHorse.heightCm) : "");
+    const birthYear = selectedHorse.birthDate ? Number(selectedHorse.birthDate.slice(0, 4)) : NaN;
+    setOnboardingHorseAge(Number.isFinite(birthYear) ? String(Math.max(0, new Date().getFullYear() - birthYear)) : "");
   }, [
     accountMode,
     equinaSession.phase,
