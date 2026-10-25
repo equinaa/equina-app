@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import NetInfo from "@react-native-community/netinfo";
-import type { EquinaBackend, RideEntry, RideMoodRecord } from "../../backend";
+import type { EquinaBackend, RideEntry, RideMoodRecord, RideSource } from "../../backend";
 import { startOfPreviousMonth } from "../../domain/local-day";
 import { withRide } from "../../domain/ride-stats";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
@@ -8,9 +8,12 @@ import type { RideCompletion, RideMood, RideSession } from "./RideExperience";
 
 export type RideLogInput = {
   session: RideCompletion;
-  mood: RideMood;
+  /** Optional for a logged activity: no feeling is recorded unless the rider picked one. */
+  mood?: RideMood;
   horseId?: string;
   riderNote?: string;
+  /** "manual" for Add activity. A ride the clock timed is live. */
+  source?: RideSource;
 };
 
 // The client speaks capitalised discipline and mood names; the database speaks
@@ -53,7 +56,8 @@ export const rideSessionFrom = (entry: RideEntry): RideSession => ({
   completedPhases: entry.completedPhases,
   totalPhases: entry.totalPhases,
   ...(entry.phases ? { phases: entry.phases } : {}),
-  mood: entry.mood ? moodFromRecord[entry.mood] : "Focused"
+  // A logged activity can be saved without a feeling. None is invented.
+  ...(entry.mood ? { mood: moodFromRecord[entry.mood] } : {})
 });
 
 const messageFor = (error: unknown, fallback: string) => {
@@ -168,8 +172,9 @@ export function useRideJournal({
         completedPhases: input.session.completedPhases,
         totalPhases: input.session.totalPhases,
         phases: input.session.phases,
-        mood: moodToRecord[input.mood],
-        riderNote: input.riderNote
+        mood: input.mood ? moodToRecord[input.mood] : undefined,
+        riderNote: input.riderNote,
+        source: input.source ?? "live"
       });
       setEntries((current) => withRide(current, created));
       setTotal((current) => current + 1);

@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, Text, TextInput, View } from "react-native";
 import { ChevronUp, Minus, Plus, RotateCcw, X } from "lucide-react-native";
+import type { RideMood } from "./RideExperience";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { rideAlertsAllowed } from "./ride-cues";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
 import {
+  activityDays,
+  activityProblem,
+  activityTimeExists,
   addPhase,
+  defaultActivityStart,
   defaultRidePhases,
   editPhase,
   movePhaseUp,
@@ -19,6 +24,8 @@ import {
   rideTrainingTypes,
   cleanPhases,
   setPhaseMinutes,
+  formatActivityTime,
+  type ActivityDraft,
   type RidePhasePlan,
   type RidePlan,
   type RideSetupMemory,
@@ -26,6 +33,22 @@ import {
 } from "./ride-plan";
 
 export type RideSetupHorse = { id?: string; name: string };
+
+/** A training logged with Add activity, with what the rider added about it. */
+export type LoggedActivity = { draft: ActivityDraft; mood?: RideMood; note?: string };
+
+const moods: readonly RideMood[] = ["Fresh", "Focused", "Tender"];
+const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const minutesInDay = 24 * 60;
+
+/** "Today", "Yesterday", then "Thu 22" for the days before. */
+const dayLabel = (day: string, index: number) => {
+  if (index === 0) return "Today";
+  if (index === 1) return "Yesterday";
+  const [year, month, date] = day.split("-").map(Number);
+  const weekday = weekdays[new Date(year ?? 0, (month ?? 1) - 1, date ?? 1).getDay()];
+  return `${weekday} ${date}`;
+};
 
 // The list is rebuilt on every render of the app, so horses compare by who
 // they are, not by object. A horse from the demo has a name and no id.
@@ -46,27 +69,37 @@ const samePhases = (left: RidePhasePlan[], right: RidePhasePlan[]) =>
  * What the rider sets before getting on: the horse, the training, and the
  * phases with their minutes. Nothing starts here -- the clock waits on the
  * ride screen until the rider is in the saddle and taps Start.
+ *
+ * The same sheet logs a training done without the clock ("Add activity"):
+ * the rider also says when it was, and it goes straight into the journal.
  */
 export function RideSetupSheet({
   visible,
+  mode = "ride",
   horses,
   horseId,
   trainingType,
   phases: initialPhases,
   memory,
   onContinue,
+  onLog,
   onDismiss
 }: {
   visible: boolean;
+  /** "log" is Add activity: nothing is timed, the training is saved as done. */
+  mode?: "ride" | "log";
   horses: RideSetupHorse[];
   horseId?: string;
   trainingType: RideTrainingType;
   /** The phases to open with: the ride being edited, or the last ones for this training. */
   phases: RidePhasePlan[];
   memory: RideSetupMemory | null;
-  onContinue: (plan: RidePlan) => void;
+  onContinue?: (plan: RidePlan) => void;
+  /** Saves a logged activity. The sheet stays open, with what was entered, if it fails. */
+  onLog?: (activity: LoggedActivity) => Promise<void>;
   onDismiss: () => void;
 }) {
+  const logging = mode === "log";
   const [horse, setHorse] = useState<RideSetupHorse | undefined>(undefined);
   const [training, setTraining] = useState(trainingType);
   const [phases, setPhases] = useState(initialPhases);
@@ -76,6 +109,16 @@ export function RideSetupSheet({
   // A phase just added opens with its name selected, ready to type over.
   const [addedId, setAddedId] = useState<string | null>(null);
   const nextId = useRef(0);
+  // Add activity only.
+  const [day, setDay] = useState("");
+  const [startMinutes, setStartMinutes] = useState(0);
+  const [mood, setMood] = useState<RideMood | undefined>(undefined);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  // A save outlives the sheet closing and opening again, so it can never be
+  // sent twice.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -84,6 +127,13 @@ export function RideSetupSheet({
     setPhases(initialPhases);
     setEdited(false);
     setAddedId(null);
+    const opening = defaultActivityStart(Date.now(), plannedMinutes(initialPhases));
+    setDay(opening.day);
+    setStartMinutes(opening.startMinutes);
+    setMood(undefined);
+    setNote("");
+    setSaving(inFlight.current);
+    setSaveError("");
     // Opening is the reset point; edits while open must survive re-renders.
   }, [visible]);
 
@@ -104,26 +154,128 @@ export function RideSetupSheet({
     setPhases((current) => current.map((phase) => (phase.detail === training.label ? { ...phase, detail: next.label } : phase)));
   };
 
-  const problem = ridePlanProblem(phases);
+  const now = Date.now();
+  const days = logging ? activityDays(now) : [];
+  const plan: RidePlan = {
+    ...(horse?.id ? { horseId: horse.id } : {}),
+    horseName: horse?.name ?? "",
+    trainingType: training,
+    phases: cleanPhases(phases)
+  };
+  const draft: ActivityDraft = { day, startMinutes, plan };
+  const problem = logging ? activityProblem(draft, now) : ridePlanProblem(phases);
   const total = plannedMinutes(phases);
   const atDefault = samePhases(cleanPhases(phases), defaultRidePhases(training));
 
+  const clampStart = (minutes: number) => Math.min(minutesInDay - 15, Math.max(0, minutes));
+  const stepStart = (by: number) => {
+    let next = clampStart(startMinutes + by);
+    // Skip the hour the clocks jump over.
+    while (!activityTimeExists(day, next) && next > 0 && next < minutesInDay - 15) next = clampStart(next + Math.sign(by) * 15);
+    if (next !== startMinutes) selectionHaptic();
+    setStartMinutes(next);
+  };
+
+  const save = async () => {
+    if (problem || inFlight.current || !onLog) return;
+    inFlight.current = true;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await onLog({ draft, ...(mood ? { mood } : {}), ...(note.trim() ? { note: note.trim() } : {}) });
+    } catch (error) {
+      setSaveError(error instanceof Error && error.message ? error.message : "The activity could not be saved.");
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
+    }
+  };
+
   const submit = () => {
-    if (problem) return;
+    if (logging) {
+      void save();
+      return;
+    }
+    if (problem || !onContinue) return;
     // Asked here, on the ground, never mid-ride: alerts are what reach a
     // locked phone. A no keeps the voice and the buzz with the screen on.
     if (Platform.OS !== "web") void rideAlertsAllowed(true);
-    onContinue({
-      ...(horse?.id ? { horseId: horse.id } : {}),
-      horseName: horse?.name ?? "",
-      trainingType: training,
-      phases: cleanPhases(phases)
-    });
+    onContinue(plan);
   };
 
   return (
-    <EquinaSheet visible={visible} title="Customize training" onDismiss={onDismiss} closeTestID="ride-setup-close">
-      <View style={styles.body} testID="ride-setup">
+    <EquinaSheet
+      visible={visible}
+      title={logging ? "Add activity" : "Customize training"}
+      // Held open while saving: closed mid-save, a failure would go unseen.
+      onDismiss={saving ? () => undefined : onDismiss}
+      closeTestID={logging ? "add-activity-close" : "ride-setup-close"}
+    >
+      <View style={styles.body} testID={logging ? "add-activity-sheet" : "ride-setup"}>
+        {logging ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>When</Text>
+            <View accessibilityRole="radiogroup" style={styles.chips}>
+              {days.map((option, index) => {
+                const selected = option === day;
+                return (
+                  <MotionPressable
+                    key={option}
+                    testID={`add-activity-day-${index}`}
+                    accessibilityRole="radio"
+                    accessibilityLabel={dayLabel(option, index)}
+                    accessibilityState={{ selected }}
+                    pressedScale={0.97}
+                    onPress={() => {
+                      if (!selected) selectionHaptic();
+                      setDay(option);
+                    }}
+                    style={[styles.chip, selected && styles.chipSelected]}
+                  >
+                    <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{dayLabel(option, index)}</Text>
+                  </MotionPressable>
+                );
+              })}
+            </View>
+            <View style={styles.timeRow}>
+              <Text style={styles.timeLabel}>Started at</Text>
+              <View
+                accessible
+                accessibilityRole="adjustable"
+                accessibilityLabel="Start time"
+                accessibilityValue={{ text: formatActivityTime(startMinutes) }}
+                accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+                onAccessibilityAction={(event) => stepStart(event.nativeEvent.actionName === "increment" ? 15 : -15)}
+                style={styles.stepper}
+              >
+                <MotionPressable
+                  testID="add-activity-earlier"
+                  accessibilityRole="button"
+                  accessibilityLabel="Earlier start"
+                  disabled={startMinutes <= 0}
+                  onPress={() => stepStart(-15)}
+                  onLongPress={() => stepStart(-60)}
+                  style={[styles.stepButton, startMinutes <= 0 && styles.disabled]}
+                >
+                  <Minus size={16} color={equinaTheme.text.primary} />
+                </MotionPressable>
+                <Text testID="add-activity-start" style={styles.stepValue}>{formatActivityTime(startMinutes)}</Text>
+                <MotionPressable
+                  testID="add-activity-later"
+                  accessibilityRole="button"
+                  accessibilityLabel="Later start"
+                  disabled={startMinutes >= minutesInDay - 15}
+                  onPress={() => stepStart(15)}
+                  onLongPress={() => stepStart(60)}
+                  style={[styles.stepButton, startMinutes >= minutesInDay - 15 && styles.disabled]}
+                >
+                  <Plus size={16} color={equinaTheme.text.primary} />
+                </MotionPressable>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
         {horses.length > 0 ? (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Horse</Text>
@@ -234,16 +386,66 @@ export function RideSetupSheet({
           </View>
         </View>
 
-        <Text style={styles.note}>
-          {Platform.OS === "web"
-            ? "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. Keep this page open; the screen stays on so your phone can call out each phase."
-            : "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. At each new phase your phone chimes, vibrates and says what comes next, with a notification if the screen is locked."}
-        </Text>
+        {logging ? (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>How the horse felt</Text>
+              <View accessibilityRole="radiogroup" style={styles.chips}>
+                {moods.map((option) => {
+                  const selected = option === mood;
+                  return (
+                    <MotionPressable
+                      key={option}
+                      testID={`add-activity-mood-${option.toLowerCase()}`}
+                      accessibilityRole="radio"
+                      accessibilityLabel={option}
+                      accessibilityState={{ selected }}
+                      pressedScale={0.97}
+                      onPress={() => {
+                        selectionHaptic();
+                        // Optional: tapping the chosen feeling again takes it back.
+                        setMood(selected ? undefined : option);
+                      }}
+                      style={[styles.chip, selected && styles.chipSelected]}
+                    >
+                      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{option}</Text>
+                    </MotionPressable>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Note</Text>
+              <TextInput
+                testID="add-activity-note"
+                accessibilityLabel="Note"
+                value={note}
+                onChangeText={setNote}
+                placeholder="What worked, what to try next time"
+                placeholderTextColor={equinaTheme.text.tertiary}
+                selectionColor={equinaTheme.colors.brass}
+                maxLength={2000}
+                multiline
+                style={[styles.noteInput, styles.webInput]}
+              />
+            </View>
+            <Text style={styles.note}>
+              Saved straight to your journal. The minutes are the ones you set, so they show as logged, not tracked.
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.note}>
+            {Platform.OS === "web"
+              ? "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. Keep this page open; the screen stays on so your phone can call out each phase."
+              : "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. At each new phase your phone chimes, vibrates and says what comes next, with a notification if the screen is locked."}
+          </Text>
+        )}
         {problem ? <Text accessibilityRole="alert" style={styles.problem}>{problem}</Text> : null}
+        {!problem && saveError ? <Text accessibilityRole="alert" style={styles.problem}>{saveError}</Text> : null}
         <EquinaButton
-          testID="ride-setup-continue"
-          label="Start training"
-          disabled={Boolean(problem)}
+          testID={logging ? "add-activity-save" : "ride-setup-continue"}
+          label={logging ? (saving ? "Saving..." : "Save to journal") : "Start training"}
+          disabled={Boolean(problem) || saving}
           onPress={submit}
         />
       </View>
@@ -531,6 +733,30 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
     textAlign: "center"
+  },
+  timeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: equinaTheme.spacing.compact,
+    paddingTop: equinaTheme.spacing.xs
+  },
+  timeLabel: {
+    ...equinaTheme.typography.body,
+    color: equinaTheme.text.primary
+  },
+  noteInput: {
+    minHeight: 76,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: equinaTheme.radius.control,
+    borderWidth: 1,
+    borderColor: equinaTheme.material.fieldBorder,
+    backgroundColor: equinaTheme.material.field,
+    color: equinaTheme.text.primary,
+    fontSize: 15,
+    lineHeight: 20,
+    textAlignVertical: "top"
   },
   phaseActions: {
     flexDirection: "row",

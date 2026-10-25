@@ -159,11 +159,13 @@ import {
   type RideRecommendation,
   type RideSession
 } from "./features/ride/RideExperience";
-import { RideSetupSheet, type RideSetupHorse } from "./features/ride/RideSetupSheet";
+import { RideSetupSheet, type LoggedActivity, type RideSetupHorse } from "./features/ride/RideSetupSheet";
+import { RideJournalSheet } from "./features/ride/RideJournalSheet";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending, snapshotSetsHomeHorse } from "./features/home/home-hero";
 import {
+  activityCompletion,
   defaultTrainingType,
   phasesFor,
   plannedMinutes,
@@ -758,7 +760,7 @@ const createCoachReply = ({
     Trail: `Notice whether ${horseName} stays relaxed as the terrain changes.`
   };
   const latestRideSummary = lastRide
-    ? `${rideDurationLabel(lastRide.elapsedSeconds)}, ${lastRide.completedPhases}/${lastRide.totalPhases} phases, and it felt ${lastRide.mood.toLowerCase()}`
+    ? `${rideDurationLabel(lastRide.elapsedSeconds)}, ${lastRide.completedPhases}/${lastRide.totalPhases} phases${lastRide.mood ? `, and it felt ${lastRide.mood.toLowerCase()}` : ""}`
     : null;
   const recoveryRule = lastRide?.mood === "Tender"
     ? `${horseName}'s latest ride felt tender, so keep this session recovery-led and stop if anything feels unusual.`
@@ -887,6 +889,9 @@ function EquinaApp() {
   const [rideActive, setRideActive] = useState(false);
   // Set on the setup sheet before the ride screen opens; the clock waits there.
   const [rideSetupOpen, setRideSetupOpen] = useState(false);
+  const [addActivityOpen, setAddActivityOpen] = useState(false);
+  const [rideJournalOpen, setRideJournalOpen] = useState(false);
+  const [deletingRideId, setDeletingRideId] = useState("");
   const [ridePlan, setRidePlan] = useState<RidePlan | null>(null);
   // Seeded for demo mode only. A connected account counts its real journal.
   const [localSessionCount, setLocalSessionCount] = useState(4);
@@ -994,6 +999,8 @@ function EquinaApp() {
     setRideActive(false);
     setRidePlan(null);
     setRideSetupOpen(false);
+    setAddActivityOpen(false);
+    setRideJournalOpen(false);
     setLastRideRecapVisible(false);
     void cancelStaleRideAlerts();
     setAccountReturnTab("home");
@@ -1074,6 +1081,12 @@ function EquinaApp() {
         trainingType: rememberedTraining,
         phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
       };
+  // Add activity opens on Home's horse: the last one the rider picked.
+  const activityDraft = {
+    horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
+    trainingType: rememberedTraining,
+    phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
+  };
   const ridePersistence =
     accountMode === "connected" &&
     equinaSession.phase === "authenticated" &&
@@ -1586,6 +1599,36 @@ function EquinaApp() {
           ? saveError.message
           : "The ride could not be saved. It is still shown here for this session.");
       });
+  };
+
+  // A training done without the clock goes straight into the journal. It is
+  // not today's ride: no recap, and the next ride's setup stays as it was.
+  const logActivity = async ({ draft, mood, note }: LoggedActivity) => {
+    const horseDiscipline = horseRecords.horses.find((record) => record.id === draft.plan.horseId)?.discipline;
+    await rideJournal.logRide({
+      session: activityCompletion(draft, horseDiscipline ? toCoachDiscipline(horseDiscipline) : onboardingDiscipline),
+      mood,
+      horseId: draft.plan.horseId,
+      riderNote: note,
+      source: "manual"
+    });
+    setAddActivityOpen(false);
+    refresh("Added to your journal.");
+  };
+
+  const deleteJournalRide = async (id: string) => {
+    const deleted = rideJournal.entries.find((entry) => entry.id === id);
+    setDeletingRideId(id);
+    try {
+      await rideJournal.deleteRide(id);
+      // The ride finished this session is also held locally; once it is
+      // deleted, Home must not keep calling it the last ride.
+      if (deleted && localLastRide && Date.parse(localLastRide.completedAt) === Date.parse(deleted.completedAt)) {
+        setLocalLastRide(null);
+      }
+    } finally {
+      setDeletingRideId("");
+    }
   };
 
   const cancelRide = () => {
@@ -2566,6 +2609,14 @@ function EquinaApp() {
                 horsePhoto={onboardingHorsePhoto}
                 heroPhotoPending={heroPhotoPending}
                 onToggleRide={startRide}
+                onAddActivity={ridePersistence && !rideActive ? () => {
+                  rideJournal.clearError();
+                  setAddActivityOpen(true);
+                } : undefined}
+                onOpenJournal={ridePersistence ? () => {
+                  rideJournal.clearError();
+                  setRideJournalOpen(true);
+                } : undefined}
                 rideMeta={`${plannedMinutes(rideSetupDraft.phases)} min · ${rideSetupDraft.trainingType.label}`}
                 onLogCare={logCare}
                 onOpenRalf={ralfAvailable ? openRalf : undefined}
@@ -2773,6 +2824,32 @@ function EquinaApp() {
           memory={rideSetupMemory.memory}
           onContinue={confirmRideSetup}
           onDismiss={() => setRideSetupOpen(false)}
+        />
+
+        <RideSetupSheet
+          visible={addActivityOpen}
+          mode="log"
+          horses={rideHorses}
+          horseId={activityDraft.horseId}
+          trainingType={activityDraft.trainingType}
+          phases={activityDraft.phases}
+          memory={rideSetupMemory.memory}
+          onLog={logActivity}
+          onDismiss={() => setAddActivityOpen(false)}
+        />
+
+        <RideJournalSheet
+          visible={rideJournalOpen}
+          entries={rideJournal.entries}
+          total={rideJournal.total}
+          horseNames={Object.fromEntries(horseRecords.horses.map((record) => [record.id, record.name]))}
+          deletingId={deletingRideId || undefined}
+          error={rideJournalOpen ? rideJournal.error : undefined}
+          onDelete={deleteJournalRide}
+          onDismiss={() => {
+            setRideJournalOpen(false);
+            rideJournal.clearError();
+          }}
         />
 
         {signUpPlanOffer.visible && purchases.available ? (
@@ -3235,6 +3312,8 @@ function HomeScreen({
   horsePhoto,
   heroPhotoPending,
   onToggleRide,
+  onAddActivity,
+  onOpenJournal,
   rideMeta: plannedRideMeta,
   onLogCare,
   onOpenRalf,
@@ -3254,6 +3333,9 @@ function HomeScreen({
   horsePhoto: string;
   /** The rider's own photo is on its way: show no stock picture meanwhile. */
   heroPhotoPending: boolean;
+  /** Logs a training done without the clock. Absent where rides are not saved. */
+  onAddActivity?: () => void;
+  onOpenJournal?: () => void;
   onToggleRide: () => void;
   /** The ride the setup sheet will open with: "52 min · Dressage". */
   rideMeta: string;
@@ -3597,6 +3679,28 @@ function HomeScreen({
       </Animated.View>
 
       <Animated.View style={[styles.homeDetails, detailsStyle]}>
+        {/* Under Start ride: a training done without the clock still
+            belongs in the journal. */}
+        {onAddActivity ? (
+          <Pressable
+            testID="add-activity"
+            accessibilityRole="button"
+            accessibilityLabel="Add activity"
+            accessibilityHint="Log a training you did without starting the clock"
+            style={({ pressed }) => [styles.homeAddActivity, pressed && styles.homeAgendaRowPressed]}
+            onPress={onAddActivity}
+          >
+            <View style={styles.homeAddActivityIcon}>
+              <Plus size={18} strokeWidth={2.2} color={equinaTheme.colors.brass} />
+            </View>
+            <View style={styles.homeBriefingCopy}>
+              <Text style={styles.homeAddActivityTitle}>Add activity</Text>
+              <Text numberOfLines={1} style={styles.homeAddActivityMeta}>Log a training you did without the clock</Text>
+            </View>
+            <ChevronRight size={17} color={nightTheme.faint} />
+          </Pressable>
+        ) : null}
+
         {/* An empty journal on day one only repeats what the ride button
             already says. It appears with the first saved ride. */}
         {rideEntries.length > 0 ? (
@@ -3606,6 +3710,7 @@ function HomeScreen({
             onPeriodChange={setSummaryPeriod}
             lifetimeRides={horse.sessionCount}
             lastRideOn={lastRideDay}
+            onOpenJournal={onOpenJournal}
           />
         ) : null}
 
@@ -5192,7 +5297,9 @@ function StableScreen({
                   <View style={styles.stableLatestRideCopy}>
                     <Text style={styles.stableLatestRideKicker}>Latest ride · {rideDurationLabel(lastRide.elapsedSeconds)}</Text>
                     <Text style={styles.stableLatestRideTitle}>{lastRide.focus}</Text>
-                    <Text style={styles.stableLatestRideBody}>{lastRide.discipline} · {lastRide.mood.toLowerCase()} · {lastRide.completedPhases}/{lastRide.totalPhases} phases</Text>
+                    <Text style={styles.stableLatestRideBody}>
+                      {[lastRide.discipline, lastRide.mood?.toLowerCase(), `${lastRide.completedPhases}/${lastRide.totalPhases} phases`].filter(Boolean).join(" · ")}
+                    </Text>
                   </View>
                 </View>
               )}
@@ -8129,6 +8236,39 @@ const styles = StyleSheet.create({
   },
   homeAgendaRowPressed: {
     backgroundColor: equinaTheme.surfaces.elevated
+  },
+  homeAddActivity: {
+    minHeight: 60,
+    marginTop: -6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: equinaTheme.radius.control,
+    borderWidth: 1,
+    borderColor: equinaTheme.material.separator,
+    backgroundColor: equinaTheme.surfaces.raised,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  homeAddActivityIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(196,160,90,0.55)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  homeAddActivityTitle: {
+    color: equinaTheme.text.primary,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "600"
+  },
+  homeAddActivityMeta: {
+    color: equinaTheme.text.secondary,
+    fontSize: 13,
+    lineHeight: 18
   },
   homeBriefingRow: {
     minHeight: 82,

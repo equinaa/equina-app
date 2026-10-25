@@ -756,6 +756,64 @@ await assert.rejects(
   "Completed phases must not exceed the planned total."
 );
 
+// Add activity (202610250001): a training logged by hand afterwards is marked
+// manual, and the dates a phone sends have to be plausible.
+const liveSource = await db.query<{ source: string }>("select source from public.ride_entries where id = $1", [rideEntryId]);
+assert.equal(liveSource.rows[0]?.source, "live", "A ride saved without a source is a timed ride.");
+const loggedActivity = await db.query<{ source: string }>(`
+  insert into public.ride_entries(rider_id, discipline, training_type, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases, source)
+  values ($1, 'trail', 'hack', 'Hack', now() - interval '2 days 1 hour', now() - interval '2 days', 3600, 1, 1, 'manual')
+  returning source
+`, [riderA]);
+assert.equal(loggedActivity.rows[0]?.source, "manual", "A rider must be able to log a training from two days ago.");
+await assert.rejects(
+  db.query(`
+    insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases, source)
+    values ($1, 'trail', 'Tomorrow', now() + interval '1 day', now() + interval '1 day 1 hour', 3600, 1, 1, 'manual')
+  `, [riderA]),
+  /ended already/,
+  "A logged activity must not be dated in the future."
+);
+const fastClockActivity = await db.query<{ id: string }>(`
+  insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases, source)
+  values ($1, 'trail', 'Fast clock', now() - interval '40 minutes', now() + interval '20 minutes', 3600, 1, 1, 'manual')
+  returning id
+`, [riderA]);
+assert.ok(fastClockActivity.rows[0]?.id, "A phone a few minutes fast can log an activity that has just ended by its clock.");
+await assert.rejects(
+  db.query(`
+    insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases, source)
+    values ($1, 'trail', 'Last summer', now() - interval '40 days 1 hour', now() - interval '40 days', 3600, 1, 1, 'manual')
+  `, [riderA]),
+  /a month back/,
+  "A logged activity must not reach further back than a month."
+);
+await assert.rejects(
+  db.query(`
+    insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases)
+    values ($1, 'jumping', 'Next year', now() + interval '1 year', now() + interval '1 year', 600, 1, 1)
+  `, [riderA]),
+  /cannot finish in the future/,
+  "A timed ride must not finish in the future."
+);
+const fastClock = await db.query<{ id: string }>(`
+  insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases)
+  values ($1, 'jumping', 'Fast clock', now(), now() + interval '20 minutes', 600, 1, 1)
+  returning id
+`, [riderA]);
+assert.ok(fastClock.rows[0]?.id, "A phone whose clock runs a few minutes fast can still save its ride.");
+await assert.rejects(
+  db.query(`
+    insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases, source)
+    values ($1, 'jumping', 'Imported', now(), now(), 600, 1, 1, 'import')
+  `, [riderA]),
+  /ride_entries_source_known/,
+  "A ride is either timed or logged."
+);
+const turnedLogged = await db.query("update public.ride_entries set source = 'manual' where id = $1 returning id", [rideEntryId]).catch((error: Error) => error);
+assert.ok(turnedLogged instanceof Error, "A timed ride must not be relabelled as logged afterwards.");
+await db.query("delete from public.ride_entries where rider_id = $1 and focus in ('Hack', 'Fast clock')", [riderA]);
+
 
 // --- Ralf credit ledger -----------------------------------------------------
 
@@ -1372,7 +1430,7 @@ const clientWrites: Record<string, ClientWrites> = {
   },
   profiles: { update: ["display_name", "locale", "location", "discipline", "skill_level", "bio"] },
   ride_entries: {
-    insert: ["rider_id", "horse_id", "discipline", "training_type", "focus", "planned_duration", "started_at", "completed_at", "elapsed_seconds", "completed_phases", "total_phases", "phases", "mood", "rider_note"],
+    insert: ["rider_id", "horse_id", "discipline", "training_type", "focus", "planned_duration", "started_at", "completed_at", "elapsed_seconds", "completed_phases", "total_phases", "phases", "mood", "rider_note", "source"],
     update: ["focus", "mood", "rider_note", "elapsed_seconds", "completed_phases"],
     delete: true
   },

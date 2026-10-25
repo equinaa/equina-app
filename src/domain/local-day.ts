@@ -28,3 +28,20 @@ export const startOfPreviousMonth = (now: number | Date = Date.now()): Date => {
   const date = now instanceof Date ? now : new Date(now);
   return new Date(date.getFullYear(), date.getMonth() - 1, 1);
 };
+
+const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/** "Fri 23 Oct · 14:50" in local time, the way a journal line reads. Null if it is not an instant. */
+export const localMomentLabel = (value: number | string | Date): string | null => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${weekdayNames[date.getDay()]} ${date.getDate()} ${monthNames[date.getMonth()]} · ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+/** "1 Sep": a local day, short. Null if it is not one. */
+export const shortDayLabel = (day: string): string | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) return null;
+  return `${Number(match[3])} ${monthNames[Number(match[2]) - 1]}`;
+};

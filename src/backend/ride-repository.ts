@@ -43,6 +43,7 @@ const mapRideEntry = (row: Record<string, unknown>): RideEntry => ({
   phases: mapPhases(row.phases),
   mood: row.mood ? (row.mood as RideEntry["mood"]) : undefined,
   riderNote: row.rider_note ? String(row.rider_note) : undefined,
+  source: row.source === "manual" ? "manual" : "live",
   createdAt: String(row.created_at), updatedAt: String(row.updated_at)
 });
 
@@ -103,7 +104,10 @@ export class RideRepository {
       elapsed_seconds: input.elapsedSeconds,
       completed_phases: input.completedPhases, total_phases: input.totalPhases,
       phases: phasesRow(input.phases),
-      mood: input.mood ?? null, rider_note: input.riderNote?.trim() || null
+      mood: input.mood ?? null, rider_note: input.riderNote?.trim() || null,
+      // Sent only for a logged activity: a timed ride is the column's
+      // default, and keeps saving on a database without the column yet.
+      ...(input.source === "manual" ? { source: "manual" } : {})
     }).select("*").single();
     return mapRideEntry(requireData(data as Record<string, unknown> | null, error, "The ride could not be saved."));
   }

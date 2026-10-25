@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ChevronRight } from "lucide-react-native";
 import type { RidePeriod, RideSummary } from "../../domain/ride-stats";
-import { describeMood, describeTracked, describeTrend } from "../../domain/ride-stats";
+import { describeLogged, describeMood, describeTracked, describeTrend } from "../../domain/ride-stats";
 import { equinaTheme } from "../../ui/theme/theme";
 import { rideTrainingLabel } from "./ride-plan";
 
@@ -16,6 +17,8 @@ export type RideSummaryCardProps = {
   /** Rides in the journal overall, used only to word the empty state. */
   lifetimeRides: number;
   lastRideOn?: string;
+  /** Opens every ride, one line each. */
+  onOpenJournal?: () => void;
 };
 
 export function RideSummaryCard({
@@ -23,7 +26,8 @@ export function RideSummaryCard({
   period,
   onPeriodChange,
   lifetimeRides,
-  lastRideOn
+  lastRideOn,
+  onOpenJournal
 }: RideSummaryCardProps) {
   const label = period === "week" ? "this week" : "this month";
 
@@ -33,6 +37,7 @@ export function RideSummaryCard({
   const trend = summary ? describeTrend(summary) : null;
   const mood = summary ? describeMood(summary) : null;
   const tracked = summary ? describeTracked(summary.trackedSeconds) : null;
+  const logged = summary ? describeLogged(summary.loggedSeconds) : null;
   // A ride set up as "Flatwork" also has "Flatwork" as its focus; the tally
   // above already says it, so only older, freer focuses are repeated here.
   const trainingWords = new Set(summary?.trainings.map((entry) => (rideTrainingLabel(entry.value) ?? entry.value).toLowerCase()) ?? []);
@@ -92,6 +97,7 @@ export function RideSummaryCard({
             ) : null}
             {mood ? <Text style={styles.fact}>{mood}</Text> : null}
             {tracked ? <Text style={styles.fact}>{tracked}</Text> : null}
+            {logged ? <Text style={styles.fact}>{logged}</Text> : null}
           </View>
 
           {workedOn.length > 0 ? (
@@ -101,6 +107,19 @@ export function RideSummaryCard({
           ) : null}
         </View>
       )}
+
+      {onOpenJournal && lifetimeRides > 0 ? (
+        <Pressable
+          testID="ride-journal-open"
+          accessibilityRole="button"
+          accessibilityLabel="See all rides"
+          onPress={onOpenJournal}
+          style={({ pressed }) => [styles.open, pressed && styles.openPressed]}
+        >
+          <Text style={styles.openText}>See all rides</Text>
+          <ChevronRight size={16} color={equinaTheme.colorRole.accent} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -150,5 +169,15 @@ const styles = StyleSheet.create({
   focus: { ...equinaTheme.typography.meta, color: equinaTheme.text.tertiary },
   empty: { gap: equinaTheme.spacing.xs },
   emptyTitle: { ...equinaTheme.typography.body, color: equinaTheme.text.primary, fontWeight: "600" },
-  emptyBody: { ...equinaTheme.typography.meta, color: equinaTheme.text.secondary }
+  emptyBody: { ...equinaTheme.typography.meta, color: equinaTheme.text.secondary },
+  open: {
+    minHeight: equinaTheme.accessibility.minimumTapTarget,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 2,
+    marginBottom: -equinaTheme.spacing.sm
+  },
+  openPressed: { opacity: 0.6 },
+  openText: { ...equinaTheme.typography.meta, color: equinaTheme.colorRole.accent, fontWeight: "600" }
 });
