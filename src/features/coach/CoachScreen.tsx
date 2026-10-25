@@ -95,6 +95,20 @@ export function RalfScreen({
     void controller.send(queuedPrompt);
   }, [queuedPrompt]);
 
+  // A conversation keeps the horse it was started about, and the server reads
+  // the horse from there. Opened after the rider picked another horse on Home,
+  // it moves to that horse; its own focus, load and style stay as they were.
+  const active = controller.activeConversation;
+  useEffect(() => {
+    if (!active || !context.selectedHorseId || active.selectedHorseId === context.selectedHorseId) return;
+    void controller.updateContext({
+      ...context,
+      focus: active.focus,
+      load: active.load,
+      style: active.style
+    }).catch(() => undefined);
+  }, [active?.id, active?.selectedHorseId, context.selectedHorseId]);
+
   return (
     <CoachScreen
       context={context}
