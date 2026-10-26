@@ -254,14 +254,6 @@ export const rideScheduleKey = (run: RideRun, phases: RidePhasePlan[]) => {
 
 // Cues ----------------------------------------------------------------------
 
-const spokenMinutes = (minutes: number) => (minutes === 1 ? "1 minute" : `${minutes} minutes`);
-
-/** What the phone says as a phase begins: "Warm-up. Trot. 7 minutes." */
-export const phaseAnnouncement = (phase: RidePhasePlan) =>
-  `${[phase.title, phase.detail, spokenMinutes(phase.minutes)].filter((part) => part.trim()).join(". ")}.`;
-
-export const phasesDoneAnnouncement = "All phases done. Finish the ride when you're ready.";
-
 export type RideAlert = {
   /** The phase that begins, or null for the end of the last one. */
   phaseIndex: number | null;
@@ -272,7 +264,7 @@ export type RideAlert = {
 
 /**
  * Every phase change still ahead, as seconds from now: the notifications that
- * stand in for the voice while the phone is locked. Nothing while paused.
+ * stand in for the chime while the phone is locked. Nothing while paused.
  */
 export const upcomingRideAlerts = (run: RideRun, phases: RidePhasePlan[], now: number): RideAlert[] => {
   if (run.runningSince === null || run.phasesDone || phases.length === 0) return [];
