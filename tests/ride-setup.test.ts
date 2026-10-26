@@ -9,7 +9,6 @@ import {
   movePhaseUp,
   parseRideSetupMemory,
   pauseRun,
-  phaseAnnouncement,
   phaseProgress,
   phaseRemainingMs,
   phasesFor,
@@ -211,12 +210,6 @@ const phases = defaultRidePhases(dressage);
   assert.equal(rideScheduleKey(paused, phases), "stopped");
   assert.notEqual(rideScheduleKey(resumeRun(paused, t0 + 5 * minute), phases), key, "After a break the changes come later.");
   assert.equal(rideScheduleKey(readyRun(), phases), "stopped", "Nothing is scheduled before the start.");
-}
-
-{
-  // What the phone says as each phase begins.
-  assert.equal(phaseAnnouncement(phases[1]!), "Warm-up. Trot. 7 minutes.");
-  assert.equal(phaseAnnouncement({ id: "x", title: "Stretch", detail: "", minutes: 1 }), "Stretch. 1 minute.");
 }
 
 // --- Remembering the last setup ---------------------------------------------------------

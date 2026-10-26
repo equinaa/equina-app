@@ -22,8 +22,6 @@ import {
   Play,
   SendHorizontal,
   Sparkles,
-  Volume2,
-  VolumeX,
   X
 } from "lucide-react-native";
 import type { RidePhaseEntry } from "../../backend";
@@ -34,22 +32,17 @@ import { equinaTheme } from "../../ui/theme/theme";
 import {
   cancelRideAlerts,
   cancelStaleRideAlerts,
-  cueFromClock,
-  cueFromTap,
-  cueVoiceOn,
+  cuePhaseChange,
   holdScreenAwake,
   prepareRideCues,
   releaseRideCues,
-  scheduleRideAlerts,
-  silenceRideCues
+  scheduleRideAlerts
 } from "./ride-cues";
 import {
   isRunning,
   pauseRun,
-  phaseAnnouncement,
   phaseProgress,
   phaseRemainingMs,
-  phasesDoneAnnouncement,
   plannedMinutes,
   reachedPhases,
   readyRun,
@@ -146,9 +139,7 @@ export function RideModeScreen({
   const phases = plan.phases;
   const [run, setRun] = useState<RideRun>(readyRun);
   const [now, setNow] = useState(() => Date.now());
-  const [voice, setVoice] = useState(true);
   const runRef = useRef(run);
-  const voiceRef = useRef(voice);
   const lastTick = useRef(Date.now());
   const alertIds = useRef<string[]>([]);
   const alertQueue = useRef<Promise<void>>(Promise.resolve());
@@ -157,7 +148,6 @@ export function RideModeScreen({
   const reducedMotion = useReducedMotion();
   const useNativeDriver = Platform.OS !== "web";
   runRef.current = run;
-  voiceRef.current = voice;
 
   const started = run.startedAt !== null;
   const running = isRunning(run);
@@ -228,15 +218,11 @@ export function RideModeScreen({
       runRef.current = step.run;
       setRun(step.run);
       // Out of sight -- locked, or another app in front -- the notification
-      // already told the rider; a second voice from the background would not.
-      // "inactive" (Control Center pulled down) still runs and still speaks.
+      // already told the rider; a second chime from the background would not.
+      // "inactive" (Control Center pulled down) still runs and still chimes.
       if (slept || AppState.currentState === "background") return;
-      if (step.finished) {
-        cueFromClock(phasesDoneAnnouncement, voiceRef.current, "done");
-      } else if (step.entered !== null) {
-        const entered = phases[step.entered];
-        if (entered) cueFromClock(phaseAnnouncement(entered), voiceRef.current, "phase");
-      }
+      if (step.finished) cuePhaseChange("done");
+      else if (step.entered !== null && phases[step.entered]) cuePhaseChange("phase");
       pulsePhase();
     }, tickMs);
     return () => clearInterval(interval);
@@ -262,7 +248,7 @@ export function RideModeScreen({
     runRef.current = next;
     setRun(next);
     setNow(tick);
-    cueFromTap(phaseAnnouncement(first), voice);
+    cuePhaseChange("phase");
     pulsePhase();
   };
 
@@ -270,7 +256,6 @@ export function RideModeScreen({
     void Haptics.selectionAsync().catch(() => undefined);
     const tick = Date.now();
     const next = running ? pauseRun(run, tick) : resumeRun(run, tick);
-    if (running) silenceRideCues();
     runRef.current = next;
     setRun(next);
     setNow(tick);
@@ -283,21 +268,12 @@ export function RideModeScreen({
     runRef.current = next;
     setRun(next);
     setNow(tick);
-    const entered = phases[next.phaseIndex];
-    cueFromTap(next.phasesDone || !entered ? phasesDoneAnnouncement : phaseAnnouncement(entered), voice);
+    cuePhaseChange("phase");
     pulsePhase();
-  };
-
-  const toggleVoice = () => {
-    void Haptics.selectionAsync().catch(() => undefined);
-    if (voice) silenceRideCues();
-    else cueVoiceOn();
-    setVoice((value) => !value);
   };
 
   const finishRide = () => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    silenceRideCues();
     const tick = Date.now();
     const elapsed = Math.min(maxRideMs, rideElapsedMs(run, tick));
     onFinish({
@@ -374,17 +350,6 @@ export function RideModeScreen({
           </View>
 
           <View style={styles.rideTopActions}>
-            <MotionPressable
-              testID="ride-voice"
-              accessibilityRole="switch"
-              accessibilityLabel="Say each phase out loud"
-              accessibilityState={{ checked: voice }}
-              hitSlop={6}
-              onPress={toggleVoice}
-              style={styles.rideIconButton}
-            >
-              {voice ? <Volume2 size={19} color={equinaTheme.text.primary} /> : <VolumeX size={19} color={equinaTheme.text.secondary} />}
-            </MotionPressable>
             {!started ? (
               <MotionPressable
                 testID="ride-edit"
@@ -791,6 +756,8 @@ const styles = StyleSheet.create({
     gap: 12
   },
   rideTopActions: {
+    // As wide as the close button even when empty, so the name stays centred.
+    minWidth: 44,
     flexDirection: "row",
     gap: 8
   },

@@ -198,7 +198,7 @@ export function RideSetupSheet({
     }
     if (problem || !onContinue) return;
     // Asked here, on the ground, never mid-ride: alerts are what reach a
-    // locked phone. A no keeps the voice and the buzz with the screen on.
+    // locked phone. A no keeps the chime and the buzz with the screen on.
     if (Platform.OS !== "web") void rideAlertsAllowed(true);
     onContinue(plan);
   };
@@ -436,8 +436,8 @@ export function RideSetupSheet({
         ) : (
           <Text style={styles.note}>
             {Platform.OS === "web"
-              ? "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. Keep this page open; the screen stays on so your phone can call out each phase."
-              : "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. At each new phase your phone chimes, vibrates and says what comes next, with a notification if the screen is locked."}
+              ? "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. Keep this page open; the screen stays on so your phone can chime at each phase."
+              : "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. At each new phase your phone chimes and vibrates, with a notification if the screen is locked."}
           </Text>
         )}
         {problem ? <Text accessibilityRole="alert" style={styles.problem}>{problem}</Text> : null}

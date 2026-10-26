@@ -6,43 +6,39 @@ import type { AudioPlayer } from "expo-audio";
 import type { RideAlert } from "./ride-plan";
 
 /**
- * How the phone tells a rider the phase changed: a chime, a buzz, and the next
- * phase said out loud. The rider is on a horse with the phone in a pocket, so
- * nothing here asks them to look.
+ * How the phone tells a rider the phase changed: a chime and a buzz. The rider
+ * is on a horse with the phone in a pocket, so nothing here asks them to look.
+ * Nothing is said out loud; the screen names the phase.
  *
- * Speech and sound are native modules a build from before the ride setup does
- * not have. They load when a ride opens; without them the ride still buzzes.
- * With the phone locked, JavaScript stops: notifications scheduled for each
- * phase change take over (`scheduleRideAlerts`). No notification handler is
- * set, so while the app is open they stay silent and the voice speaks instead.
+ * Sound is a native module a build from before the ride setup does not have.
+ * It loads when a ride opens; without it the ride still buzzes. With the phone
+ * locked, JavaScript stops: notifications scheduled for each phase change take
+ * over (`scheduleRideAlerts`). No notification handler is set, so while the app
+ * is open they stay silent and the chime plays instead.
  */
 
-type SpeechModule = typeof import("expo-speech");
 type AudioModule = typeof import("expo-audio");
 
-let speech: SpeechModule | null = null;
 let audio: AudioModule | null = null;
 let chime: AudioPlayer | null = null;
-const speechDelayMs = 450;
-// Just past the 0.62 s chime: when nothing is said after it, the music comes back here.
+// Just past the 0.62 s chime: the music the chime turned down comes back here.
 const chimeOnlyMs = 800;
+let unduckTimer: ReturnType<typeof setTimeout> | null = null;
 const alertChannel = "ride-phases";
 const alertRoute = "ride-phase";
 
 export async function prepareRideCues() {
-  speech ??= await import("expo-speech").catch(() => null);
   audio ??= await import("expo-audio").catch(() => null);
   if (!audio) return;
   if (Platform.OS !== "web") {
-    // Heard with the ring switch on silent, and spoken over the rider's music
+    // Heard with the ring switch on silent, and played over the rider's music
     // by turning it down for a moment instead of stopping it.
     await audio.setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "duckOthers" }).catch(() => undefined);
   }
   if (!chime) {
     try {
-      // Kept from closing the audio session when it ends: by default expo-audio
-      // closes it 0.1 s after the chime, which cut the voice off mid-sentence.
-      // The voice and releaseRideCues close it instead.
+      // Kept from closing the audio session on its own when it ends: unduck
+      // and releaseRideCues close it, so the music comes back in one place.
       chime = audio.createAudioPlayer(require("../../../assets/sounds/ride-phase.wav"), { keepAudioSessionActive: true });
     } catch {
       chime = null;
@@ -51,12 +47,13 @@ export async function prepareRideCues() {
 }
 
 export function releaseRideCues() {
-  void speech?.stop().catch(() => undefined);
+  if (unduckTimer) clearTimeout(unduckTimer);
+  unduckTimer = null;
   chime?.remove();
   chime = null;
   if (audio && Platform.OS !== "web") {
     // Back to what iOS gives an app that has not asked for anything.
-    void audio.setIsAudioActiveAsync(false).catch(() => undefined);
+    if (Platform.OS === "ios") void audio.setIsAudioActiveAsync(false).catch(() => undefined);
     void audio.setAudioModeAsync({ playsInSilentMode: false, interruptionMode: "doNotMix" }).catch(() => undefined);
   }
 }
@@ -87,71 +84,31 @@ const ring = () => {
     chime.seekTo(0).catch(() => undefined);
     chime.play();
   } catch {
-    // A chime that cannot play leaves the buzz and the voice.
+    // A chime that cannot play leaves the buzz.
   }
 };
 
-// Each utterance gives the music back only if it is still the one speaking:
-// stopping the last words to say new ones must not close the session the new
-// ones are about to use.
-let currentUtterance = 0;
-
-const say = (text: string) => {
-  if (!speech) return;
-  const mine = ++currentUtterance;
-  const finished = () => {
-    if (mine === currentUtterance) unduck();
-  };
-  try {
-    void speech.stop().catch(() => undefined);
-    speech.speak(text, {
-      language: "en-GB",
-      // A touch slower than normal: heard over hooves and wind.
-      rate: 0.95,
-      onDone: finished,
-      onStopped: finished,
-      onError: finished
-    });
-  } catch {
-    // The chime and the buzz already said it.
-  }
-};
-
-// The voice turns the rider's music down while it speaks; this gives it back.
+// The chime turns the rider's music down while it plays; this gives it back.
+// iOS only: on Android the same call switches expo-audio off for the app, and
+// every chime after it would be silent.
 function unduck() {
-  if (audio && Platform.OS !== "web") void audio.setIsAudioActiveAsync(false).catch(() => undefined);
+  if (audio && Platform.OS === "ios") void audio.setIsAudioActiveAsync(false).catch(() => undefined);
 }
 
 /**
- * The rider's own tap on Start: Safari only lets a page speak if the first
- * words come straight from a tap, so these are said at once, without waiting
- * for the chime.
+ * A phase begins, or the last one ends. The first one comes from the rider's
+ * own tap on Start, which is what lets a browser play the chime at all.
  */
-export function cueFromTap(text: string, voice: boolean) {
-  buzz("phase");
-  ring();
-  if (voice) say(text);
-  else setTimeout(unduck, chimeOnlyMs);
-}
-
-/** A phase change the clock made. The chime first, then the words. */
-export function cueFromClock(text: string, voice: boolean, kind: "phase" | "done") {
+export function cuePhaseChange(kind: "phase" | "done") {
   buzz(kind);
   ring();
-  if (voice) setTimeout(() => say(text), speechDelayMs);
-  else setTimeout(unduck, chimeOnlyMs);
-}
-
-/**
- * Turning the voice back on is a tap, and Safari only lets a page speak from
- * one: saying so here keeps the next phase change audible in the browser.
- */
-export function cueVoiceOn() {
-  say("Voice on.");
-}
-
-export function silenceRideCues() {
-  void speech?.stop().catch(() => undefined);
+  // Only the latest chime gives the music back: closing the session pauses
+  // every player, so an earlier cue's timer would cut a newer chime short.
+  if (unduckTimer) clearTimeout(unduckTimer);
+  unduckTimer = setTimeout(() => {
+    unduckTimer = null;
+    unduck();
+  }, chimeOnlyMs);
 }
 
 // Locked phone ---------------------------------------------------------------
