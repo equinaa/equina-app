@@ -887,6 +887,9 @@ function EquinaApp() {
   // Account opens over the tab the rider was on, and closing it goes back there.
   const [accountReturnTab, setAccountReturnTab] = useState<Tab>("home");
   const [accountInitialRoute, setAccountInitialRoute] = useState<AccountRoute>("root");
+  // Horses opened from the account's "Horses" row, so the list offers the way
+  // back to the account. Reached from the dock, the tab is a tab like any other.
+  const [stableFromAccount, setStableFromAccount] = useState(false);
   // Ralf opens over whichever tab asked for him, with that tab's question.
   const [ralfOpen, setRalfOpen] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState(api.store.listings[0]?.id ?? "");
@@ -1743,6 +1746,15 @@ function EquinaApp() {
   const closeAccount = () => {
     setTab(accountReturnTab === "profile" ? "home" : accountReturnTab);
   };
+  // Back to the account as it was: closing it later still returns the rider to
+  // the tab they opened it from, not to the horses.
+  const backToAccount = () => {
+    setAccountInitialRoute("root");
+    setTab("profile");
+  };
+  useEffect(() => {
+    if (tab !== "stable") setStableFromAccount(false);
+  }, [tab]);
 
   // Finishing a preview lesson only moves the preview's bar. A real lesson is
   // recorded, and the bar follows what the rider actually finished.
@@ -2774,6 +2786,7 @@ function EquinaApp() {
                 // out of the tab rather than reading as advice.
                 nutritionAvailable={false}
                 onOpenRalf={ralfAvailable ? openRalf : undefined}
+                onBackToAccount={stableFromAccount ? backToAccount : undefined}
                 onToggleNutritionMeal={toggleNutritionMeal}
                 onLogNutritionWater={logNutritionWater}
                 program={ridePersistence ? {
@@ -2877,7 +2890,10 @@ function EquinaApp() {
                 busy={accountController.busy}
                 error={accountController.error}
                 blocked={accountController.blocked}
-                onOpenHorse={() => setTab("stable")}
+                onOpenHorse={() => {
+                  setStableFromAccount(true);
+                  setTab("stable");
+                }}
                 onSaveProfile={accountController.saveProfile}
                 onUploadAvatar={accountController.uploadAvatar}
                 onSavePreferences={accountController.savePreferences}
@@ -2904,7 +2920,10 @@ function EquinaApp() {
           <TabDock
             tabs={dockTabs}
             activeTab={tab}
-            onChange={setTab}
+            onChange={(next) => {
+              setStableFromAccount(false);
+              setTab(next);
+            }}
             // New Club activity shows on the tab from anywhere in the app.
             badges={{ community: club.unreadActivity > 0 }}
           />
@@ -5101,6 +5120,7 @@ function StableScreen({
   lastRide,
   nutritionAvailable,
   onOpenRalf,
+  onBackToAccount,
   onToggleNutritionMeal,
   onLogNutritionWater,
   program
@@ -5121,6 +5141,8 @@ function StableScreen({
   nutritionAvailable: boolean;
   /** Absent while Ralf is switched off for this account. */
   onOpenRalf?: (prompt?: string) => void;
+  /** Present when the rider came here from the account's "Horses" row. */
+  onBackToAccount?: () => void;
   onToggleNutritionMeal: (mealId: NutritionMealId) => void;
   onLogNutritionWater: () => void;
   /** The rider's training week seen from each horse. Absent where rides are not saved. */
@@ -5403,12 +5425,31 @@ function StableScreen({
     </>
   );
 
+  // Every state the account's "Horses" row can land on offers the way back:
+  // the list, an empty or failed list, loading, and the sample horse.
+  const backToAccount = onBackToAccount ? (
+    <Pressable
+      testID="stable-back-to-account"
+      accessibilityRole="button"
+      accessibilityLabel="Back to your account"
+      hitSlop={8}
+      onPress={onBackToAccount}
+      style={({ pressed }) => [styles.stableBack, pressed && styles.tabItemPressed]}
+    >
+      <ChevronLeft size={20} color={equinaTheme.text.secondary} />
+      <Text style={styles.stableBackText}>Account</Text>
+    </Pressable>
+  ) : null;
+
   if (connected && loading && !loaded) {
     return (
-      <View style={[styles.screen, styles.stableSystemState]}>
-        <Text style={styles.stableSystemEyebrow}>HORSE</Text>
-        <Text style={styles.stableSystemTitle}>Loading your records...</Text>
-        <Text style={styles.stableSystemBody}>Private horse data is being restored from Equina.</Text>
+      <View style={styles.screen}>
+        {backToAccount}
+        <View style={styles.stableSystemState}>
+          <Text style={styles.stableSystemEyebrow}>HORSE</Text>
+          <Text style={styles.stableSystemTitle}>Loading your records...</Text>
+          <Text style={styles.stableSystemBody}>Private horse data is being restored from Equina.</Text>
+        </View>
       </View>
     );
   }
@@ -5417,6 +5458,7 @@ function StableScreen({
     return (
       <>
         <View style={[styles.screen, styles.stableEmptyScreen]}>
+          {backToAccount}
           <View style={styles.stableEmptyHero}>
             <Image source={{ uri: disciplineVisuals[discipline].home }} style={styles.stableEmptyImage} />
             <LinearGradient
@@ -5498,6 +5540,7 @@ function StableScreen({
       <>
         <View style={styles.screen} testID="stable-horse-list">
           {connectionBanner}
+          {backToAccount}
           <View style={styles.stableHorseList}>
             {horses.map((horseOption) => {
               const age = horseOption.birthDate
@@ -5578,7 +5621,7 @@ function StableScreen({
             <ChevronLeft size={20} color={equinaTheme.text.secondary} />
             <Text style={styles.stableBackText}>Horses</Text>
           </Pressable>
-        ) : null}
+        ) : backToAccount}
 
         <View style={styles.stableProfileHeader}>
           <View style={styles.stablePortraitWrap}>
