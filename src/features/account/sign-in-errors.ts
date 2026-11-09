@@ -21,6 +21,19 @@ const describe = (error: unknown): ErrorShape => {
 export const isNetworkFailure = (error: unknown) => describe(error).code === networkUnreachable;
 
 /**
+ * The password was right but the email was never confirmed. Auth checks the
+ * password first, so this answer only reaches someone who knows it: telling
+ * them to confirm reveals nothing a stranger could learn.
+ */
+export const needsEmailConfirmation = (error: unknown) => describe(error).code === "email_not_confirmed";
+
+/** Creating an account for an email that already has a confirmed one. */
+export const accountAlreadyExists = (error: unknown) => {
+  const { code } = describe(error);
+  return code === "user_already_exists" || code === "email_exists";
+};
+
+/**
  * What a failed sign-in attempt tells the rider. The outcome of a password
  * reset or an emailed sign-in link is not decided here: those always answer
  * with the same neutral notice, see `emailRequestOutcome`.
@@ -29,8 +42,8 @@ export function signInErrorCopy(error: unknown, context: SignInErrorContext): st
   const { code, retryable } = describe(error);
   if (code === "ERR_WEB_BROWSER_BLOCKED") return copy.errors.popupBlocked;
   if (code === "over_request_rate_limit") return copy.errors.tooManyAttempts;
-  // Wrong password and unconfirmed email share one message: telling them apart
-  // would confirm that the email has an account.
+  // An unconfirmed email is normally caught first and sent to the code screen
+  // (see needsEmailConfirmation); if that fails, it reads like a wrong password.
   if (context === "password" && (code === "invalid_credentials" || code === "email_not_confirmed")) {
     return copy.errors.badCredentials;
   }

@@ -1,5 +1,5 @@
 import type { AuthChangeEvent, Session, SupabaseClient } from "@supabase/supabase-js";
-import { backendError } from "./errors";
+import { backendError, EquinaBackendError } from "./errors";
 import { forgetSignedUrls } from "./signed-urls";
 
 export type AuthProvider = "apple" | "google";
@@ -73,7 +73,27 @@ export class AuthRepository {
     });
     if (error) throw backendError(error, "Your account could not be created.");
     if (!data.user) throw backendError(new Error("Account was not returned."), "Your account could not be created.");
+    // With email confirmation on, signing up again with a confirmed address
+    // gets no error: Auth answers with a stand-in user that has no identities
+    // and sends no email. Without this the rider would wait for a code that
+    // never comes.
+    if (!data.session && data.user.identities?.length === 0) {
+      throw new EquinaBackendError("An account already exists for this email.", "user_already_exists");
+    }
     return data.session;
+  }
+
+  /**
+   * Sends the sign-up confirmation again, to an account that has not confirmed
+   * its email yet. A new code (or link) replaces the previous one.
+   */
+  async resendSignupConfirmation(email: string, redirectTo?: string): Promise<void> {
+    const { error } = await this.client.auth.resend({
+      type: "signup",
+      email: email.trim().toLowerCase(),
+      options: { emailRedirectTo: redirectTo }
+    });
+    if (error) throw backendError(error, "The confirmation email could not be sent.");
   }
 
   async signInWithPassword(email: string, password: string): Promise<Session> {

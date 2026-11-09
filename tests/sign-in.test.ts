@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AuthRepository } from "../src/backend/auth-repository";
 import { backendError, EquinaBackendError } from "../src/backend/errors";
 import { visibleProviders } from "../src/features/account/provider-visibility";
 import { signInCopy as copy } from "../src/features/account/sign-in-copy";
 import {
+  accountAlreadyExists,
   emailRequestOutcome,
   isNetworkFailure,
+  needsEmailConfirmation,
   signInErrorCopy
 } from "../src/features/account/sign-in-errors";
 
@@ -126,6 +130,87 @@ const offline = backendError(
   );
   assert.equal(offline.forgotten, 1, "A failed sign-out must still remove the stored session.");
   assert.equal(offline.threw, true);
+}
+
+// An unconfirmed email goes to the code screen; a wrong password does not.
+// Auth only says "not confirmed" after the password matched.
+{
+  assert.equal(needsEmailConfirmation(authError(400, "email_not_confirmed")), true);
+  assert.equal(needsEmailConfirmation(authError(400, "invalid_credentials")), false);
+  assert.equal(needsEmailConfirmation(offline), false);
+  assert.equal(accountAlreadyExists(authError(422, "user_already_exists")), true);
+  assert.equal(accountAlreadyExists(authError(422, "email_exists")), true);
+  assert.equal(accountAlreadyExists(authError(422, "weak_password")), false);
+}
+
+// Password sign-up, against what Auth answers with confirmation on.
+{
+  const signUpAnswering = (data: { user: unknown; session: unknown }, error: unknown = null) => {
+    const sent: unknown[] = [];
+    const client = {
+      auth: {
+        signUp: async (input: unknown) => {
+          sent.push(input);
+          return { data, error };
+        }
+      }
+    } as unknown as SupabaseClient;
+    return { auth: new AuthRepository(client), sent };
+  };
+  const input = { email: " Rider@Example.com ", password: "long enough password", redirectTo: "equina://auth/email" };
+
+  const fresh = signUpAnswering({ user: { id: "u1", identities: [{ id: "i1" }] }, session: null });
+  assert.equal(await fresh.auth.signUpWithPassword(input), null, "A new account waits for its code.");
+  assert.equal((fresh.sent[0] as { email: string }).email, "rider@example.com");
+
+  // A confirmed address gets a stand-in user with no identities, no error and
+  // no email. Waiting for a code here would wait forever.
+  const taken = signUpAnswering({ user: { id: "fake", identities: [] }, session: null });
+  await assert.rejects(taken.auth.signUpWithPassword(input), (error: unknown) => accountAlreadyExists(error));
+
+  const session = { access_token: "a" };
+  const autoconfirmed = signUpAnswering({ user: { id: "u2", identities: [] }, session });
+  assert.equal(await autoconfirmed.auth.signUpWithPassword(input), session,
+    "With a session the account was created and signed in; nothing to refuse.");
+
+  const refused = signUpAnswering({ user: null, session: null }, Object.assign(new Error("User already registered"), { status: 422, code: "user_already_exists", name: "AuthApiError" }));
+  await assert.rejects(refused.auth.signUpWithPassword(input), (error: unknown) => accountAlreadyExists(error));
+}
+
+// Resending a sign-up confirmation resends that, not a sign-in.
+{
+  const calls: unknown[] = [];
+  const client = {
+    auth: {
+      resend: async (input: unknown) => {
+        calls.push(input);
+        return { data: { user: null, session: null }, error: null };
+      }
+    }
+  } as unknown as SupabaseClient;
+  await new AuthRepository(client).resendSignupConfirmation(" Rider@Example.com ", "equina://auth/email");
+  assert.deepEqual(calls, [{ type: "signup", email: "rider@example.com", options: { emailRedirectTo: "equina://auth/email" } }]);
+}
+
+// Auth emails: every template exists, and the ones the app asks a code for
+// carry the code and no link -- a mail scanner opening links would use it up.
+{
+  const root = process.cwd();
+  const config = readFileSync(join(root, "supabase", "config.toml"), "utf8");
+  assert.match(config, /^enable_confirmations = true$/m, "The hosted project confirms emails; local must match.");
+  const templates = [...config.matchAll(/\[auth\.email\.template\.(\w+)\]\nsubject = "([^"]+)"\ncontent_path = "\.\/([^"]+)"/g)]
+    .map(([, name = "", subject = "", path = ""]) => ({ name, subject, path }));
+  assert.deepEqual(templates.map((template) => template.name).sort(),
+    ["confirmation", "email_change", "magic_link", "reauthentication", "recovery"]);
+  for (const template of templates) {
+    assert.ok(existsSync(join(root, template.path)), template.path);
+    const html = readFileSync(join(root, template.path), "utf8");
+    assert.doesNotMatch(html, /\{\{\s*\.(SiteURL|RedirectTo)/, `${template.name}: no links built by hand.`);
+    if (template.name === "email_change") continue;
+    assert.match(html, /\{\{ \.Token \}\}/, `${template.name} must carry the code.`);
+    assert.doesNotMatch(html, /ConfirmationURL|TokenHash/, `${template.name} must not carry a link.`);
+    assert.match(template.subject, /\{\{ \.Token \}\}/, `${template.name}: the code in the subject fills it in from Mail.`);
+  }
 }
 
 console.log("Sign-in rules passed.");

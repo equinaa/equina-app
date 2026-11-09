@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Reset your password</title>
+  </head>
+  <body style="margin:0;background:#f4f1e9;font-family:Arial,Helvetica,sans-serif;color:#161512;">
+    <!-- Password reset. The code signs the rider in only to choose a new password. -->
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:480px;background:#ffffff;border-radius:18px;padding:32px;">
+            <tr>
+              <td>
+                <p style="margin:0 0 28px;font-size:12px;font-weight:700;letter-spacing:2px;color:#9a783e;">EQUINA</p>
+                <h1 style="margin:0 0 12px;font-size:26px;line-height:32px;font-weight:600;">Reset your password</h1>
+                <p style="margin:0 0 24px;font-size:15px;line-height:23px;color:#6b6560;">Enter this code in Equina, then choose a new password.</p>
+                <p style="margin:0 0 24px;padding:18px 20px;border-radius:14px;background:#161512;color:#fff7e6;font-size:30px;font-weight:600;letter-spacing:6px;text-align:center;font-family:'Courier New',Courier,monospace;">{{ .Token }}</p>
+                <p style="margin:0;font-size:12px;line-height:19px;color:#8a847d;">The code expires in one hour. If you did not ask to reset your password, you can ignore this email. Your password stays the same.</p>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:16px 0 0;font-size:11px;line-height:17px;color:#8a847d;">Sent by Equina to {{ .Email }}.</p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
