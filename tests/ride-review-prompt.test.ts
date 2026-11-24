@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RideEntry } from "../src/backend";
+import { coachHorseFor } from "../src/features/coach/coach-types";
 import type { RideSession } from "../src/features/ride/RideExperience";
 import { defaultRidePhases, rideTrainingTypes } from "../src/features/ride/ride-plan";
 import {
@@ -82,7 +83,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   // A ride the clock timed: every fact, in plain sentences.
   const prompt = rideReviewPrompt(rideReviewFactsFromEntry(liveEntry, "Test"));
   const lines = prompt.split("\n");
-  assert.equal(lines[0], "Review my Pole work session with Test on Tue 17 Nov.");
+  assert.equal(lines[0], "Review my session on Tue 17 Nov: Pole work with Test.");
   assert.equal(lines[1], "");
   assert.equal(lines.at(-1), question);
   assert.equal(lines.at(-2), "");
@@ -105,7 +106,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
 {
   // An activity added by hand says so: its minutes are not the clock's.
   const prompt = rideReviewPrompt(rideReviewFactsFromEntry(manualEntry, "Test"));
-  assert.ok(prompt.startsWith("Review my Hack session with Test on Tue 17 Nov.\n\n"));
+  assert.ok(prompt.startsWith("Review my session on Tue 17 Nov: Hack with Test.\n\n"));
   assert.ok(prompt.includes("I added it by hand afterwards, so the app did not time it. It lasted 45 min."));
   assert.ok(prompt.includes("Warm-up (Walk): 15 min."));
   assert.ok(prompt.includes("Training (Hack): 30 min."));
@@ -122,7 +123,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
 {
   // No horse on the ride, or one that is no longer the rider's.
   const prompt = rideReviewPrompt(rideReviewFactsFromEntry({ ...liveEntry, horseId: undefined, mood: "fresh" }));
-  assert.ok(prompt.startsWith("Review my Pole work session on Tue 17 Nov.\n"));
+  assert.ok(prompt.startsWith("Review my session on Tue 17 Nov: Pole work.\n"));
   assert.ok(prompt.includes("My horse felt fresh."));
 }
 
@@ -134,7 +135,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   );
   assert.equal(facts.training, "Jumping");
   const prompt = rideReviewPrompt(facts);
-  assert.ok(prompt.startsWith("Review my Jumping session with Test on Tue 17 Nov."));
+  assert.ok(prompt.startsWith("Review my session on Tue 17 Nov: Jumping with Test."));
   assert.ok(prompt.includes("I worked on: Rhythm."));
   assert.ok(prompt.includes("The app timed it live. I rode for 42 min.\n"));
   assert.ok(!prompt.includes("The plan was"));
@@ -206,8 +207,71 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
     phases: Array.from({ length: 400 }, (_, index) => ({ title: `Phase ${index}`, plannedSeconds: 600, actualSeconds: 600 }))
   }, "Test"));
   assert.ok(absurd.length <= RIDE_REVIEW_PROMPT_LIMIT);
-  assert.ok(absurd.startsWith("Review my Pole work session with Test on Tue 17 Nov."));
+  assert.ok(absurd.startsWith("Review my session on Tue 17 Nov: Pole work with Test."));
   assert.ok(absurd.endsWith(`...\n\n${question}`));
+}
+
+{
+  // Ralf's history names a conversation after the first 45 characters of its
+  // first message. The day has to be among them, or two reviews of Pole work
+  // on different days look the same there.
+  assert.match(coachChat, /return compact\.length <= 48 \? compact : `\$\{compact\.slice\(0, 45\)\.trim\(\)\}\.\.\.`;/);
+  const historyTitle = (message: string) => {
+    const compact = message.replace(/\s+/g, " ").trim();
+    return compact.length <= 48 ? compact : `${compact.slice(0, 45).trim()}...`;
+  };
+  for (const training of rideTrainingTypes) {
+    for (const horse of [undefined, "Test", "Sir Galahad of the Northern Hills"]) {
+      const title = historyTitle(rideReviewPrompt(rideReviewFactsFromEntry({ ...liveEntry, trainingType: training.id }, horse)));
+      assert.ok(title.startsWith("Review my session on Tue 17 Nov:"), title);
+    }
+  }
+  const lastDayOfMonth = new Date(2026, 8, 30, 9, 5).toISOString();
+  assert.ok(
+    historyTitle(rideReviewPrompt(rideReviewFactsFromEntry({ ...liveEntry, startedAt: lastDayOfMonth }, "Test")))
+      .startsWith("Review my session on Wed 30 Sep:")
+  );
+}
+
+{
+  // An emoji is two UTF-16 units. A cut between them leaves half of one,
+  // which Postgres refuses as JSON when coach-chat saves the message: Ralf
+  // would fail on that ride every time.
+  const loneHalf = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  const split = `${"a".repeat(RIDE_REVIEW_NOTE_LIMIT - 1)}🐴${"b".repeat(100)}`;
+  const prompt = rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: split }, "Test"));
+  assert.doesNotMatch(prompt, loneHalf);
+  assert.ok(prompt.includes(`My note: ${"a".repeat(RIDE_REVIEW_NOTE_LIMIT - 1)}...`));
+  // An emoji that fits whole stays.
+  const whole = `${"a".repeat(RIDE_REVIEW_NOTE_LIMIT - 2)}🐴${"b".repeat(100)}`;
+  assert.ok(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: whole }, "Test"))
+    .includes(`My note: ${"a".repeat(RIDE_REVIEW_NOTE_LIMIT - 2)}🐴...`));
+  // The same where the facts are cut to fit. A horse name one letter longer
+  // moves the cut by one, so one of the two lands inside an emoji.
+  for (const horse of ["Test", "Tests"]) {
+    const cut = rideReviewPrompt(rideReviewFactsFromEntry(
+      { ...liveEntry, phases: undefined, mood: undefined, focus: "🐴".repeat(2000) },
+      horse
+    ));
+    assert.ok(cut.length <= RIDE_REVIEW_PROMPT_LIMIT);
+    assert.ok(cut.endsWith(`...\n\n${question}`));
+    assert.doesNotMatch(cut, loneHalf);
+  }
+}
+
+{
+  // Ralf talks about the horse of the ride he is asked about. A ride with no
+  // horse, or on one the rider no longer has (sold and archived, or no longer
+  // shared), is asked about with no horse: never as a ride on the Home horse.
+  const names = { bella: "Bella", max: "Max" };
+  const home = { selectedHorseId: "bella", hasHorse: true, horseName: "Bella" };
+  assert.equal(coachHorseFor(undefined, names, home), home, "No question about a horse: the one on Home.");
+  assert.deepEqual(coachHorseFor("max", names, home), { selectedHorseId: "max", hasHorse: true, horseName: "Max" });
+  const none = coachHorseFor(null, names, home);
+  assert.deepEqual(none, { hasHorse: false, horseName: "" });
+  assert.equal(none.selectedHorseId, undefined, "coach-chat then starts the conversation with no horse.");
+  // A horse that leaves while Ralf is open hands him back to Home's, as before.
+  assert.equal(coachHorseFor("gone", names, home), home);
 }
 
 // Every training the app offers, with its usual phases, timed and logged,

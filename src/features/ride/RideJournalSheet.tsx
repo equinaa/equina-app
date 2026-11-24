@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { StyleSheet, Text, View, type ScrollView } from "react-native";
 import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react-native";
 import type { RideEntry } from "../../backend";
 import { localDayOf, localMomentLabel, shortDayLabel } from "../../domain/local-day";
@@ -55,8 +55,16 @@ export function RideJournalSheet({
   // Shown with the ride it belongs to. Offline, the journal refuses before
   // asking the server, and that refusal is the message.
   const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  // Where the list was when a ride opened. The list comes back at its top
+  // (a ride opens at its own), so it is put back there: a rider going
+  // through older rides one by one does not scroll down to them each time.
+  const listOffset = useRef(0);
+  const returning = useRef(false);
 
   useEffect(() => {
+    listOffset.current = 0;
+    returning.current = false;
     if (!visible) return;
     setOpenId(null);
     setConfirming(null);
@@ -81,6 +89,11 @@ export function RideJournalSheet({
       onDismiss={onDismiss}
       closeTestID="ride-journal-close"
       contentKey={open ? open.id : "list"}
+      scrollRef={scrollRef}
+      onScroll={(event) => {
+        // A ride scrolls on its own: only the list's place is kept.
+        if (!open && !returning.current) listOffset.current = event.nativeEvent.contentOffset.y;
+      }}
     >
       {open ? (
         <RideDetail
@@ -113,7 +126,16 @@ export function RideJournalSheet({
           }}
         />
       ) : (
-        <View style={styles.body} testID="ride-journal">
+        <View
+          style={styles.body}
+          testID="ride-journal"
+          onLayout={() => {
+            // Laid out again after a ride closed (back, deleted, or gone).
+            if (!returning.current) return;
+            returning.current = false;
+            scrollRef.current?.scrollTo({ y: listOffset.current, animated: false });
+          }}
+        >
           {entries.length === 0 ? (
             <Text style={styles.empty}>No rides yet. A ride you finish or an activity you add appears here.</Text>
           ) : null}
@@ -139,6 +161,7 @@ export function RideJournalSheet({
                 accessibilityLabel={spoken}
                 onPress={() => {
                   selectionHaptic();
+                  returning.current = true;
                   setOpenId(entry.id);
                 }}
                 style={styles.row}
@@ -291,7 +314,7 @@ function RideDetail({
         <MotionPressable
           testID={`ride-journal-delete-${entry.id}`}
           accessibilityRole="button"
-          accessibilityLabel={`Delete ${training}, ${[when, durationOf(entry), horse].filter(Boolean).join(" · ")}`}
+          accessibilityLabel={`Delete ${kind}, ${training}, ${[when, durationOf(entry), horse].filter(Boolean).join(" · ")}`}
           disabled={busy}
           onPress={onAskDelete}
           style={styles.deleteRow}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from "react";
 import {
   Animated,
   KeyboardAvoidingView,
@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewProps,
   type StyleProp,
   type TextInputProps,
   type ViewStyle
@@ -155,9 +156,24 @@ type EquinaSheetProps = {
    * scroll position the list was left in.
    */
   contentKey?: string;
+  /**
+   * With onScroll, lets such a sheet put the list back where the rider left
+   * it when the item closes, rather than at its top.
+   */
+  scrollRef?: Ref<ScrollView>;
+  onScroll?: ScrollViewProps["onScroll"];
 };
 
-export function EquinaSheet({ visible, title, children, onDismiss, closeTestID, contentKey }: EquinaSheetProps) {
+export function EquinaSheet({
+  visible,
+  title,
+  children,
+  onDismiss,
+  closeTestID,
+  contentKey,
+  scrollRef,
+  onScroll
+}: EquinaSheetProps) {
   const sheetMotion = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
 
@@ -227,6 +243,9 @@ export function EquinaSheet({ visible, title, children, onDismiss, closeTestID, 
           </View>
           <ScrollView
             key={contentKey}
+            ref={scrollRef}
+            onScroll={onScroll}
+            scrollEventThrottle={onScroll ? 16 : undefined}
             style={primitiveStyles.sheetScroll}
             contentContainerStyle={primitiveStyles.sheetContent}
             keyboardDismissMode="interactive"

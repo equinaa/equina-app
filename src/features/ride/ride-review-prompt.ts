@@ -39,6 +39,11 @@ export const rideMinutesLabel = (seconds: number) =>
 
 const capitalised = (value: string) => `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 
+// An emoji is two UTF-16 units. A cut between them leaves half of one, and
+// coach-chat cannot save a message holding it (Postgres refuses it as JSON),
+// so the question would fail on that ride every time.
+const cutAt = (text: string, limit: number) => text.slice(0, limit).replace(/[\uD800-\uDBFF]$/, "");
+
 export const rideReviewFactsFromEntry = (entry: RideEntry, horseName?: string): RideReviewFacts => ({
   training: rideTrainingLabel(entry.trainingType) ?? capitalised(entry.discipline),
   ...(horseName ? { horseName } : {}),
@@ -79,15 +84,16 @@ const phaseLine = (phase: RidePhaseEntry, logged: boolean) => {
 };
 
 /**
- * One message, in plain sentences. The first line is short on purpose: Ralf's
- * history titles a conversation with the start of its first message. The
- * question closes it and is never cut; if anything has to give, it is the
+ * One message, in plain sentences. The day comes first on purpose: Ralf's
+ * history titles a conversation with the first 45 characters of its first
+ * message, and the day is what tells two reviews of the same training apart.
+ * The question closes it and is never cut; if anything has to give, it is the
  * tail of the facts.
  */
 export const rideReviewPrompt = (facts: RideReviewFacts): string => {
   const moment = localMomentLabel(facts.startedAt);
   const [day, time] = moment ? moment.split(" · ") : [];
-  const opening = `Review my ${facts.training} session${facts.horseName ? ` with ${facts.horseName}` : ""}${day ? ` on ${day}` : ""}.`;
+  const opening = `Review my session${day ? ` on ${day}` : ""}: ${facts.training}${facts.horseName ? ` with ${facts.horseName}` : ""}.`;
   const question = "What went well, and what is the one thing to work on next time?";
 
   const lines: string[] = [];
@@ -106,10 +112,10 @@ export const rideReviewPrompt = (facts: RideReviewFacts): string => {
   if (focus && focus.toLowerCase() !== facts.training.toLowerCase()) lines.push(`I worked on: ${focus}.`);
   const note = facts.note?.replace(/\s+/g, " ").trim();
   if (note) {
-    lines.push(`My note: ${note.length > RIDE_REVIEW_NOTE_LIMIT ? `${note.slice(0, RIDE_REVIEW_NOTE_LIMIT).trim()}...` : note}`);
+    lines.push(`My note: ${note.length > RIDE_REVIEW_NOTE_LIMIT ? `${cutAt(note, RIDE_REVIEW_NOTE_LIMIT).trim()}...` : note}`);
   }
 
   const room = RIDE_REVIEW_PROMPT_LIMIT - opening.length - question.length - 4;
   const body = lines.join("\n");
-  return `${opening}\n\n${body.length > room ? `${body.slice(0, Math.max(0, room - 3)).trim()}...` : body}\n\n${question}`;
+  return `${opening}\n\n${body.length > room ? `${cutAt(body, Math.max(0, room - 3)).trim()}...` : body}\n\n${question}`;
 };

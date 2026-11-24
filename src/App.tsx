@@ -102,7 +102,7 @@ import type { AccountMode, AccountRoute } from "./features/account/account-types
 import { useAccount } from "./features/account/useAccount";
 import { useEquinaSession } from "./features/account/useEquinaSession";
 import { RalfScreen } from "./features/coach/CoachScreen";
-import { trainingFocusByDiscipline, type CoachConversationContext } from "./features/coach/coach-types";
+import { coachHorseFor, trainingFocusByDiscipline, type CoachConversationContext } from "./features/coach/coach-types";
 import { clearDemoCoachHistory } from "./features/coach/useCoachConversation";
 import { ShopConversationScreen } from "./features/messaging/ShopConversationScreen";
 import { ShopThreadList } from "./features/messaging/ShopThreadList";
@@ -947,8 +947,9 @@ function EquinaApp() {
   const [coachOnboarded, setCoachOnboarded] = useState(false);
   const [pendingCoachPrompt, setPendingCoachPrompt] = useState("");
   // The horse a question is about, when it is not the one on Home: a past
-  // ride opened from the journal belongs to the horse that was ridden.
-  const [coachHorseId, setCoachHorseId] = useState("");
+  // ride opened from the journal belongs to the horse that was ridden, or to
+  // none (null). Undefined leaves Ralf on the horse on Home.
+  const [coachHorseId, setCoachHorseId] = useState<string | null | undefined>(undefined);
   const [academyProgress, setAcademyProgress] = useState(0);
   const [academyMode, setAcademyMode] = useState<AcademyMode>("home");
   // Empty means "the lesson the Academy recommends", whichever that is today.
@@ -1722,26 +1723,27 @@ function EquinaApp() {
   };
 
   // A prompt arrives already asked, the way the place it came from put it.
-  // `about` names the horse the question concerns; without it Ralf opens on
-  // the horse on Home, and a horse left over from an earlier question is dropped.
-  const openRalf = (prompt?: string, about?: { horseId?: string }) => {
+  // `about` names the horse the question concerns, or null for no horse;
+  // without it Ralf opens on the horse on Home, and a horse left over from an
+  // earlier question is dropped.
+  const openRalf = (prompt?: string, about?: { horseId?: string | null }) => {
     if (!ralfAvailable) return;
     void Haptics.selectionAsync().catch(() => undefined);
     setLastRideRecapVisible(false);
     if (prompt) setPendingCoachPrompt(prompt);
-    setCoachHorseId(about?.horseId ?? "");
+    setCoachHorseId(about?.horseId);
     setRalfOpen(true);
     refresh("");
   };
 
   const closeRalf = () => {
     setPendingCoachPrompt("");
-    setCoachHorseId("");
+    setCoachHorseId(undefined);
     setRalfOpen(false);
   };
 
-  // A horse that was archived or is no longer shared cannot be Ralf's subject
-  // (the server refuses it), so the question is then asked without one.
+  // A horse that was archived or is no longer shared cannot be Ralf's subject:
+  // the server refuses it.
   const knownHorseId = (horseId?: string) => (horseId && horseNames[horseId] ? horseId : undefined);
 
   // The ride on the recap, whether or not the journal holds it yet: the facts
@@ -1761,7 +1763,12 @@ function EquinaApp() {
     // The sheet is a modal over the whole app and Ralf renders under it.
     setRideJournalOpen(false);
     rideJournal.clearError();
-    openRalf(rideReviewPrompt(rideReviewFactsFromEntry(entry, horseId ? horseNames[horseId] : undefined)), { horseId });
+    // A ride with no horse, or on one the rider no longer has, is asked about
+    // without a horse, not as a ride on the horse on Home.
+    openRalf(
+      rideReviewPrompt(rideReviewFactsFromEntry(entry, horseId ? horseNames[horseId] : undefined)),
+      { horseId: horseId ?? null }
+    );
   };
 
   const openAccountAt = (route: AccountRoute) => {
@@ -2527,16 +2534,15 @@ function EquinaApp() {
   const focusedTask = ralfOpen || accountOpen || shopNestedTask || academyNestedTask;
   const hideGlobalHeader = focusedTask;
   const headerTitle = tabTitles[tab];
-  // A question about another horse's ride puts Ralf on that horse, in his
-  // header and in what the server reads, until he is closed.
-  const coachHorseName = coachHorseId ? horseNames[coachHorseId] : undefined;
   const coachContext: CoachConversationContext = {
-    // Otherwise the horse on Home, so Ralf talks about the one the rider picked.
-    selectedHorseId: coachHorseName
-      ? coachHorseId
-      : horseRecords.selectedHorseId || accountController.snapshot.primaryHorse?.id,
-    hasHorse: coachHorseName ? true : horseState.hasHorse,
-    horseName: coachHorseName ?? horseState.name,
+    // A question about a past ride puts Ralf on that ride's horse, or on none,
+    // until he is closed. Otherwise the horse on Home, so Ralf talks about the
+    // one the rider picked.
+    ...coachHorseFor(coachHorseId, horseNames, {
+      selectedHorseId: horseRecords.selectedHorseId || accountController.snapshot.primaryHorse?.id,
+      hasHorse: horseState.hasHorse,
+      horseName: horseState.name
+    }),
     focus: coachGoal,
     load: coachLoad,
     style: coachStyle
