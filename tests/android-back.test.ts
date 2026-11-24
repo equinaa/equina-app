@@ -3,12 +3,14 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   androidBackAction,
+  carryOutBack,
   shopBuyerBack,
   shopSellerBack,
   type BackAction,
   type BackShopBuyerView,
   type BackShopSellerView,
   type BackState,
+  type BackSteps,
   type BackTab
 } from "../src/ui/navigation/android-back";
 
@@ -261,6 +263,90 @@ const flags = [false, true] as const;
 }
 
 {
+  // carryOutBack: each action calls its own step once, with its page, and
+  // only "system" hands Back to Android.
+  const actions: Record<BackAction["type"], { action: BackAction; step: keyof BackSteps | null; args: unknown[] }> = {
+    system: { action: { type: "system" }, step: null, args: [] },
+    stay: { action: { type: "stay" }, step: null, args: [] },
+    "onboarding-back": { action: { type: "onboarding-back" }, step: "onboardingBack", args: [] },
+    "close-recap": { action: { type: "close-recap" }, step: "closeRecap", args: [] },
+    "close-ralf": { action: { type: "close-ralf" }, step: "closeRalf", args: [] },
+    "close-account": { action: { type: "close-account" }, step: "closeAccount", args: [] },
+    "academy-home": { action: { type: "academy-home" }, step: "academyHome", args: [] },
+    "shop-buyer": { action: { type: "shop-buyer", view: "checkout" }, step: "shopBuyer", args: ["checkout"] },
+    "shop-seller": { action: { type: "shop-seller", view: "messages" }, step: "shopSeller", args: ["messages"] },
+    "back-to-account": { action: { type: "back-to-account" }, step: "backToAccount", args: [] },
+    "go-home": { action: { type: "go-home" }, step: "goHome", args: [] }
+  };
+  for (const [type, { action, step, args }] of Object.entries(actions)) {
+    const calls: unknown[][] = [];
+    const spy = (name: keyof BackSteps) => (...received: unknown[]) => {
+      calls.push([name, ...received]);
+    };
+    const steps: BackSteps = {
+      onboardingBack: spy("onboardingBack"),
+      closeRecap: spy("closeRecap"),
+      closeRalf: spy("closeRalf"),
+      closeAccount: spy("closeAccount"),
+      academyHome: spy("academyHome"),
+      shopBuyer: spy("shopBuyer"),
+      shopSeller: spy("shopSeller"),
+      backToAccount: spy("backToAccount"),
+      goHome: spy("goHome")
+    };
+    assert.equal(carryOutBack(action, steps), type !== "system", `${type}: only "system" leaves Back to Android.`);
+    assert.deepEqual(calls, step ? [[step, ...args]] : [], `${type} calls the wrong step.`);
+  }
+}
+
+// The text inside the bracket that opens at `open`, quoted strings skipped.
+function enclosed(source: string, open: number): string {
+  const closers: Record<string, string> = { "(": ")", "{": "}", "[": "]" };
+  const expected: string[] = [];
+  for (let index = open; index < source.length; index += 1) {
+    const char = source.charAt(index);
+    if (char === '"' || char === "'" || char === "`") {
+      index += 1;
+      while (index < source.length && source.charAt(index) !== char) index += source.charAt(index) === "\\" ? 2 : 1;
+    } else if (closers[char]) {
+      expected.push(closers[char] ?? "");
+    } else if (char === expected.at(-1)) {
+      expected.pop();
+      if (expected.length === 0) return source.slice(open + 1, index);
+    }
+  }
+  throw new Error(`No closing bracket for ${source.slice(open, open + 40)}`);
+}
+
+// Splits at a separator outside brackets and strings, whitespace collapsed.
+function topLevel(source: string, separator: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source.charAt(index);
+    if (char === '"' || char === "'" || char === "`") {
+      index += 1;
+      while (index < source.length && source.charAt(index) !== char) index += source.charAt(index) === "\\" ? 2 : 1;
+    } else if ("({[".includes(char)) {
+      depth += 1;
+    } else if (")}]".includes(char)) {
+      depth -= 1;
+    } else if (depth === 0 && source.startsWith(separator, index)) {
+      parts.push(source.slice(start, index));
+      start = index + separator.length;
+      index = start - 1;
+    }
+  }
+  parts.push(source.slice(start));
+  return parts.map((part) => part.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
+
+// "(a && b)" and "a && b" are the same condition.
+const unwrap = (condition: string) =>
+  condition.startsWith("(") && enclosed(condition, 0).length === condition.length - 2 ? condition.slice(1, -1).trim() : condition;
+
+{
   // How App.tsx is wired.
   const sourceFiles = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
@@ -278,9 +364,97 @@ const flags = [false, true] as const;
   assert.match(wiring, /if \(Platform\.OS !== "android"\) return;/, "Android only: react-native-web logs an error for this call.");
   assert.match(wiring, /return \(\) => subscription\.remove\(\);\s*\}, \[\]\);/, "Registered once and removed on unmount.");
   assert.match(wiring, /catch \{[^}]*return false;/, "A failure in the listener leaves Back to Android.");
-  for (const type of ["system", "stay", "onboarding-back", "close-recap", "close-ralf", "close-account", "academy-home", "shop-buyer", "shop-seller", "back-to-account", "go-home"]) {
-    assert.ok(wiring.includes(`case "${type}":`), `App.tsx does not carry out "${type}".`);
+  assert.match(wiring, /return androidBack\.current\(\);/, "The listener answers with what the handler returns.");
+  assert.match(
+    wiring,
+    /if \(Platform\.OS === "android"\) \{\s*androidBack\.current = \(\) =>\s*carryOutBack\(\s*androidBackAction\(\{/,
+    "Only Android builds the handler, and it returns carryOutBack's answer for androidBackAction's choice."
+  );
+
+  // What App.tsx hands the table: each value is what decides the layer it
+  // draws. Change one only after checking it against EquinaApp by hand.
+  const carry = wiring.indexOf("carryOutBack(");
+  const [actionArgument = "", stepsArgument = "", ...extra] = topLevel(enclosed(wiring, carry + "carryOutBack".length), ",");
+  assert.equal(extra.length, 0);
+  assert.ok(actionArgument.startsWith("androidBackAction({"), "carryOutBack carries out androidBackAction's choice.");
+  assert.ok(stepsArgument.startsWith("{"), "carryOutBack gets its steps as one object.");
+  const state = topLevel(enclosed(actionArgument, actionArgument.indexOf("{")), ",");
+  const sheetFlags = state.find((entry) => entry.startsWith("modalSheetOpen:"));
+  assert.deepEqual(
+    state.filter((entry) => entry !== sheetFlags),
+    [
+      "phase: equinaSession.phase",
+      "recoveryRequired: equinaSession.recoveryRequired",
+      "betaDoor",
+      "accountCreated",
+      "onboardingTransitioning",
+      "entryRoute",
+      "otpVisible",
+      "onboardingStep",
+      "tab",
+      "rideActive",
+      "rideReady: Boolean(ridePlan && rideRun)",
+      "recapVisible: lastRideRecapVisible && Boolean(lastRide)",
+      "ralfOpen",
+      "academyMode",
+      "shopMode",
+      "shopBuyerView",
+      "shopSellerView",
+      "stableFromAccount"
+    ],
+    "App.tsx hands android-back.ts other values than the ones checked here."
+  );
+
+  // Every sheet EquinaApp draws counts as open, and nothing else does.
+  const equinaAppStart = app.indexOf("function EquinaApp(");
+  const equinaApp = app.slice(equinaAppStart, app.indexOf("\nfunction ", equinaAppStart + 1));
+  const sheets = [...equinaApp.matchAll(/\bvisible=\{/g)].map((match) =>
+    enclosed(equinaApp, (match.index ?? 0) + "visible=".length)
+  );
+  assert.equal(sheets.length, 8, "EquinaApp draws a sheet more or less than before: recheck modalSheetOpen.");
+  // The plan offer is drawn on a condition instead of taking visible.
+  const offer = equinaApp.match(/\{([^{}?]+?) \? \(\s*<PlanOfferScreen\b/)?.[1];
+  assert.ok(offer, "The plan offer is no longer drawn where it was.");
+  assert.deepEqual(
+    topLevel(sheetFlags?.slice("modalSheetOpen:".length) ?? "", "||").map(unwrap).sort(),
+    [...sheets, offer].map((condition) => unwrap(condition.replace(/\s+/g, " ").trim())).sort(),
+    "modalSheetOpen must be true exactly while one of EquinaApp's sheets is up."
+  );
+
+  // The steps, each the handler an on-screen control uses for the same move.
+  assert.deepEqual(
+    topLevel(enclosed(stepsArgument, 0), ","),
+    [
+      "onboardingBack: goBackOnboarding",
+      "closeRecap: closeRideRecap",
+      "closeRalf",
+      "closeAccount",
+      'academyHome: () => navigateAcademy("home")',
+      "shopBuyer: setShopBuyerView",
+      "shopSeller: setShopSellerView",
+      "backToAccount",
+      'goHome: () => { setStableFromAccount(false); setTab("home"); }'
+    ],
+    "App.tsx carries out Back with other handlers than the ones checked here."
+  );
+  for (const control of [
+    "onBack={goBackOnboarding}",
+    "onHome={closeRideRecap}",
+    "onBack={closeRalf}",
+    "onClose={closeAccount}",
+    "onAcademyModeChange={navigateAcademy}",
+    "onBuyerViewChange={setShopBuyerView}",
+    "onSellerViewChange={setShopSellerView}",
+    "onBackToAccount={stableFromAccount ? backToAccount : undefined}"
+  ]) {
+    assert.ok(app.includes(control), `No on-screen control does ${control} any more; recheck the step Back uses.`);
   }
+  assert.match(
+    app,
+    /<TabDock[\s\S]*?onChange=\{\(next\) => \{\s*setStableFromAccount\(false\);\s*setTab\(next\);\s*\}\}/,
+    "goHome is what the dock's Home does."
+  );
+
   // None of these can be a step back: they end or save a ride, sign out,
   // delete, or drop the code screen.
   for (const forbidden of ["cancelRide", "finishRide", "activeRide.clear", "signOut", "scheduleDeletion", "deleteJournalRide", "setOtpVisible", "setRideActive"]) {

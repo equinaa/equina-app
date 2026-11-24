@@ -3,9 +3,10 @@
  * screen.
  *
  * Nothing here knows React or React Native: EquinaApp hands over the few
- * values that decide which layer it draws, and gets back one thing to do. The
- * checks follow the order EquinaApp draws its layers (its early returns, then
- * the app layer, then the onboarding layer), top-most first, so Back always
+ * values that decide which layer it draws, gets back one thing to do, and
+ * carryOutBack does it with the handlers EquinaApp hands over. The checks
+ * follow the order EquinaApp draws its layers (its early returns, then the
+ * app layer, then the onboarding layer), top-most first, so Back always
  * answers for the screen the rider is looking at.
  *
  * Two things never reach this file:
@@ -162,4 +163,60 @@ export function androidBackAction(state: BackState): BackAction {
 
   // A tab's front page goes Home, and Home leaves the app.
   return onHome ? system : { type: "go-home" };
+}
+
+/**
+ * The steps EquinaApp hands over, each the handler an on-screen control
+ * already uses for the same move.
+ */
+export type BackSteps = {
+  onboardingBack(): void;
+  closeRecap(): void;
+  closeRalf(): void;
+  closeAccount(): void;
+  academyHome(): void;
+  shopBuyer(view: BackShopBuyerView): void;
+  shopSeller(view: BackShopSellerView): void;
+  backToAccount(): void;
+  goHome(): void;
+};
+
+/**
+ * Carries out one action. The answer goes back to React Native: true when
+ * Back was handled here, false to hand it to Android.
+ */
+export function carryOutBack(action: BackAction, steps: BackSteps): boolean {
+  switch (action.type) {
+    case "system":
+      return false;
+    case "stay":
+      return true;
+    case "onboarding-back":
+      steps.onboardingBack();
+      return true;
+    case "close-recap":
+      steps.closeRecap();
+      return true;
+    case "close-ralf":
+      steps.closeRalf();
+      return true;
+    case "close-account":
+      steps.closeAccount();
+      return true;
+    case "academy-home":
+      steps.academyHome();
+      return true;
+    case "shop-buyer":
+      steps.shopBuyer(action.view);
+      return true;
+    case "shop-seller":
+      steps.shopSeller(action.view);
+      return true;
+    case "back-to-account":
+      steps.backToAccount();
+      return true;
+    case "go-home":
+      steps.goHome();
+      return true;
+  }
 }

@@ -221,7 +221,7 @@ import { MotionPressable } from "./ui/motion/MotionPressable";
 import { EquinaIconButton, EquinaSegmentedTabs } from "./ui/primitives/EquinaPrimitives";
 import { useReducedMotion } from "./ui/motion/useReducedMotion";
 import { RootErrorBoundary } from "./ui/states/RootErrorBoundary";
-import { androidBackAction } from "./ui/navigation/android-back";
+import { androidBackAction, carryOutBack } from "./ui/navigation/android-back";
 import { equinaTheme } from "./ui/theme/theme";
 import { floatingDockContentInset, floatingDockMetrics } from "./ui/layout/metrics";
 
@@ -2704,77 +2704,59 @@ function EquinaApp() {
   // hands every Back to Android, which puts Equina in the background: from
   // Ralf, a lesson, the account or onboarding's second step, Back left the
   // app instead of going back. What Back does on each screen is decided in
-  // android-back.ts; here it is only carried out, with the handlers the
-  // on-screen arrows already use. Sheets are Modals and take Back themselves.
+  // android-back.ts, which also carries it out with the handlers handed over
+  // here, the ones the on-screen arrows already use. Sheets are Modals and
+  // take Back themselves.
   const androidBack = useRef<() => boolean>(() => false);
   // Only Android builds the handler; iOS and the web keep the inert default.
   if (Platform.OS === "android") {
-    androidBack.current = () => {
-      const action = androidBackAction({
-        phase: equinaSession.phase,
-        recoveryRequired: equinaSession.recoveryRequired,
-        betaDoor,
-        accountCreated,
-        onboardingTransitioning,
-        entryRoute,
-        otpVisible,
-        onboardingStep,
-        modalSheetOpen:
-          rideSetupOpen ||
-          addActivityOpen ||
-          horseSwitcherOpen ||
-          horseCreatorOpen ||
-          streakOpen ||
-          trainingPlanOpen ||
-          Boolean(timeOffHorseId) ||
-          rideJournalOpen ||
-          (signUpPlanOffer.visible && purchases.available),
-        tab,
-        rideActive,
-        rideReady: Boolean(ridePlan && rideRun),
-        recapVisible: lastRideRecapVisible && Boolean(lastRide),
-        ralfOpen,
-        academyMode,
-        shopMode,
-        shopBuyerView,
-        shopSellerView,
-        stableFromAccount
-      });
-      switch (action.type) {
-        case "system":
-          return false;
-        case "stay":
-          return true;
-        case "onboarding-back":
-          goBackOnboarding();
-          return true;
-        case "close-recap":
-          closeRideRecap();
-          return true;
-        case "close-ralf":
-          closeRalf();
-          return true;
-        case "close-account":
-          closeAccount();
-          return true;
-        case "academy-home":
-          navigateAcademy("home");
-          return true;
-        case "shop-buyer":
-          setShopBuyerView(action.view);
-          return true;
-        case "shop-seller":
-          setShopSellerView(action.view);
-          return true;
-        case "back-to-account":
-          backToAccount();
-          return true;
-        case "go-home":
-          setStableFromAccount(false);
-          setTab("home");
-          return true;
-      }
-    };
+    androidBack.current = () =>
+      carryOutBack(
+        androidBackAction({
+          phase: equinaSession.phase,
+          recoveryRequired: equinaSession.recoveryRequired,
+          betaDoor,
+          accountCreated,
+          onboardingTransitioning,
+          entryRoute,
+          otpVisible,
+          onboardingStep,
+          modalSheetOpen:
+            rideSetupOpen ||
+            addActivityOpen ||
+            horseSwitcherOpen ||
+            horseCreatorOpen ||
+            streakOpen ||
+            trainingPlanOpen ||
+            Boolean(timeOffHorseId) ||
+            rideJournalOpen ||
+            (signUpPlanOffer.visible && purchases.available),
+          tab,
+          rideActive,
+          rideReady: Boolean(ridePlan && rideRun),
+          recapVisible: lastRideRecapVisible && Boolean(lastRide),
+          ralfOpen,
+          academyMode,
+          shopMode,
+          shopBuyerView,
+          shopSellerView,
+          stableFromAccount
+        }),
+        {
+          onboardingBack: goBackOnboarding,
+          closeRecap: closeRideRecap,
+          closeRalf,
+          closeAccount,
+          academyHome: () => navigateAcademy("home"),
+          shopBuyer: setShopBuyerView,
+          shopSeller: setShopSellerView,
+          backToAccount,
+          goHome: () => {
+            setStableFromAccount(false);
+            setTab("home");
+          }
+        }
+      );
   }
   // Registered once, with the latest state read through the ref: React
   // Native asks its listeners last registered first, so one that registered
