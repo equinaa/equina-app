@@ -98,6 +98,15 @@ only lists what it would do. It never deletes a file and never changes a row, an
 it lists the pictures it cannot clean (a HEIC photo stored earlier), so the rider
 can be asked to choose the photo again (`tests/clean-stored-photos.test.ts`).
 
+**What cleaning at completion does not cover.** Between the upload and
+`complete-upload`, a file sits in its bucket as it was sent, and an upload whose
+completion never arrives stays that way. Nobody is handed a link to such a file,
+but storage's read rules follow the folder, not the row: every rider let into the
+app may read any file in `avatars` (202610060003), and whoever may view a horse may
+read any file under it in `horse-media`, so a rider who lists a folder through the
+API can find one. Closing that takes a read policy that follows the row a file is
+registered on, or removing an unfinished upload when its ticket expires.
+
 Record files and dispute evidence are kept exactly as they were sent, because the
 file is the record and its hash is stored with it. An image among them keeps its
 metadata, and the people in the table above can read it. They, and anything the
