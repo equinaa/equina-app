@@ -35,6 +35,14 @@ export const cleanedUploadKinds: readonly string[] = ["avatar", "horse_photo", "
 
 const ascii = (data: Uint8Array, length: number) => String.fromCharCode(...data.subarray(0, length));
 
+// A picture has a few dozen labelled parts, a large PNG a few thousand. A file
+// made of millions of empty ones is not a picture: taking it apart would cost
+// far more memory than its size, so it is refused before that.
+const maxParts = 100_000;
+const countPart = (kept: Uint8Array[], removed: string[]) => {
+  if (kept.length + removed.length >= maxParts) throw new ImageMetadataError("Too many parts.");
+};
+
 const concat = (parts: Uint8Array[]) => {
   const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let at = 0;
@@ -173,6 +181,7 @@ export function stripJpegMetadata(input: Uint8Array): CleanedPhoto {
   let orientationKept = false;
   let offset = 2;
   while (offset < input.length) {
+    countPart(kept, removed);
     if (input[offset] !== 0xff) throw new ImageMetadataError("Malformed JPEG segment.");
     // Fill bytes between segments.
     while (input[offset] === 0xff && input[offset + 1] === 0xff) offset += 1;
@@ -254,6 +263,7 @@ export function stripPngMetadata(input: Uint8Array): CleanedPhoto {
   let offset = 8;
   let ended = false;
   while (offset < input.length && !ended) {
+    countPart(kept, removed);
     if (offset + 12 > input.length) throw new ImageMetadataError("Truncated PNG.");
     // Length of the data, then four letters, the data, and a checksum.
     const length =

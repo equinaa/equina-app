@@ -341,6 +341,29 @@ const pngWith = (...chunks: number[][]) =>
   );
 }
 
+// A file built of millions of empty parts is not a picture, and taking it apart
+// would cost many times its size in memory. It is refused, however small each
+// part is. A large PNG saved in small pieces has a few thousand and is fine.
+{
+  const emptySegment = [0xff, 0xe3, 0x00, 0x02];
+  const manySegments = new Uint8Array(2 + 100_000 * 4 + 2);
+  manySegments.set([0xff, 0xd8]);
+  for (let index = 0; index < 100_000; index += 1) manySegments.set(emptySegment, 2 + index * 4);
+  manySegments.set(endOfImage, manySegments.length - 2);
+  assert.throws(() => stripJpegMetadata(manySegments), ImageMetadataError);
+  assert.equal(stripJpegMetadata(manySegments.subarray(0, 2 + 5_000 * 4)).removed.length, 5_000);
+
+  const emptyChunk = chunk("tEXt");
+  const start = [...pngSignature, ...header];
+  const manyChunks = new Uint8Array(start.length + 100_000 * emptyChunk.length + pngEnd.length);
+  manyChunks.set(start);
+  for (let index = 0; index < 100_000; index += 1) manyChunks.set(emptyChunk, start.length + index * emptyChunk.length);
+  manyChunks.set(pngEnd, manyChunks.length - pngEnd.length);
+  assert.throws(() => stripPngMetadata(manyChunks), ImageMetadataError);
+  const smallPieces = Uint8Array.from([...start, ...Array.from({ length: 5_000 }, () => pixels).flat(), ...pngEnd]);
+  assert.deepEqual([...stripPngMetadata(smallPieces).bytes], [...smallPieces]);
+}
+
 // --- By type --------------------------------------------------------------------
 
 // The types that can be cleaned without decoding the picture. HEIC is not one:
