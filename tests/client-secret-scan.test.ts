@@ -72,7 +72,13 @@ try {
   const bytecodeOnly = scan(exportTo("bytecode", { "metadata.json": "{}", "_expo/static/js/ios/index.hbc": hermes }));
   assert.equal(bytecodeOnly.status, 1, "An export the scan cannot read is not a pass.");
   assert.match(bytecodeOnly.output, /not scanned, Hermes bytecode: .*ios.index\.hbc/);
-  assert.match(bytecodeOnly.output, /npx expo export --platform all --no-bytecode/, "It says how to get bundles it can read.");
+  // --clear belongs to the command: Metro's cache does not notice a changed
+  // EXPO_PUBLIC_ value, so an export without it can carry an earlier run's.
+  assert.match(
+    bytecodeOnly.output,
+    /npx expo export --platform all --no-bytecode --clear$/m,
+    "It says how to get bundles it can read, freshly bundled."
+  );
 
   const missing = scan(join(work, "never-exported"));
   assert.notEqual(missing.status, 0);

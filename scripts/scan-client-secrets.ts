@@ -5,7 +5,11 @@ import { extname, join, relative, resolve } from "node:path";
 // (npm run security:bundle-scan -- some/export). `npm run build` puts the web
 // export there. To scan the iOS and Android bundles too, export all three as
 // JavaScript first:
-//   npx expo export --platform all --no-bytecode
+//   npx expo export --platform all --no-bytecode --clear
+// Keep --clear (npm run build -- --clear for the web export alone). Metro's
+// cache is shared by every checkout on this machine and does not notice a
+// changed EXPO_PUBLIC_ value, so without it the export can carry the values of
+// an earlier one, not the ones being checked.
 const outputName = process.argv[2] ?? "dist";
 const outputDirectory = resolve(process.cwd(), outputName);
 if (!existsSync(outputDirectory)) {
@@ -74,7 +78,7 @@ if (findings.length || bytecode.length) {
     console.error(`- not scanned, Hermes bytecode: ${relative(process.cwd(), file)}`);
   }
   if (bytecode.length) {
-    console.error("Export the native bundles as JavaScript to scan them: npx expo export --platform all --no-bytecode");
+    console.error("Export the native bundles as JavaScript to scan them: npx expo export --platform all --no-bytecode --clear");
   }
   process.exitCode = 1;
 } else {

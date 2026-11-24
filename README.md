@@ -59,7 +59,7 @@ Set `EXPO_PUBLIC_EQUINA_DEMO_MODE=true` to explore the UI with local sample data
 | `npm test` | Client flows, backend contract, and migration/RLS isolation tests |
 | `npm run backend:check` | Type-check every Edge Function with Deno |
 | `npm run backend:audit` | Schema audit: grants, RLS, and policy coverage |
-| `npm run security:bundle-scan` | Fails if a secret-shaped value would ship in the client bundle. Reads the web export in `dist`; run `npx expo export --platform all --no-bytecode` first to include the iOS and Android bundles |
+| `npm run security:bundle-scan` | Fails if a secret-shaped value would ship in the client bundle. Reads the web export in `dist`; run `npx expo export --platform all --no-bytecode --clear` first to include the iOS and Android bundles. Keep `--clear` (for the web export alone, `npm run build -- --clear`): Metro's cache is shared by every checkout on this machine and does not notice a changed `EXPO_PUBLIC_` value, so without it an export can carry the values of an earlier one |
 
 Run `typecheck`, `test`, `backend:check`, `backend:audit` and `security:bundle-scan` before opening a pull request.
 
