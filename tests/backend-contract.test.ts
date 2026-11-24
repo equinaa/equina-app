@@ -395,7 +395,7 @@ assert.doesNotMatch(mediaSafetySource, /console\.(log|error)/);
 // out is in image-metadata.test.ts; here, that complete-upload runs it on every
 // such upload before a row can point at the file, and never keeps a picture it
 // could not clean.
-assert.deepEqual([...cleanedUploadKinds], ["avatar", "horse_photo", "club_post"]);
+assert.deepEqual([...cleanedUploadKinds], ["avatar", "horse_photo", "club_post", "listing_photo"]);
 {
   const cleaningStart = uploadStep("if (cleanedUploadKinds.includes(ticket.kind)) {");
   const cleaning = uploadBlock("if (cleanedUploadKinds.includes(ticket.kind)) {");
@@ -428,6 +428,13 @@ assert.deepEqual([...cleanedUploadKinds], ["avatar", "horse_photo", "club_post"]
   );
   assert.match(cleaning, /storedSize = cleaned\.bytes\.byteLength;\s*\}$/);
   assert.match(uploadBlock('} else if (ticket.kind === "club_post") {'), /byte_size: storedSize,/);
+  // A listing photo's row carries the size and the hash of the file that is
+  // kept: the hash is how the same picture is recognised on another listing.
+  assert.match(cleaning, /if \(contentHash\) contentHash = await sha256\(cleaned\.bytes\.slice\(\)\.buffer\);/);
+  assert.match(
+    uploadBlock('} else if (ticket.kind === "listing_photo") {'),
+    /byte_size: storedSize, position: input\.position \?\? 0, content_hash: contentHash,/
+  );
   // Whatever goes wrong in this step ends in rejectRegistration, which removes
   // the upload and cancels the ticket: there is no way out of it that leaves
   // the original in storage with a row pointing at it.
@@ -458,6 +465,7 @@ assert.deepEqual([...cleanedUploadKinds], ["avatar", "horse_photo", "club_post"]
   }
   assert.match(ticketSource, /\n  avatar: \{ bucket: "avatars", max: 10 \* 1024 \* 1024, mime: cleanablePhotoTypes \},/);
   assert.match(ticketSource, /\n  horse_photo: \{ bucket: "horse-media", max: 15 \* 1024 \* 1024, mime: cleanablePhotoTypes \},/);
+  assert.match(ticketSource, /\n  listing_photo: \{ bucket: "listing-media", max: 15 \* 1024 \* 1024, mime: cleanablePhotoTypes \},/);
 }
 
 const oldUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;

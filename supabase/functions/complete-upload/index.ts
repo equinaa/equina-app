@@ -11,8 +11,8 @@ import { createAdminClient, requireUser } from "../_shared/supabase.ts";
 
 type CompleteUploadRequest = { ticketId: string; requiredAngle?: string; position?: number; note?: string };
 
-const sha256 = async (blob: Blob) => {
-  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+const sha256 = async (bytes: ArrayBuffer) => {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
@@ -142,7 +142,7 @@ Deno.serve(async (request) => {
     if (["horse_record", "listing_photo", "dispute_evidence"].includes(ticket.kind)) {
       const { data: uploadedBlob, error: downloadError } = await admin.storage.from(ticket.bucket_id).download(ticket.object_path);
       if (downloadError || !uploadedBlob) throw downloadError ?? new Error("Uploaded file could not be verified.");
-      contentHash = await sha256(uploadedBlob);
+      contentHash = await sha256(await uploadedBlob.arrayBuffer());
     }
     try {
       await inspectUploadForMalware({
@@ -185,6 +185,9 @@ Deno.serve(async (request) => {
         const { error: sizeError } = await admin.from("upload_tickets")
           .update({ byte_size: cleaned.bytes.byteLength }).eq("id", ticket.id);
         if (sizeError) return await rejectRegistration(sizeError);
+        // A listing photo's hash is how the same picture is recognised on
+        // another listing, so it is the hash of the file that is kept.
+        if (contentHash) contentHash = await sha256(cleaned.bytes.slice().buffer);
       }
       storedSize = cleaned.bytes.byteLength;
     }
@@ -226,7 +229,7 @@ Deno.serve(async (request) => {
       const { error: insertError } = await admin.from("listing_photos").insert({
         listing_id: ticket.entity_id, uploaded_by: user.id, object_path: ticket.object_path,
         required_angle: requiredAngle, mime_type: ticket.mime_type,
-        byte_size: ticket.byte_size, position: input.position ?? 0, content_hash: contentHash,
+        byte_size: storedSize, position: input.position ?? 0, content_hash: contentHash,
       });
       if (insertError) await rejectRegistration(insertError);
       if (!insertError && contentHash) {

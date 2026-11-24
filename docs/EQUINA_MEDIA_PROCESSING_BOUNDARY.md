@@ -62,6 +62,12 @@ the owner sees one today, because no screen shares a horse yet, but the database
 already lets an owner share a horse with another rider (`set_horse_collaborator`),
 and a portrait is usually taken where the horse lives.
 
+**Listing photos** can be opened by anyone once the listing is visible, signed in
+or not, so they are cleaned as well. The hash kept with a listing photo, which is
+how the same picture is recognised on another listing, is the hash of the cleaned
+file. Nothing uploads one yet: the marketplace is closed and the app has no screen
+for it. When it gets one, the app has to send JPEG or PNG, as it does for the Club.
+
 Which uploads are cleaned is one list, `cleanedUploadKinds`, decided by who can
 open the file:
 
@@ -70,7 +76,7 @@ open the file:
 | Profile photo (`avatar`) | every rider let into the app, and staff | cleaned |
 | Club photo (`club_post`) | the Club's readers | cleaned |
 | Horse portrait (`horse_photo`) | its owner, the riders the owner shares the horse with, and staff | cleaned |
-| Listing photo (`listing_photo`) | anyone, once the listing is visible | as sent |
+| Listing photo (`listing_photo`) | anyone, once the listing is visible | cleaned |
 | Record file (`horse_record`) | the horse's owner, the riders it is shared with, and staff | as sent, with its SHA-256 |
 | Dispute evidence (`dispute_evidence`) | the buyer, the seller and staff | as sent, with its SHA-256 |
 
@@ -82,8 +88,11 @@ The cleaned file replaces the upload at the same path before any row points at i
 and the ticket then names the cleaned file's size, so completing the same ticket
 twice finds the file it expects.
 
-Uploads stored as sent still go through the full processor below before they can
-be public.
+Record files and dispute evidence are kept exactly as they were sent, because the
+file is the record and its hash is stored with it. An image among them keeps its
+metadata, and the people in the table above can read it. They, and anything the
+cleaner cannot do (decode a picture, enforce its dimensions, read HEIC), still need
+the full processor below before they can be public.
 
 Required processor contract:
 
