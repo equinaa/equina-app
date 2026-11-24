@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Keyboard, KeyboardAvoidingView, Platform, View, type StyleProp, type ViewStyle } from "react-native";
-import { createKeyboardAvoider } from "./keyboard-avoidance";
+import { createKeyboardAvoider, followKeyboard } from "./keyboard-avoidance";
 
 type KeyboardAvoidingContainerProps = {
   style?: StyleProp<ViewStyle>;
@@ -59,17 +59,7 @@ function AndroidKeyboardAvoidingView({
     []
   );
 
-  useEffect(() => {
-    const shown = Keyboard.addListener("keyboardDidShow", (event) => avoider.show(event.endCoordinates.screenY));
-    const hidden = Keyboard.addListener("keyboardDidHide", () => avoider.hide());
-    // Mounted with the keyboard already open.
-    const open = Keyboard.isVisible() ? Keyboard.metrics() : undefined;
-    if (open) avoider.show(open.screenY);
-    return () => {
-      shown.remove();
-      hidden.remove();
-    };
-  }, [avoider]);
+  useEffect(() => followKeyboard(Keyboard, avoider), [avoider]);
 
   return (
     <View

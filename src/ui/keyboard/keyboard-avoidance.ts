@@ -87,3 +87,36 @@ export function createKeyboardAvoider(
     }
   };
 }
+
+/** The part of React Native's Keyboard that followKeyboard uses. */
+export type KeyboardSource = {
+  addListener(
+    event: "keyboardDidShow" | "keyboardDidHide",
+    listener: (event: { endCoordinates: { screenY: number } }) => void
+  ): { remove(): void };
+  isVisible(): boolean;
+  metrics(): { screenY: number } | null | undefined;
+};
+
+/**
+ * Feeds the keyboard's events to an avoider until the returned function is
+ * called (a useEffect cleanup).
+ *
+ * In React Native 0.83 on Android (ReactRootView.checkForKeyboardEvents),
+ * keyboardDidShow's screenY is where the keyboard starts on screen, while its
+ * height leaves out the navigation bar, so only screenY tells how much of a
+ * view is covered. keyboardDidHide's screenY is the visible area's height,
+ * not a keyboard edge, so nothing in the hide event is read.
+ */
+export function followKeyboard(keyboard: KeyboardSource, avoider: KeyboardAvoider): () => void {
+  const shown = keyboard.addListener("keyboardDidShow", (event) => avoider.show(event.endCoordinates.screenY));
+  const hidden = keyboard.addListener("keyboardDidHide", () => avoider.hide());
+  // Mounted with the keyboard already open: React Native keeps the last
+  // keyboardDidShow's coordinates until the keyboard closes.
+  const open = keyboard.isVisible() ? keyboard.metrics() : undefined;
+  if (open) avoider.show(open.screenY);
+  return () => {
+    shown.remove();
+    hidden.remove();
+  };
+}
