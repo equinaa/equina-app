@@ -82,6 +82,30 @@ export const reviewedSwitches = (easJson, profile, platform) => {
 export const setTwice = (env, switches) => Object.keys(switches).filter((name) => env[name] !== undefined);
 
 /**
+ * What this release does not sell with. The app opens its paywall only when a
+ * store key for the platform and a privacy link are both built in
+ * (src/features/plans/purchase-catalog.ts, purchasesAvailable), and nothing
+ * else reads these three names. The server's side of selling is already on in
+ * production, so a build that carries them sells to every tester.
+ *
+ * The first closed test sells nothing: the team gives each account its plan
+ * from the Admin (decided on 24 Nov 2026). Until that changes a store build
+ * carries none of the three. To start selling, take the names out of this list
+ * in the commit that reviews the paywall, and set them as EAS variables.
+ */
+export const notSoldYet = [
+  "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY",
+  "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY",
+  "EXPO_PUBLIC_PRIVACY_POLICY_URL"
+];
+
+/** The name the app reads the key from: the old one only when the new one is absent. */
+const backendKeyName = (env) =>
+  env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY === undefined && env.EXPO_PUBLIC_SUPABASE_ANON_KEY !== undefined
+    ? "EXPO_PUBLIC_SUPABASE_ANON_KEY"
+    : "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY";
+
+/**
  * Why this build must not ship. Empty when the build is fine, and for the
  * development client.
  *
@@ -105,10 +129,7 @@ export const storeBuildProblems = ({ profile, env, switches = {} }) => {
     report("EXPO_PUBLIC_SUPABASE_URL", "is not an https address.");
   }
   // The app falls back to the key's old name only when the new one is absent.
-  const keyName =
-    env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY === undefined && env.EXPO_PUBLIC_SUPABASE_ANON_KEY !== undefined
-      ? "EXPO_PUBLIC_SUPABASE_ANON_KEY"
-      : "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY";
+  const keyName = backendKeyName(env);
   const key = clean(env[keyName]);
   if (!key) {
     report("EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "is not set. The app would open with no backend and nobody could sign in.");
@@ -127,13 +148,23 @@ export const storeBuildProblems = ({ profile, env, switches = {} }) => {
 
   for (const name of ["EXPO_PUBLIC_REVENUECAT_IOS_API_KEY", "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY"]) {
     if (clean(env[name]).startsWith("test_")) {
-      report(name, "is a RevenueCat Test Store key, which only works in development builds. Use the store's own key, or none.");
+      report(name, "is a RevenueCat Test Store key, which only works in development builds. Delete it from this environment.");
     }
   }
 
   const privacy = webAddress(clean(env.EXPO_PUBLIC_PRIVACY_POLICY_URL));
   if (privacy && privacy.hostname.replace(/\.$/, "") === webAppHost) {
     report("EXPO_PUBLIC_PRIVACY_POLICY_URL", "points at the web app, not at a privacy policy. Leave it unset until the policy has its own page.");
+  }
+
+  // Nothing is sold in this release, so nothing selling needs is built in.
+  for (const name of notSoldYet) {
+    if (clean(env[name]) !== "") {
+      report(
+        name,
+        "is set, and this release sells nothing. With a store key and a privacy link built in, the paywall opens for every tester. Delete it from this environment."
+      );
+    }
   }
 
   // The switches reviewed in git are the ones the build gets.
@@ -151,4 +182,36 @@ export const storeBuildProblems = ({ profile, env, switches = {} }) => {
     );
   }
   return lines;
+};
+
+/**
+ * Whether the two backend values are a live project's own: asks the project's
+ * auth service for its public settings with the key, as the app's client
+ * would, and wants a plain 200. A wrong letter in the address or a key cut
+ * short when it was pasted passes every rule above, and the build that carries
+ * it cannot sign anyone in and cannot be patched.
+ *
+ * Only the rehearsal calls this, from the owner's computer. A build machine
+ * asks nobody. It answers with a line for the report, or null when the project
+ * answered. The line carries the status, never the address or the key.
+ */
+export const backendAnswer = async (env, request = globalThis.fetch) => {
+  const url = clean(env.EXPO_PUBLIC_SUPABASE_URL);
+  const keyName = backendKeyName(env);
+  const key = clean(env[keyName]);
+  let status;
+  try {
+    const response = await request(new URL("/auth/v1/settings", url), {
+      headers: { apikey: key },
+      signal: AbortSignal.timeout(15_000)
+    });
+    status = response.status;
+  } catch {
+    return "EXPO_PUBLIC_SUPABASE_URL did not answer from this computer. It is not the project's address, or this computer is offline.";
+  }
+  if (status === 200) return null;
+  if (status === 401 || status === 403) {
+    return `${keyName} was refused by the project (HTTP ${status}). It is not this project's publishable key, or it was cut short.`;
+  }
+  return `EXPO_PUBLIC_SUPABASE_URL answered HTTP ${status}, not as a Supabase project does.`;
 };

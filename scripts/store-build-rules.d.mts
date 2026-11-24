@@ -25,3 +25,12 @@ export declare const reviewedSwitches: (
 export declare const setTwice: (env: Env, switches: Record<string, string>) => string[];
 
 export declare const storeBuildProblems: (build: StoreBuild) => string[];
+
+/** The names a store build must not carry while nothing is sold. */
+export declare const notSoldYet: string[];
+
+/** Asks the project whether the two backend values are its own. A report line, or null. */
+export declare const backendAnswer: (
+  env: Env,
+  request?: (url: URL, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<{ status: number }>
+) => Promise<string | null>;

@@ -120,6 +120,13 @@ for (const [name, value] of Object.entries(committedSwitches)) {
 for (const profile of ["preview", "production"]) {
   assert.deepEqual(easJson.build[profile]?.env, committedSwitches, `eas.json "${profile}" carries the reviewed switches.`);
 }
+// So does any profile added later. Only "base" (never built by itself) and the
+// development client go without: every other profile makes an app someone
+// installs, and the build guard compares a build with its own profile.
+for (const [profile, config] of Object.entries(easJson.build)) {
+  if (profile === "base" || profile === "development") continue;
+  assert.deepEqual(config.env, committedSwitches, `eas.json "${profile}" makes an installable app, so it carries the reviewed switches.`);
+}
 
 // What EAS variables provide is never also in eas.json: when a name is in both,
 // which one a build gets is not something to depend on.

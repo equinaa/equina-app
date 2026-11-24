@@ -130,16 +130,18 @@ npx eas-cli@latest env:set --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value "
 ```
 
 - **Profiles.** `development` is the dev client. `preview` installs from a link, for the team: an APK on Android, ad hoc on iOS. `production` goes to the stores, and EAS keeps and raises its build number, so no build edits `app.json`. All three use the Node pinned in `base`.
-- **The guard.** `scripts/eas-build-guard.mjs` runs on EAS before `npm install` and fails the build when a backend variable is missing, sign-in is not by code, the demo is on, a RevenueCat Test Store key or the placeholder privacy link is present, or a switch is not what `eas.json` says. It prints names, never values. To check from your machine before spending a build:
+- **The guard.** `scripts/eas-build-guard.mjs` runs on EAS before `npm install` and fails the build when a backend variable is missing, sign-in is not by code, the demo is on, a RevenueCat key or a privacy link is present (see "Selling stays off"), or a switch is not what `eas.json` says. It prints names, never values. To check from your machine before spending a build:
 
   ```bash
   npx eas-cli@latest env:exec production "node scripts/eas-build-guard.mjs --rehearse production"
   ```
 
+  The rehearsal also asks the project itself whether the address and the key are its own (one request for the auth service's public settings), because a wrong letter or a key cut short has the right shape and still makes a build nobody can sign in to. Add `--offline` to skip that question.
+
 - **Local builds.** `eas build --local` runs the same guard, and its `.ipa` or `.aab` can go to a store like any other. It is not the same build, though: it uses the Node installed on this computer, not the one pinned in `base`, and it cannot read an EAS variable of Secret visibility, one more reason the two above are plain text. It also takes whatever the terminal exports. The guard's first line lists every `EXPO_PUBLIC_` name the build sees: read it before you submit.
 - **One place for each name.** When a name is in `eas.json` and also an EAS variable, EAS CLI says the `eas.json` value is used and prints a warning, but Expo does not document the order and the build machine joins the two itself. Do not depend on it: the guard stops a build whose switch differs from `eas.json`, and the rehearsal names anything set twice.
 - **Never run `eas env:push` without `--path`.** It uploads `.env.local` by default, with its development-only keys and tokens. `eas env:pull` without `--path` overwrites `.env.local`.
-- **Selling stays off** while no store key (`EXPO_PUBLIC_REVENUECAT_*`) and no privacy policy link are set. Plans are given from the Admin.
+- **Selling stays off.** The app opens its paywall only with a store key (`EXPO_PUBLIC_REVENUECAT_*`) and a privacy policy link (`EXPO_PUBLIC_PRIVACY_POLICY_URL`) built in, and the server's side of selling is already on. The first closed test sells nothing and plans are given from the Admin, so the guard stops a store build that carries any of the three. To start selling, take the names out of `notSoldYet` in `scripts/store-build-rules.mjs` in the commit that reviews the paywall, then set them as EAS variables.
 - **Icons and launch screen.** The icons in `assets/` are provisional, a plain E: replace the files and keep their names. `assets/splash.png` is transparent on purpose. Expo SDK 55 only colours the iOS launch screen when it has an image.
 
 `tests/store-build-config.test.ts` holds the reviewed answer for every `EXPO_PUBLIC_` name the app reads. A new name fails the tests until it has one.

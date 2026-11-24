@@ -16,15 +16,17 @@
 // To check a profile from this computer before spending a build, let EAS CLI
 // hand over the variables it holds:
 //   npx eas-cli@latest env:exec production "node scripts/eas-build-guard.mjs --rehearse production"
+// A rehearsal also asks the project itself whether the address and the key are
+// its own, which no rule can tell from their shape. Add --offline to skip that.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isEasBuild, isStoreBuild, reviewedSwitches, setTwice, storeBuildProblems } from "./store-build-rules.mjs";
+import { backendAnswer, isEasBuild, isStoreBuild, reviewedSwitches, setTwice, storeBuildProblems } from "./store-build-rules.mjs";
 
 const say = (line) => console.log(`eas-build-guard: ${line}`);
 const complain = (line) => console.error(`eas-build-guard: ${line}`);
 
-const check = () => {
+const check = async () => {
   const onEas = isEasBuild(process.env);
   const rehearsing = !onEas && process.argv[2] === "--rehearse";
   if (!onEas && !rehearsing) {
@@ -68,6 +70,15 @@ const check = () => {
   }
   problems.push(...storeBuildProblems({ profile, env, switches }));
 
+  // The values have the right shape. Whether they are a live project's own is
+  // asked of the project, from this computer only and never from a build.
+  const backendLooksRight = !problems.some((problem) => problem.startsWith("EXPO_PUBLIC_SUPABASE_"));
+  if (rehearsing && backendLooksRight && !process.argv.includes("--offline")) {
+    const answer = await backendAnswer(env);
+    if (answer) problems.push(answer);
+    else say("the project answered with these two values.");
+  }
+
   const names = Object.keys(env)
     .filter((name) => name.startsWith("EXPO_PUBLIC_"))
     .sort();
@@ -84,4 +95,4 @@ const check = () => {
   return 0;
 };
 
-process.exitCode = check();
+process.exitCode = await check();

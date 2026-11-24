@@ -4,7 +4,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readBackendConfig } from "../src/backend/config";
 import { revenueCatApiKey } from "../src/features/plans/purchase-catalog";
-import { isEasBuild, isStoreBuild, reviewedSwitches, setTwice, storeBuildProblems } from "../scripts/store-build-rules.mjs";
+import {
+  backendAnswer,
+  isEasBuild,
+  isStoreBuild,
+  notSoldYet,
+  reviewedSwitches,
+  setTwice,
+  storeBuildProblems
+} from "../scripts/store-build-rules.mjs";
 
 // The guard EAS runs before a build (package.json, "eas-build-pre-install"):
 // a store build never ships without a backend, with the wrong sign-in mode,
@@ -182,8 +190,8 @@ for (const profile of ["preview", "production"]) {
     const problems = problemsWith({ [name]: testStoreKey });
     assert.equal(problems.length, 1);
     assert.ok(problems[0]!.startsWith(`${name} is a RevenueCat Test Store key`));
-    for (const key of [undefined, "", `appl_${"k".repeat(24)}`, `goog_${"k".repeat(24)}`]) {
-      assert.deepEqual(problemsWith({ [name]: key }), [], "A store key, or none, is fine.");
+    for (const key of [undefined, "", "   "]) {
+      assert.deepEqual(problemsWith({ [name]: key }), [], "No key is fine: nothing is sold.");
     }
   }
   assert.equal(
@@ -203,8 +211,86 @@ for (const profile of ["preview", "production"]) {
     assert.equal(problems.length, 1);
     assert.match(problems[0]!, /^EXPO_PUBLIC_PRIVACY_POLICY_URL points at the web app/);
   }
-  for (const link of [undefined, "", "https://example.com/privacy", "https://equina-ten.vercel.app.example.com/", "equina-ten.vercel.app/privacy"]) {
-    assert.deepEqual(problemsWith({ EXPO_PUBLIC_PRIVACY_POLICY_URL: link }), [], "Only an http(s) link on the web app's own host is refused.");
+  for (const link of [undefined, "", "  "]) {
+    assert.deepEqual(problemsWith({ EXPO_PUBLIC_PRIVACY_POLICY_URL: link }), [], "No privacy link is fine: nothing is sold.");
+  }
+}
+
+// Nothing is sold in this release, so a store build carries nothing selling needs.
+{
+  assert.deepEqual(
+    [...notSoldYet].sort(),
+    ["EXPO_PUBLIC_PRIVACY_POLICY_URL", "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY", "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY"],
+    "The store keys and the privacy link are what opens the paywall. Take a name out only in the commit that reviews selling."
+  );
+  // These are exactly the two things the app itself needs before it sells.
+  const catalog = readFileSync(join(root, "src", "features", "plans", "purchase-catalog.ts"), "utf8");
+  assert.match(catalog, /Boolean\(input\.apiKey\) &&\s+Boolean\(input\.privacyPolicyUrl\) &&/);
+
+  const storeKeys: Record<string, string> = {
+    EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: `appl_${"k".repeat(24)}`,
+    EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: `goog_${"k".repeat(24)}`
+  };
+  for (const [name, key] of Object.entries(storeKeys)) {
+    const problems = problemsWith({ [name]: key });
+    assert.equal(problems.length, 1, "A real store key is refused as well: with it the paywall can open.");
+    assert.ok(problems[0]!.startsWith(`${name} is set, and this release sells nothing.`));
+    assert.ok(!problems[0]!.includes(key), "The key is not repeated.");
+  }
+  for (const link of ["https://example.com/privacy", "https://equina-ten.vercel.app.example.com/", "equina-ten.vercel.app/privacy"]) {
+    const problems = problemsWith({ EXPO_PUBLIC_PRIVACY_POLICY_URL: link });
+    assert.equal(problems.length, 1, "A privacy link on any host is the other half of selling.");
+    assert.match(problems[0]!, /^EXPO_PUBLIC_PRIVACY_POLICY_URL is set, and this release sells nothing\./);
+    assert.ok(!problems[0]!.includes(link));
+  }
+  // The more exact reason wins when there is one, and each name is reported once.
+  assert.match(
+    problemsWith({ EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: testStoreKey })[0] ?? "",
+    /^EXPO_PUBLIC_REVENUECAT_IOS_API_KEY is a RevenueCat Test Store key/
+  );
+  assert.equal(problemsWith({ ...storeKeys, EXPO_PUBLIC_PRIVACY_POLICY_URL: "https://example.com/privacy" }).length, 3);
+  // The development client still takes whatever .env.local holds.
+  assert.deepEqual(storeBuildProblems({ profile: "development", env: { ...storeKeys } }), []);
+}
+
+// Whether the address and the key are a live project's own is asked of the
+// project. Only a rehearsal asks; the answer names the status and nothing else.
+{
+  type Asked = { url: string; apikey: string | undefined };
+  const asking = (status: number | Error) => {
+    const asked: Asked[] = [];
+    const request = async (url: URL, init: { headers: Record<string, string> }) => {
+      asked.push({ url: url.toString(), apikey: init.headers.apikey });
+      if (status instanceof Error) throw status;
+      return { status };
+    };
+    return { asked, request };
+  };
+  const env: Env = { EXPO_PUBLIC_SUPABASE_URL: ` ${projectUrl}/ `, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey };
+
+  const live = asking(200);
+  assert.equal(await backendAnswer(env, live.request), null, "The project answered: nothing to report.");
+  assert.deepEqual(live.asked, [{ url: `${projectUrl}/auth/v1/settings`, apikey: publishableKey }], "The auth service's public settings, with the key, as the app's client asks.");
+
+  for (const status of [401, 403]) {
+    const refused = await backendAnswer(env, asking(status).request);
+    assert.match(refused ?? "", new RegExp(`^EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY was refused by the project \\(HTTP ${status}\\)\\.`));
+  }
+  const oldName = await backendAnswer(
+    { EXPO_PUBLIC_SUPABASE_URL: projectUrl, EXPO_PUBLIC_SUPABASE_ANON_KEY: jwtKey("anon") },
+    asking(401).request
+  );
+  assert.match(oldName ?? "", /^EXPO_PUBLIC_SUPABASE_ANON_KEY was refused/, "The key is named as the app reads it.");
+
+  for (const status of [404, 500, 302]) {
+    assert.match((await backendAnswer(env, asking(status).request)) ?? "", new RegExp(`^EXPO_PUBLIC_SUPABASE_URL answered HTTP ${status},`));
+  }
+  const unreachable = await backendAnswer(env, asking(new Error(`getaddrinfo ENOTFOUND ${projectUrl}`)).request);
+  assert.match(unreachable ?? "", /^EXPO_PUBLIC_SUPABASE_URL did not answer from this computer\./);
+
+  for (const outcome of [401, 404, new Error(`connect ECONNREFUSED ${projectUrl} ${publishableKey}`)]) {
+    const line = (await backendAnswer(env, asking(outcome).request)) ?? "";
+    assert.ok(!line.includes("store-build-test") && !line.includes(publishableKey), "No line repeats the address or the key.");
   }
 }
 
@@ -419,23 +505,42 @@ for (const profile of ["preview", "production"]) {
 
   // A rehearsal from this computer, where `eas env:exec` supplies the EAS variables.
   const easVariables = { EXPO_PUBLIC_SUPABASE_URL: projectUrl, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey };
+  // --offline: these addresses are made up, and a test asks nobody on the network.
   for (const profile of ["preview", "production"]) {
-    const rehearsed = run(easVariables, ["--rehearse", profile]);
+    const rehearsed = run(easVariables, ["--rehearse", profile, "--offline"]);
     assert.equal(rehearsed.status, 0, `With the two EAS variables, a "${profile}" build would go through.`);
     assert.match(rehearsed.output, /has a backend/);
+    assert.doesNotMatch(rehearsed.output, /the project answered/, "Offline, the project is not asked.");
     assert.ok(!rehearsed.output.includes(projectUrl) && !rehearsed.output.includes(publishableKey));
   }
+  // Without --offline the rehearsal asks the project. Nothing listens on this
+  // port of this computer, so the question fails at once and no network is used.
+  const nobodyHome = "https://127.0.0.1:9";
+  const unanswered = run({ ...easVariables, EXPO_PUBLIC_SUPABASE_URL: nobodyHome }, ["--rehearse", "production"]);
+  assert.equal(unanswered.status, 1, "An address that is not a live project stops the rehearsal, though its shape is right.");
+  assert.match(unanswered.errors, /EXPO_PUBLIC_SUPABASE_URL did not answer from this computer\./);
+  assert.ok(!unanswered.output.includes(nobodyHome) && !unanswered.output.includes(publishableKey));
+  // A build on EAS never asks: the same unanswering address goes through there.
+  const onEasNobodyAsks = run({
+    EAS_BUILD: "true",
+    EAS_BUILD_PROFILE: "production",
+    EAS_BUILD_PLATFORM: "ios",
+    ...switches,
+    ...easVariables,
+    EXPO_PUBLIC_SUPABASE_URL: nobodyHome
+  });
+  assert.equal(onEasNobodyAsks.status, 0, "The build machine checks the rules and asks nobody.");
   const nothingOnEas = run({}, ["--rehearse", "production"]);
   assert.equal(nothingOnEas.status, 1, "Without them it says so before a build is spent.");
   assert.match(nothingOnEas.errors, /the "production" build would be stopped/);
   assert.match(nothingOnEas.errors, /EXPO_PUBLIC_SUPABASE_URL is not set/);
   assert.doesNotMatch(nothingOnEas.errors, /Missing, although/, "The switches come from eas.json in a rehearsal.");
 
-  const inBoth = run({ ...easVariables, EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS: "true" }, ["--rehearse", "production"]);
+  const inBoth = run({ ...easVariables, EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS: "true" }, ["--rehearse", "production", "--offline"]);
   assert.equal(inBoth.status, 1, "A switch that is also an EAS variable is caught before the build machine picks one.");
   assert.match(inBoth.errors, /Set outside eas\.json as well as in it: EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS\./);
 
-  const leftovers = run({ ...easVariables, EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: testStoreKey }, ["--rehearse", "preview"]);
+  const leftovers = run({ ...easVariables, EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: testStoreKey }, ["--rehearse", "preview", "--offline"]);
   assert.equal(leftovers.status, 1, "What a careless env:push left on EAS is caught too.");
   assert.match(leftovers.errors, /EXPO_PUBLIC_REVENUECAT_IOS_API_KEY is a RevenueCat Test Store key/);
 
