@@ -324,6 +324,11 @@ export type UploadAsset = {
   uri: string;
   fileName: string;
   mimeType: string;
+  /**
+   * What the picker reported, 0 when it said nothing. Good for showing a size
+   * and for an early limit; the upload declares the bytes it reads instead,
+   * because a picker can report another file's size (upload-flow.ts).
+   */
   byteSize: number;
 };
 

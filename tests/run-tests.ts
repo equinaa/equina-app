@@ -23,6 +23,9 @@ import "./active-ride.test";
 import "./store-build-config.test";
 import "./eas-build-guard.test";
 import "./client-secret-scan.test";
+import "./support-contact.test";
+import "./root-error.test";
+import "./ralf-notice.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./horse-selection.test");
 await import("./home-hero.test");
@@ -32,4 +35,5 @@ await import("./club-social.test");
 await import("./ride-setup.test");
 await import("./ride-journal.test");
 await import("./add-activity.test");
+await import("./upload-flow.test");
 await import("./backend-migrations.test");

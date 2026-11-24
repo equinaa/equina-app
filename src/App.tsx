@@ -115,7 +115,7 @@ import {
 } from "./features/records/HorseRecordSheets";
 import { CareSchedule } from "./features/records/CareSchedule";
 import { SignInScreen } from "./features/account/SignInScreen";
-import { signInCopy } from "./features/account/sign-in-copy";
+import { emailStepCopy, signInCopy } from "./features/account/sign-in-copy";
 import {
   accountAlreadyExists,
   emailRequestOutcome,
@@ -219,6 +219,7 @@ import { getFitScreening, type HorseFitContext } from "./product/product-truth";
 import { MotionPressable } from "./ui/motion/MotionPressable";
 import { EquinaIconButton, EquinaSegmentedTabs } from "./ui/primitives/EquinaPrimitives";
 import { useReducedMotion } from "./ui/motion/useReducedMotion";
+import { RootErrorBoundary } from "./ui/states/RootErrorBoundary";
 import { equinaTheme } from "./ui/theme/theme";
 import { floatingDockContentInset, floatingDockMetrics } from "./ui/layout/metrics";
 
@@ -872,9 +873,11 @@ const createCoachReply = ({
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <EquinaApp />
-    </SafeAreaProvider>
+    <RootErrorBoundary>
+      <SafeAreaProvider>
+        <EquinaApp />
+      </SafeAreaProvider>
+    </RootErrorBoundary>
   );
 }
 
@@ -2286,12 +2289,9 @@ function EquinaApp() {
   const uploadOnboardingHorsePhoto = async (horseId: string, asset: OnboardingPhotoAsset) => {
     if (!equinaSession.backend) return;
     try {
-      // Some pickers omit the size. The upload boundary compares the declared
-      // size against the bytes it receives, so measure rather than guess.
-      const byteSize = asset.byteSize > 0
-        ? asset.byteSize
-        : (await (await fetch(asset.uri)).blob()).size;
-      await equinaSession.backend.records.uploadHorsePhoto(horseId, { ...asset, byteSize });
+      // The size the picker gave is not sent: the upload reads the file and
+      // declares what it read (upload-flow.ts).
+      await equinaSession.backend.records.uploadHorsePhoto(horseId, asset);
       await equinaSession.refreshAccount();
     } catch {
       refresh("Your horse was saved. The photo could not be uploaded — you can add it from the horse profile.");
@@ -2768,7 +2768,7 @@ function EquinaApp() {
               // finished account, onboarding for one that never finished.
               await equinaSession.completePasswordRecovery(password);
             } catch {
-              setAuthError("The recovery session expired. Request a new recovery link.");
+              setAuthError(emailStepCopy(equinaSession.emailAuthMode).recoveryExpired);
             } finally {
               setAuthBusy(false);
             }
