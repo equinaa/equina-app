@@ -9,6 +9,7 @@ import {
   type UploadSteps,
   type UploadTicketRequest
 } from "../src/backend/upload-flow";
+import { recordFileMaxBytes, recordFileTooLarge, recordFileTooLargeMessage } from "../src/features/records/record-file-limit";
 
 const root = process.cwd();
 const ticket = { ticketId: "ticket-1", bucket: "horse-media", path: "rider/horse/horse/file.jpg", token: "signed", expiresAt: "2026-11-24T12:00:00Z" };
@@ -154,6 +155,28 @@ for (const kind of ["avatar", "horse_photo", "horse_record", "club_post", "listi
   assert.match(createTicket, /input\.byteSize < 1 \|\| input\.byteSize > rule\.max/, "A ticket is refused over the limit for its kind.");
   assert.match(createTicket, /byte_size: input\.byteSize/);
   assert.match(completeUpload, /actualSize !== ticket\.byte_size/, "A file is kept only at the size on its ticket.");
+}
+
+// A record's file is refused when it is chosen, before the upload reads it into memory.
+{
+  const tooLarge = "This file is too large. A record takes a file of up to 20 MB.";
+  assert.equal(recordFileMaxBytes, 20 * 1024 * 1024);
+  assert.equal(recordFileTooLarge(recordFileMaxBytes), false, "A file at the limit is taken.");
+  assert.equal(recordFileTooLarge(recordFileMaxBytes + 1), true);
+  assert.equal(recordFileTooLarge(150 * 1024 * 1024), true);
+  // No size reported is not a refusal: the file is measured next, and checked again.
+  assert.equal(recordFileTooLarge(undefined), false);
+  assert.equal(recordFileTooLarge(null), false);
+  assert.equal(recordFileTooLargeMessage, tooLarge);
+
+  // The same limit as the server's, so the two answers never disagree.
+  const createTicket = readFileSync(join(root, "supabase", "functions", "create-upload-ticket", "index.ts"), "utf8");
+  assert.match(createTicket, /horse_record: \{ bucket: "horse-records", max: 20 \* 1024 \* 1024,/, "The record limit on the server is 20 MB.");
+
+  // Checked on the size the picker gave, and again on the measured size, before the file is kept.
+  const sheets = readFileSync(join(root, "src", "features", "records", "HorseRecordSheets.tsx"), "utf8");
+  assert.match(sheets, /if \(recordFileTooLarge\(result\.assets\[0\]\.size\)\) \{\s+setLocalError\(recordFileTooLargeMessage\);\s+return;/);
+  assert.match(sheets, /if \(recordFileTooLarge\(chosen\.byteSize\)\) \{\s+setLocalError\(recordFileTooLargeMessage\);\s+return;/);
 }
 
 // --- Every upload in the app takes this path -----------------------------------------------------

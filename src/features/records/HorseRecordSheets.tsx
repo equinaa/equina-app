@@ -34,6 +34,7 @@ import { equinaTheme } from "../../ui/theme/theme";
 import { cadenceOf, isCareType, nextDueOn, recordTypeLabels } from "../../domain/care-schedule";
 import { disciplineLabel, horseSexOptionLabels } from "../../domain/labels";
 import { localToday } from "../../domain/local-day";
+import { recordFileTooLarge, recordFileTooLargeMessage } from "./record-file-limit";
 import type { HorseInput, TimelineRecordInput } from "./useHorseRecords";
 
 /**
@@ -390,8 +391,19 @@ export function RecordEditorSheet({
       multiple: false
     });
     if (!result.canceled && result.assets[0]) {
+      // Refused before it is read, and the file chosen before stays (record-file-limit.ts).
+      if (recordFileTooLarge(result.assets[0].size)) {
+        setLocalError(recordFileTooLargeMessage);
+        return;
+      }
       try {
-        setAsset(await documentUploadAsset(result.assets[0]));
+        const chosen = await documentUploadAsset(result.assets[0]);
+        // A picker that reported no size was measured just now.
+        if (recordFileTooLarge(chosen.byteSize)) {
+          setLocalError(recordFileTooLargeMessage);
+          return;
+        }
+        setAsset(chosen);
       } catch (assetError) {
         setLocalError(assetError instanceof Error ? assetError.message : "File could not be prepared.");
       }
