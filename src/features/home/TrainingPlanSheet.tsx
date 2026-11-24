@@ -85,8 +85,10 @@ export function TrainingPlanSheet({
     entry.weekday === target.weekday && entry.horseId === target.horseId;
   const change = (target: TrainingPlanDay, patch: Partial<TrainingPlanDay>) =>
     setDays((current) => current.map((entry) => (same(entry, target) ? { ...entry, ...patch } : entry)));
+  // A browser cannot wake up to notify anyone: the phone app schedules the
+  // reminders itself, so the website says so instead of promising one.
   const remindersDetail = Platform.OS === "web"
-    ? `At ${String(reminderHour).padStart(2, "0")}:00 on training days, on the Equina app on your phone.`
+    ? `Reminders come from the Equina app on your phone at ${String(reminderHour).padStart(2, "0")}:00 on training days. The website cannot send them.`
     : `At ${String(reminderHour).padStart(2, "0")}:00 on training days you have not logged yet.`;
 
   // One switch for the rider: opened for one of several horses, it says it
@@ -223,7 +225,6 @@ export function TrainingPlanSheet({
           </View>
         </Pressable>
 
-        <Text style={styles.note}>Changes count from today. The weeks you have already trained keep the plan they had.</Text>
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
         <EquinaButton
           testID="training-plan-save"
@@ -299,6 +300,5 @@ const styles = StyleSheet.create({
   remindersCopy: { flex: 1, gap: 2 },
   remindersTitle: { ...equinaTheme.typography.body, color: equinaTheme.text.primary, fontWeight: "600" },
   remindersDetail: { ...equinaTheme.typography.meta, color: equinaTheme.text.secondary },
-  note: { ...equinaTheme.typography.meta, color: equinaTheme.text.tertiary },
   error: { ...equinaTheme.typography.meta, color: equinaTheme.colorRole.criticalOnDark }
 });

@@ -102,7 +102,7 @@ import type { AccountMode, AccountRoute } from "./features/account/account-types
 import { useAccount } from "./features/account/useAccount";
 import { useEquinaSession } from "./features/account/useEquinaSession";
 import { RalfScreen } from "./features/coach/CoachScreen";
-import { trainingFocusByDiscipline, type CoachConversationContext } from "./features/coach/coach-types";
+import { coachHorseFor, trainingFocusByDiscipline, type CoachConversationContext } from "./features/coach/coach-types";
 import { clearDemoCoachHistory } from "./features/coach/useCoachConversation";
 import { ShopConversationScreen } from "./features/messaging/ShopConversationScreen";
 import { ShopThreadList } from "./features/messaging/ShopThreadList";
@@ -145,7 +145,8 @@ import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
 import { localDayOf, localToday } from "./domain/local-day";
 import type { RideEntry } from "./backend/contracts";
-import { buildCareSchedule, completionFor, type CareItem } from "./domain/care-schedule";
+import { buildCareSchedule, completionFor, recordProviderLine, type CareItem } from "./domain/care-schedule";
+import { disciplineLabel, horseSexLabel } from "./domain/labels";
 import {
   useHorseRecords,
   type HorseRecordsController,
@@ -162,6 +163,11 @@ import {
 } from "./features/ride/RideExperience";
 import { RideSetupSheet, type LoggedActivity, type RideSetupHorse } from "./features/ride/RideSetupSheet";
 import { RideJournalSheet } from "./features/ride/RideJournalSheet";
+import {
+  rideReviewFactsFromEntry,
+  rideReviewFactsFromSession,
+  rideReviewPrompt
+} from "./features/ride/ride-review-prompt";
 import { HorseSwitcherSheet } from "./features/home/HorseSwitcherSheet";
 import { TrainingWeekCard } from "./features/home/TrainingWeek";
 import { StreakScreen } from "./features/home/StreakScreen";
@@ -818,7 +824,7 @@ const createCoachReply = ({
       confidence: lastRide ? "medium" : "low",
       text: lastRide
         ? `${voice} ${horseName}'s latest ride was ${latestRideSummary}. ${lastRide.mood === "Tender" ? "Make the next ride a quiet recovery check and keep the first ask simple." : "Repeat the clearest phase once next time, then build only if the rhythm stays easy."}`
-        : `${voice} for ${levelArticle} ${level.toLowerCase()} ${discipline.toLowerCase()} rider, log three things: where the rhythm changed, which aid worked, and when ${horseName} felt easiest. With ${sessionCount} rides logged, compare the pattern before changing the exercise.`
+        : `${voice} for ${levelArticle} ${level.toLowerCase()} ${disciplineLabel(discipline).toLowerCase()} rider, log three things: where the rhythm changed, which aid worked, and when ${horseName} felt easiest. With ${sessionCount} rides logged, compare the pattern before changing the exercise.`
     };
   }
 
@@ -959,6 +965,10 @@ function EquinaApp() {
   const [coachStyle, setCoachStyle] = useState(defaultCoachStyle);
   const [coachOnboarded, setCoachOnboarded] = useState(false);
   const [pendingCoachPrompt, setPendingCoachPrompt] = useState("");
+  // The horse a question is about, when it is not the one on Home: a past
+  // ride opened from the journal belongs to the horse that was ridden, or to
+  // none (null). Undefined leaves Ralf on the horse on Home.
+  const [coachHorseId, setCoachHorseId] = useState<string | null | undefined>(undefined);
   const [academyProgress, setAcademyProgress] = useState(0);
   const [academyMode, setAcademyMode] = useState<AcademyMode>("home");
   // Empty means "the lesson the Academy recommends", whichever that is today.
@@ -1789,18 +1799,52 @@ function EquinaApp() {
   };
 
   // A prompt arrives already asked, the way the place it came from put it.
-  const openRalf = (prompt?: string) => {
+  // `about` names the horse the question concerns, or null for no horse;
+  // without it Ralf opens on the horse on Home, and a horse left over from an
+  // earlier question is dropped.
+  const openRalf = (prompt?: string, about?: { horseId?: string | null }) => {
     if (!ralfAvailable) return;
     void Haptics.selectionAsync().catch(() => undefined);
     setLastRideRecapVisible(false);
     if (prompt) setPendingCoachPrompt(prompt);
+    setCoachHorseId(about?.horseId);
     setRalfOpen(true);
     refresh("");
   };
 
   const closeRalf = () => {
     setPendingCoachPrompt("");
+    setCoachHorseId(undefined);
     setRalfOpen(false);
+  };
+
+  // A horse that was archived or is no longer shared cannot be Ralf's subject:
+  // the server refuses it.
+  const knownHorseId = (horseId?: string) => (horseId && horseNames[horseId] ? horseId : undefined);
+
+  // The ride on the recap, whether or not the journal holds it yet: the facts
+  // go in the question, so a slow save cannot make Ralf review the ride before.
+  const reviewLastRideWithRalf = () => {
+    if (!lastRide) {
+      openRalf("Review last ride");
+      return;
+    }
+    const horseId = knownHorseId(ridePlan?.horseId);
+    const horseName = horseId ? horseNames[horseId] : ridePlan?.horseName || primaryHorseName || undefined;
+    openRalf(rideReviewPrompt(rideReviewFactsFromSession(lastRide, horseName)), { horseId });
+  };
+
+  const reviewJournalRideWithRalf = (entry: RideEntry) => {
+    const horseId = knownHorseId(entry.horseId);
+    // The sheet is a modal over the whole app and Ralf renders under it.
+    setRideJournalOpen(false);
+    rideJournal.clearError();
+    // A ride with no horse, or on one the rider no longer has, is asked about
+    // without a horse, not as a ride on the horse on Home.
+    openRalf(
+      rideReviewPrompt(rideReviewFactsFromEntry(entry, horseId ? horseNames[horseId] : undefined)),
+      { horseId: horseId ?? null }
+    );
   };
 
   const openAccountAt = (route: AccountRoute) => {
@@ -1855,7 +1899,7 @@ function EquinaApp() {
     setLastRideRecapVisible(false);
     if (!postRideLesson) {
       // No lesson to continue with yet, so the ride goes to Ralf instead.
-      openRalf("Review last ride");
+      reviewLastRideWithRalf();
       return;
     }
     setSelectedAcademyLessonId(postRideLesson.id);
@@ -2124,8 +2168,8 @@ function EquinaApp() {
         label: "Welcome",
         confidence: "medium",
         text: onboardingHasHorse
-          ? `I have your ${onboardingLevel.toLowerCase()} ${onboardingDiscipline.toLowerCase()} profile and ${primaryHorseName}'s new training space. We can plan the first useful session.`
-          : `I have your ${onboardingLevel.toLowerCase()} ${onboardingDiscipline.toLowerCase()} profile. We can plan useful sessions for lesson, lease, or shared horses.`
+          ? `I have your ${onboardingLevel.toLowerCase()} ${disciplineLabel(onboardingDiscipline).toLowerCase()} profile and ${primaryHorseName}'s new training space. We can plan the first useful session.`
+          : `I have your ${onboardingLevel.toLowerCase()} ${disciplineLabel(onboardingDiscipline).toLowerCase()} profile. We can plan useful sessions for lesson, lease, or shared horses.`
       }
     ]);
     refresh(
@@ -2567,10 +2611,14 @@ function EquinaApp() {
   const hideGlobalHeader = focusedTask;
   const headerTitle = tabTitles[tab];
   const coachContext: CoachConversationContext = {
-    // The horse on Home, so Ralf talks about the one the rider picked.
-    selectedHorseId: horseRecords.selectedHorseId || accountController.snapshot.primaryHorse?.id,
-    hasHorse: horseState.hasHorse,
-    horseName: horseState.name,
+    // A question about a past ride puts Ralf on that ride's horse, or on none,
+    // until he is closed. Otherwise the horse on Home, so Ralf talks about the
+    // one the rider picked.
+    ...coachHorseFor(coachHorseId, horseNames, {
+      selectedHorseId: horseRecords.selectedHorseId || accountController.snapshot.primaryHorse?.id,
+      hasHorse: horseState.hasHorse,
+      horseName: horseState.name
+    }),
     focus: coachGoal,
     load: coachLoad,
     style: coachStyle
@@ -2658,9 +2706,9 @@ function EquinaApp() {
             {tab === "home" && rideActive && ridePlan ? (
               <RideModeScreen
                 plan={ridePlan}
-                // For a training with no discipline of its own (lunging,
-                // groundwork), the ride's horse's -- not the Stable selection,
-                // and no longer the rider's, which Home now keeps.
+                // For a training with no discipline of its own (lunging),
+                // the ride's horse's -- not the Stable selection, and no
+                // longer the rider's, which Home now keeps.
                 discipline={rideHorseRecord?.discipline ? toCoachDiscipline(rideHorseRecord.discipline) : onboardingDiscipline}
                 image={rideHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
                 onFinish={finishRide}
@@ -2679,6 +2727,7 @@ function EquinaApp() {
                 sharingEnabled={clubSharing}
                 onMoodChange={updateDailyMood}
                 onOpenAcademy={openPostRideLesson}
+                onAskRalf={reviewLastRideWithRalf}
                 onShare={() => clubSharing ? shareRide(true) : openCommunity()}
                 onHome={closeRideRecap}
               />
@@ -3136,6 +3185,7 @@ function EquinaApp() {
           deletingId={deletingRideId || undefined}
           error={rideJournalOpen ? rideJournal.error : undefined}
           onDelete={deleteJournalRide}
+          onAskRalf={ralfAvailable ? reviewJournalRideWithRalf : undefined}
           onDismiss={() => {
             setRideJournalOpen(false);
             rideJournal.clearError();
@@ -3810,7 +3860,7 @@ function HomeScreen({
         : `That ride felt ${mood.toLowerCase()}. ${horse.sessionCount} rides are now in your journal.`
       : dayOff?.body ?? `${disciplinePlan.plan} ${loadNote}`;
   const rideTitle = horse.rideActive ? "Finish ride" : recapVisible ? "Ride again" : "Start ride";
-  const rideMeta = horse.rideActive ? `${discipline} · tap to save` : plannedRideMeta;
+  const rideMeta = horse.rideActive ? `${disciplineLabel(discipline)} · tap to save` : plannedRideMeta;
   const nextKicker = recapVisible ? "Coach recap" : horse.careLogged ? "Care complete" : "Next";
   const nextTitle = recapVisible
     ? "Shape tomorrow from this ride"
@@ -3925,12 +3975,12 @@ function HomeScreen({
               onPress={onOpenHorses}
               style={({ pressed }) => [styles.homeHorseSwitch, pressed && styles.tabItemPressed]}
             >
-              <Text numberOfLines={1} style={[styles.homeGreetingMeta, styles.homeHorseSwitchName]}>{horse.hasHorse ? horse.name : discipline}</Text>
+              <Text numberOfLines={1} style={[styles.homeGreetingMeta, styles.homeHorseSwitchName]}>{horse.hasHorse ? horse.name : disciplineLabel(discipline)}</Text>
               <ChevronDown size={15} color={equinaTheme.text.secondary} />
             </Pressable>
           ) : (
             <Text style={styles.homeGreetingMeta}>
-              {horse.hasHorse ? horse.name : discipline}
+              {horse.hasHorse ? horse.name : disciplineLabel(discipline)}
             </Text>
           )}
         </View>
@@ -3974,7 +4024,7 @@ function HomeScreen({
             <View style={styles.homeStageContext}>
               <Text style={styles.homeStageContextLabel}>TODAY</Text>
               <View style={styles.homeStageContextDot} />
-              <Text numberOfLines={1} style={styles.homeStageContextValue}>{todayLabel ?? discipline}</Text>
+              <Text numberOfLines={1} style={styles.homeStageContextValue}>{todayLabel ?? disciplineLabel(discipline)}</Text>
             </View>
             {(horse.rideActive || recapVisible) && (
               <View style={styles.homeStageState}>
@@ -5310,8 +5360,10 @@ function StableScreen({
     ? toCoachDiscipline(selectedHorse?.discipline)
     : discipline;
   const resolvedBreed = connected ? selectedHorse?.breed ?? "" : horseBreed;
+  // A horse saved as "Not Sure" (stored 'unknown') shows no sex here, as in
+  // the list, rather than the word "Unknown".
   const resolvedSex = connected && selectedHorse?.sex
-    ? `${selectedHorse.sex.charAt(0).toUpperCase()}${selectedHorse.sex.slice(1)}`
+    ? horseSexLabel(selectedHorse.sex)
     : horseSex;
   const resolvedHeight = connected
     ? selectedHorse?.heightCm ? String(selectedHorse.heightCm) : ""
@@ -5585,7 +5637,7 @@ function StableScreen({
             />
             <View style={styles.stableEmptyTopline}>
               <Text style={styles.stableEmptyEyebrow}>YOUR RIDING</Text>
-              <Text style={styles.stableEmptyMeta}>{discipline}</Text>
+              <Text style={styles.stableEmptyMeta}>{disciplineLabel(discipline)}</Text>
             </View>
             <View style={styles.stableEmptyCopy}>
               <Text style={styles.stableEmptyTitle}>No horse profile yet.</Text>
@@ -5663,9 +5715,7 @@ function StableScreen({
               const age = horseOption.birthDate
                 ? Math.max(0, new Date().getFullYear() - Number(horseOption.birthDate.slice(0, 4)))
                 : null;
-              const sex = horseOption.sex && horseOption.sex !== "unknown"
-                ? `${horseOption.sex.charAt(0).toUpperCase()}${horseOption.sex.slice(1)}`
-                : "";
+              const sex = horseSexLabel(horseOption.sex);
               const meta = [horseOption.breed, sex, age !== null && Number.isFinite(age) ? `${age} years` : "", horseOption.heightCm ? `${horseOption.heightCm} cm` : ""]
                 .filter(Boolean)
                 .join(" · ");
@@ -5686,7 +5736,7 @@ function StableScreen({
                     </View>
                   </View>
                   <View style={styles.stableProfileCopy}>
-                    <Text style={styles.stableKicker}>{toCoachDiscipline(horseOption.discipline)} horse</Text>
+                    <Text style={styles.stableKicker}>{disciplineLabel(toCoachDiscipline(horseOption.discipline))} horse</Text>
                     <Text numberOfLines={1} style={styles.stableHorseCardName}>{horseOption.name}</Text>
                     {meta ? <Text numberOfLines={1} style={styles.stableMeta}>{meta}</Text> : null}
                   </View>
@@ -5748,7 +5798,7 @@ function StableScreen({
             </View>
           </View>
           <View style={styles.stableProfileCopy}>
-            <Text style={styles.stableKicker}>{resolvedDiscipline} horse</Text>
+            <Text style={styles.stableKicker}>{disciplineLabel(resolvedDiscipline)} horse</Text>
             <Text style={styles.stableTitle}>{resolvedName}</Text>
             <Text style={styles.stableMeta}>
               {[resolvedBreed, resolvedSex, resolvedAge ? `${resolvedAge} years` : "", resolvedHeight ? `${resolvedHeight} cm` : ""]
@@ -5791,7 +5841,7 @@ function StableScreen({
                     <Text style={styles.stableLatestRideKicker}>Latest ride · {rideDurationLabel(lastRide.elapsedSeconds)}</Text>
                     <Text style={styles.stableLatestRideTitle}>{lastRide.focus}</Text>
                     <Text style={styles.stableLatestRideBody}>
-                      {[lastRide.discipline, lastRide.mood?.toLowerCase(), `${lastRide.completedPhases}/${lastRide.totalPhases} phases`].filter(Boolean).join(" · ")}
+                      {[disciplineLabel(lastRide.discipline), lastRide.mood?.toLowerCase(), `${lastRide.completedPhases}/${lastRide.totalPhases} phases`].filter(Boolean).join(" · ")}
                     </Text>
                   </View>
                 </View>
@@ -5833,16 +5883,17 @@ function StableScreen({
 
               {records.length > 0 ? (
                 <>
-                  <SectionTitle title="Recent" action="private timeline" />
+                  <SectionTitle title="Recent records" action="Private to you" quiet />
                   <View style={styles.documentStack}>
                     {records.slice(0, 4).map((record, index, recent) => {
                       const attachmentCount = filesByRecord[record.id]?.length ?? 0;
+                      const provider = recordProviderLine(record);
                       return (
                         <DocumentRow
                           key={record.id}
                           Icon={record.recordType === "lab" ? Activity : record.recordType === "passport" ? FileText : Stethoscope}
                           title={record.title}
-                          body={`${record.occurredOn}${record.providerName ? ` · ${record.providerName}` : ""}${attachmentCount ? ` · ${attachmentCount} private file` : ""}`}
+                          body={`${record.occurredOn}${provider ? ` · ${provider}` : ""}${attachmentCount ? ` · ${attachmentCount} private file` : ""}`}
                           status={record.status}
                           last={index === recent.length - 1}
                           onPress={() => openRecordEditor(record.recordType, record)}
@@ -6319,7 +6370,7 @@ function AcademyScreen({
       <View style={styles.personalAcademyHome}>
         <View style={styles.academyPersonalIntro}>
           <Text style={styles.academyPersonalEyebrow}>
-            {horse.hasHorse ? `${rider.name} + ${horse.name}` : rider.name} · {rider.level} {rider.discipline.toLowerCase()}
+            {horse.hasHorse ? `${rider.name} + ${horse.name}` : rider.name} · {rider.level} {disciplineLabel(rider.discipline).toLowerCase()}
           </Text>
           <Text style={styles.academyPersonalTitle}>{guidance.headline}</Text>
           <Text style={styles.academyPersonalBody}>{recommendationReason}</Text>
@@ -7171,7 +7222,7 @@ function CommunityScreen({
         <CommunityFeedCard
           author={rideShare.riderName}
           meta={`Just now · ${rideShare.horseName}`}
-          title={`${rideShare.horseName} finished today's ${rideShare.discipline.toLowerCase()} work`}
+          title={`${rideShare.horseName} finished today's ${disciplineLabel(rideShare.discipline).toLowerCase()} work`}
           body={`${rideShare.duration} · ${rideShare.focus} · rider marked ${rideShare.mood.toLowerCase()}.`}
           image={rideShare.image}
           // A ride the rider just shared has no likes and no comments yet, and
@@ -7387,7 +7438,7 @@ function ProfileScreen({
           </View>
           <View>
             <Text numberOfLines={1} adjustsFontSizeToFit style={styles.profileHorseFeatureTitle}>{horseName}</Text>
-            <Text style={styles.profileHorseFeatureMeta}>{discipline} · {horseBreed || "Breed"} · {horseSex}</Text>
+            <Text style={styles.profileHorseFeatureMeta}>{disciplineLabel(discipline)} · {horseBreed || "Breed"} · {horseSex}</Text>
             <Text style={styles.profileHorseFeatureDetail}>
               {[level, horseAge ? `${horseAge} years` : "", horseHeight ? `${horseHeight} cm` : ""]
                 .filter(Boolean)
@@ -7426,11 +7477,13 @@ function SectionHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
   );
 }
 
-function SectionTitle({ title, action }: { title: string; action: string }) {
+// `quiet` is for a caption that only describes the list: the brass of the
+// default reads as a link, and nothing happens when it is tapped.
+function SectionTitle({ title, action, quiet = false }: { title: string; action: string; quiet?: boolean }) {
   return (
     <View style={styles.sectionTitleRow}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.sectionAction}>{action}</Text>
+      <Text style={[styles.sectionAction, quiet && styles.sectionCaption]}>{action}</Text>
     </View>
   );
 }
@@ -10698,6 +10751,9 @@ const styles = StyleSheet.create({
     color: equinaTheme.colors.brass,
     fontSize: 13,
     fontWeight: "400"
+  },
+  sectionCaption: {
+    color: equinaTheme.text.tertiary
   },
   horizontalList: {
     gap: 12,

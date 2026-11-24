@@ -41,8 +41,7 @@ export const rideTrainingTypes: readonly RideTrainingType[] = [
   { id: "cross-country", label: "Cross-country", discipline: "Eventing" },
   { id: "hack", label: "Hack", discipline: "Trail" },
   { id: "hunting", label: "Hunting", discipline: "Trail" },
-  { id: "lunging", label: "Lunging" },
-  { id: "groundwork", label: "Groundwork" }
+  { id: "lunging", label: "Lunging" }
 ];
 
 export const ridePhaseLimits = {

@@ -11,9 +11,13 @@ import "./admin.test";
 import "./mux.test";
 import "./data-export.test";
 import "./image-metadata.test";
+import "./labels.test";
 import "./training-streak.test";
 import "./time-off.test";
+import "./calendar-month.test";
 import "./coach-scripted-replies.test";
+import "./ride-recap-message.test";
+import "./ride-review-prompt.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./horse-selection.test");
 await import("./home-hero.test");
