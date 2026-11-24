@@ -219,6 +219,7 @@ import { getFitScreening, type HorseFitContext } from "./product/product-truth";
 import { MotionPressable } from "./ui/motion/MotionPressable";
 import { EquinaIconButton, EquinaSegmentedTabs } from "./ui/primitives/EquinaPrimitives";
 import { useReducedMotion } from "./ui/motion/useReducedMotion";
+import { RootErrorBoundary } from "./ui/states/RootErrorBoundary";
 import { equinaTheme } from "./ui/theme/theme";
 import { floatingDockContentInset, floatingDockMetrics } from "./ui/layout/metrics";
 
@@ -872,9 +873,11 @@ const createCoachReply = ({
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <EquinaApp />
-    </SafeAreaProvider>
+    <RootErrorBoundary>
+      <SafeAreaProvider>
+        <EquinaApp />
+      </SafeAreaProvider>
+    </RootErrorBoundary>
   );
 }
 

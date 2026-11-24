@@ -48,6 +48,7 @@ import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { SettingsGroup } from "../../ui/settings/SettingsGroup";
 import { SettingsRow } from "../../ui/settings/SettingsRow";
+import { installedVersionLine } from "../../ui/states/installed-version";
 import { equinaTheme } from "../../ui/theme/theme";
 import { trainingFocusByDiscipline } from "../coach/coach-types";
 import { PlanScreen } from "../plans/PlanScreen";
@@ -920,6 +921,11 @@ function HelpAndLegal({ marketplaceOpen }: { marketplaceOpen: boolean }) {
           detail="Guidance only; health concerns escalate to a professional"
         />
       </SettingsGroup>
+      {installedVersionLine ? (
+        <Text testID="account-app-version" selectable style={[styles.footnote, styles.versionLine]}>
+          {installedVersionLine}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -1237,6 +1243,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontWeight: "400"
+  },
+  versionLine: {
+    textAlign: "center"
   },
   deletionNotice: {
     gap: 8,
