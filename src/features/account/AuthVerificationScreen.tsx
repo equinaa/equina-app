@@ -30,9 +30,11 @@ export function AuthVerificationScreen({
 }: {
   email: string;
   mode: EmailAuthMode;
-  /** "create" sends to an address that was just registered. The others answer
-   *  neutrally, because no account may exist for the address at all. */
-  purpose: "create" | "signin" | "recovery";
+  /** "create" sends to an address that was just registered, and "confirm" to
+   *  an account whose password was right but whose email was never confirmed.
+   *  The others answer neutrally, because no account may exist for the address
+   *  at all. */
+  purpose: "create" | "confirm" | "signin" | "recovery";
   error: string;
   verifying: boolean;
   onVerify: (code: string) => void;
@@ -62,8 +64,13 @@ export function AuthVerificationScreen({
       // onResend already put the reason on screen; the button stays usable.
     }
   };
-  const neutral = purpose !== "create";
+  const neutral = purpose === "signin" || purpose === "recovery";
   const sentTo = neutral ? `If an Equina account uses ${email}, we sent` : "We sent";
+  const eyebrow =
+    purpose === "recovery" ? "Password reset" : purpose === "confirm" ? "Confirm your email" : "Secure sign-in";
+  // Signing in reached an account that never confirmed its email. Say why the
+  // code is needed, or it reads like a second password.
+  const waitingNote = purpose === "confirm" ? "This account has not confirmed its email yet. " : "";
 
   return (
     <KeyboardAvoidingView
@@ -77,7 +84,7 @@ export function AuthVerificationScreen({
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.eyebrowText}>{purpose === "recovery" ? "Password reset" : "Secure sign-in"}</Text>
+        <Text style={styles.eyebrowText}>{eyebrow}</Text>
         <Text accessibilityRole="header" style={styles.title}>
           {waitingForLink ? "Open your email." : "Check your inbox."}
         </Text>
@@ -85,10 +92,10 @@ export function AuthVerificationScreen({
           {waitingForLink
             ? neutral
               ? `${sentTo} a link to it. Open it on this device and Equina will finish here.`
-              : `Tap the secure link sent to ${email}. Equina will finish here automatically.`
+              : `${waitingNote}Tap the secure link sent to ${email}. Equina will finish here automatically.`
             : neutral
               ? `${sentTo} a six-digit code to it. Enter it below.`
-              : `Enter the six-digit code sent to ${email}.`}
+              : `${waitingNote}Enter the six-digit code sent to ${email}.`}
         </Text>
 
         {waitingForLink ? (

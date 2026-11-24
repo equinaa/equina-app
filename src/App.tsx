@@ -116,7 +116,13 @@ import {
 import { CareSchedule } from "./features/records/CareSchedule";
 import { SignInScreen } from "./features/account/SignInScreen";
 import { signInCopy } from "./features/account/sign-in-copy";
-import { emailRequestOutcome, signInErrorCopy } from "./features/account/sign-in-errors";
+import {
+  accountAlreadyExists,
+  emailRequestOutcome,
+  isNetworkFailure,
+  needsEmailConfirmation,
+  signInErrorCopy
+} from "./features/account/sign-in-errors";
 import {
   academyCredit,
   academyPathFor,
@@ -883,8 +889,17 @@ function EquinaApp() {
   const [signInNotice, setSignInNotice] = useState("");
   const [otpVisible, setOtpVisible] = useState(false);
   // What the emailed code or link is for. Each needs a different resend and a
-  // different next step once verified.
-  const [otpPurpose, setOtpPurpose] = useState<"create" | "signin" | "recovery">("create");
+  // different next step once verified. "confirm" is an account that exists,
+  // with the right password, but never confirmed its email.
+  const [otpPurpose, setOtpPurpose] = useState<"create" | "confirm" | "signin" | "recovery">("create");
+  // A "confirm" that started from the onboarding sheet carries a filled-in
+  // form, which is saved once the email is confirmed. From the sign-in screen
+  // there is no form to save.
+  const confirmFinishesOnboarding = useRef(false);
+  // A "create" from a password sign-up resends that sign-up's confirmation. A
+  // "create" by email code alone resends the code request, which also covers
+  // an email that turned out to have an account already.
+  const createdWithPassword = useRef(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [pendingAuthPassword, setPendingAuthPassword] = useState("");
@@ -2352,6 +2367,7 @@ function EquinaApp() {
       }
       await saveCurrentOnboardingDraft();
       await equinaSession.sendCode(onboardingEmail, riderName || undefined, true);
+      createdWithPassword.current = false;
       setOtpPurpose("create");
       setOtpVisible(true);
     } catch {
@@ -2378,6 +2394,7 @@ function EquinaApp() {
         riderName || undefined
       );
       if (result.verificationRequired) {
+        createdWithPassword.current = true;
         setOtpPurpose("create");
         setOtpVisible(true);
         return;
@@ -2386,13 +2403,36 @@ function EquinaApp() {
       animateIntoApp();
     } catch (error) {
       setAuthError(
-        error instanceof Error && /already|registered|exists/i.test(error.message)
+        accountAlreadyExists(error)
           ? "An account already exists for this email. Sign in instead."
-          : "Your account could not be created. Check the details and try again."
+          : isNetworkFailure(error)
+            ? signInCopy.errors.unreachable
+            : "Your account could not be created. Check the details and try again."
       );
     } finally {
       setAuthBusy(false);
     }
+  };
+
+  // The password was right, but the account never confirmed its email --
+  // usually someone who signed up, closed the app before the code arrived and
+  // came back later. Send a fresh code and ask for it, instead of a message
+  // that reads like a wrong password.
+  const confirmEmailFirst = async (email: string, finishesOnboarding: boolean) => {
+    setOnboardingEmail(email);
+    try {
+      await equinaSession.resendSignupConfirmation(email);
+    } catch (error) {
+      if (isNetworkFailure(error)) {
+        setAuthError(signInCopy.errors.unreachable);
+        return;
+      }
+      // Anything else -- most often a code sent less than a minute ago, which
+      // is still valid -- leaves the rider with a code to enter, and a resend.
+    }
+    confirmFinishesOnboarding.current = finishesOnboarding;
+    setOtpPurpose("confirm");
+    setOtpVisible(true);
   };
 
   const signInOnboardingWithPassword = async (password: string) => {
@@ -2409,8 +2449,12 @@ function EquinaApp() {
         await persistOnboarding();
       }
       animateIntoApp();
-    } catch {
-      setAuthError("The email or password is incorrect, or the email is not verified.");
+    } catch (error) {
+      if (needsEmailConfirmation(error)) {
+        await confirmEmailFirst(onboardingEmail, true);
+        return;
+      }
+      setAuthError(signInErrorCopy(error, "password"));
     } finally {
       setAuthBusy(false);
     }
@@ -2459,6 +2503,10 @@ function EquinaApp() {
       const result = await equinaSession.signInWithPassword(email, password);
       setOnboardingEmail(result.snapshot.email);
     } catch (error) {
+      if (needsEmailConfirmation(error)) {
+        await confirmEmailFirst(email, false);
+        return;
+      }
       setAuthError(signInErrorCopy(error, "password"));
     } finally {
       setAuthBusy(false);
@@ -2556,6 +2604,17 @@ function EquinaApp() {
         return;
       }
       const { snapshot } = await equinaSession.verifyCode(onboardingEmail, code);
+      if (otpPurpose === "confirm") {
+        // Same next step as a password sign-in from the same place.
+        if (!snapshot.profile.onboardingCompletedAt && confirmFinishesOnboarding.current && riderName) {
+          await persistOnboarding();
+          setOtpVisible(false);
+          animateIntoApp();
+          return;
+        }
+        setOtpVisible(false);
+        return;
+      }
       if (pendingAuthPassword) {
         await equinaSession.setPassword(pendingAuthPassword);
         setPendingAuthPassword("");
@@ -3296,11 +3355,15 @@ function EquinaApp() {
                     // never creates an account. Only the create flow may.
                     if (otpPurpose === "recovery") await equinaSession.requestPasswordRecovery(onboardingEmail);
                     else if (otpPurpose === "signin") await equinaSession.sendCode(onboardingEmail, undefined, false);
-                    else await equinaSession.sendCode(onboardingEmail, riderName || undefined, true);
+                    // Known to exist and be unconfirmed: resend that account's
+                    // confirmation rather than starting a sign-in.
+                    else if (otpPurpose === "confirm" || createdWithPassword.current) {
+                      await equinaSession.resendSignupConfirmation(onboardingEmail);
+                    } else await equinaSession.sendCode(onboardingEmail, riderName || undefined, true);
                   } catch (error) {
                     // Same neutral answer as the first request, so a resend
                     // cannot reveal what the first one hid.
-                    if (otpPurpose !== "create" && emailRequestOutcome(error) === "sent") return;
+                    if ((otpPurpose === "signin" || otpPurpose === "recovery") && emailRequestOutcome(error) === "sent") return;
                     setAuthError(
                       emailRequestOutcome(error) === "unreachable"
                         ? signInCopy.errors.unreachable
