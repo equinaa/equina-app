@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readBackendConfig } from "../src/backend/config";
 import { revenueCatApiKey } from "../src/features/plans/purchase-catalog";
-import { isStoreBuild, reviewedSwitches, setTwice, storeBuildProblems } from "../scripts/store-build-rules.mjs";
+import { isEasBuild, isStoreBuild, reviewedSwitches, setTwice, storeBuildProblems } from "../scripts/store-build-rules.mjs";
 
 // The guard EAS runs before a build (package.json, "eas-build-pre-install"):
 // a store build never ships without a backend, with the wrong sign-in mode,
@@ -36,6 +36,22 @@ const problemsWith = (overrides: Env, profile: string | undefined = "production"
     }
   });
 const about = (problems: string[], name: string) => problems.filter((problem) => problem.startsWith(`${name} `));
+
+// Where the guard works: wherever EAS is building, on its own machines or on
+// this computer (`eas build --local`). The two do not spell EAS_BUILD alike.
+{
+  assert.equal(isEasBuild({}), false, "A plain shell is not an EAS build.");
+  assert.equal(isEasBuild({ CI: "1", NODE_ENV: "production", EXPO_PUBLIC_EQUINA_DEMO_MODE: "true" }), false);
+  assert.equal(isEasBuild({ EAS_BUILD: "true" }), true, "EAS's own machines say true.");
+  assert.equal(isEasBuild({ EAS_BUILD: "1" }), true, "A local build says 1.");
+  for (const runner of ["eas-build", "local-build-plugin"]) {
+    assert.equal(isEasBuild({ EAS_BUILD_RUNNER: runner }), true, "The runner alone is enough.");
+  }
+  assert.equal(isEasBuild({ EAS_BUILD_PROFILE: "production" }), true, "So is the profile.");
+  for (const unset of [undefined, "", "  "]) {
+    assert.equal(isEasBuild({ EAS_BUILD: unset, EAS_BUILD_RUNNER: unset, EAS_BUILD_PROFILE: unset }), false);
+  }
+}
 
 // Which builds are checked: all but the development client.
 {
@@ -331,6 +347,45 @@ for (const profile of ["preview", "production"]) {
 
   const unnamed = run({ EAS_BUILD: "true" });
   assert.equal(unnamed.status, 1, "A build that does not say which profile it is counts as a store build.");
+
+  // `eas build --local` makes the same build on this computer, and says so
+  // with EAS_BUILD=1. Its .ipa and .aab go to the stores like any other.
+  const local = { EAS_BUILD: "1", EAS_BUILD_RUNNER: "local-build-plugin", EAS_BUILD_PLATFORM: "ios" };
+  const localEmpty = run({ ...local, EAS_BUILD_PROFILE: "production" });
+  assert.equal(localEmpty.status, 1, "A local production build with nothing set is stopped like one on EAS.");
+  assert.match(localEmpty.errors, /the "production" build was stopped/);
+  assert.match(localEmpty.errors, /EXPO_PUBLIC_SUPABASE_URL is not set/);
+  assert.match(localEmpty.errors, /EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE is not "otp"/);
+  const localReady = run({
+    ...local,
+    EAS_BUILD_PROFILE: "production",
+    ...switches,
+    EXPO_PUBLIC_SUPABASE_URL: projectUrl,
+    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey
+  });
+  assert.equal(localReady.status, 0, "A complete local build goes through.");
+  assert.match(localReady.output, /has a backend/);
+  const localLeftover = run({
+    ...local,
+    EAS_BUILD_PROFILE: "production",
+    ...switches,
+    EXPO_PUBLIC_SUPABASE_URL: projectUrl,
+    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+    EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: testStoreKey
+  });
+  assert.equal(localLeftover.status, 1, "A local build also gets what the terminal exports, development keys included.");
+  assert.match(localLeftover.errors, /EXPO_PUBLIC_REVENUECAT_IOS_API_KEY is a RevenueCat Test Store key/);
+  assert.equal(run({ ...local, EAS_BUILD_PROFILE: "development" }).status, 0, "A local development client goes through.");
+  const oneNameOnly: Array<Record<string, string>> = [
+    { EAS_BUILD_RUNNER: "local-build-plugin" },
+    { EAS_BUILD_RUNNER: "eas-build" },
+    { EAS_BUILD_PROFILE: "preview" }
+  ];
+  for (const env of oneNameOnly) {
+    const stopped = run(env);
+    assert.equal(stopped.status, 1, "The runner or the profile is enough to know EAS is building, however EAS_BUILD is spelled.");
+    assert.doesNotMatch(stopped.output, /not an EAS build/);
+  }
 
   for (const [profile, platform] of [["production", "ios"], ["production", "android"], ["preview", "ios"], ["preview", "android"]] as const) {
     const ready = run({

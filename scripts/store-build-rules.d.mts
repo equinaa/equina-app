@@ -12,6 +12,8 @@ export type StoreBuild = {
   switches?: Record<string, string>;
 };
 
+export declare const isEasBuild: (env: Env) => boolean;
+
 export declare const isStoreBuild: (profile: string | undefined) => boolean;
 
 export declare const reviewedSwitches: (

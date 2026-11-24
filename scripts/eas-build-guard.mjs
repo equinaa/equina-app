@@ -9,7 +9,9 @@
 //
 // EAS runs this first, before npm install (package.json, "eas-build-pre-install"),
 // so it may only import from Node itself. A failure here fails the build.
-// Outside EAS it does nothing. It prints variable names, never values.
+// `eas build --local` runs it the same way on this computer, and is checked
+// like a build on EAS. Outside an EAS build it does nothing. It prints variable
+// names, never values.
 //
 // To check a profile from this computer before spending a build, let EAS CLI
 // hand over the variables it holds:
@@ -17,13 +19,13 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isStoreBuild, reviewedSwitches, setTwice, storeBuildProblems } from "./store-build-rules.mjs";
+import { isEasBuild, isStoreBuild, reviewedSwitches, setTwice, storeBuildProblems } from "./store-build-rules.mjs";
 
 const say = (line) => console.log(`eas-build-guard: ${line}`);
 const complain = (line) => console.error(`eas-build-guard: ${line}`);
 
 const check = () => {
-  const onEas = process.env.EAS_BUILD === "true";
+  const onEas = isEasBuild(process.env);
   const rehearsing = !onEas && process.argv[2] === "--rehearse";
   if (!onEas && !rehearsing) {
     say("not an EAS build, nothing to check.");

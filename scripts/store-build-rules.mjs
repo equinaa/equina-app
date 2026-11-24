@@ -35,6 +35,18 @@ const jwtRole = (key) => {
 const isSecretKey = (key) => key.startsWith("sb_secret_") || jwtRole(key) === "service_role";
 
 /**
+ * Whether EAS is making a build here. EAS does not say it the same way
+ * everywhere: EAS_BUILD is "true" on its own machines and "1" when the build
+ * runs on this computer (`eas build --local`). Both also name the runner and
+ * the profile, so any of the three counts and no single spelling can switch
+ * the guard off.
+ */
+export const isEasBuild = (env) =>
+  ["true", "1"].includes(clean(env.EAS_BUILD).toLowerCase()) ||
+  clean(env.EAS_BUILD_RUNNER) !== "" ||
+  clean(env.EAS_BUILD_PROFILE) !== "";
+
+/**
  * Whether the checks apply. Only the development client is let through: it
  * loads its JavaScript from Metro, with the values of .env.local. Any other
  * profile, known or not, produces an app someone installs.

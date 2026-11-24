@@ -136,6 +136,7 @@ npx eas-cli@latest env:set --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value "
   npx eas-cli@latest env:exec production "node scripts/eas-build-guard.mjs --rehearse production"
   ```
 
+- **Local builds.** `eas build --local` runs the same guard, and its `.ipa` or `.aab` can go to a store like any other. It is not the same build, though: it uses the Node installed on this computer, not the one pinned in `base`, and it cannot read an EAS variable of Secret visibility, one more reason the two above are plain text. It also takes whatever the terminal exports. The guard's first line lists every `EXPO_PUBLIC_` name the build sees: read it before you submit.
 - **One place for each name.** When a name is in `eas.json` and also an EAS variable, EAS CLI says the `eas.json` value is used and prints a warning, but Expo does not document the order and the build machine joins the two itself. Do not depend on it: the guard stops a build whose switch differs from `eas.json`, and the rehearsal names anything set twice.
 - **Never run `eas env:push` without `--path`.** It uploads `.env.local` by default, with its development-only keys and tokens. `eas env:pull` without `--path` overwrites `.env.local`.
 - **Selling stays off** while no store key (`EXPO_PUBLIC_REVENUECAT_*`) and no privacy policy link are set. Plans are given from the Admin.
