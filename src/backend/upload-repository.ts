@@ -2,8 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { UploadAsset, UploadKind } from "./contracts";
 import { EdgeClient } from "./edge-client";
 import { backendError } from "./errors";
-
-type Ticket = { ticketId: string; bucket: string; path: string; token: string; expiresAt: string };
+import { runUpload, type UploadMetadata, type UploadTicket } from "./upload-flow";
 
 export class UploadRepository {
   private readonly edge: EdgeClient;
@@ -12,32 +11,33 @@ export class UploadRepository {
     this.edge = new EdgeClient(client);
   }
 
+  // Every upload in the app comes through here: avatar, horse photo, horse
+  // record, Club photo, listing photo, dispute evidence. The order of the
+  // steps, and why the size is measured, is in upload-flow.ts.
   async upload(
     kind: UploadKind,
     entityId: string,
     asset: UploadAsset,
-    metadata: { requiredAngle?: string; position?: number; note?: string } = {}
+    metadata: UploadMetadata = {}
   ): Promise<{ path: string }> {
-    const ticket = await this.edge.invoke<Ticket>("create-upload-ticket", {
+    return await runUpload(
+      {
+        createTicket: (request) => this.edge.invoke<UploadTicket>("create-upload-ticket", request),
+        send: async (ticket, bytes, mimeType) => {
+          const { error } = await this.client.storage.from(ticket.bucket).uploadToSignedUrl(ticket.path, ticket.token, bytes, {
+            contentType: mimeType,
+            upsert: false
+          });
+          if (error) throw backendError(error, "Upload failed.");
+        },
+        complete: (ticketId, uploadMetadata) =>
+          this.edge.invoke<{ path: string }>("complete-upload", { ticketId, ...uploadMetadata })
+      },
       kind,
       entityId,
-      fileName: asset.fileName,
-      mimeType: asset.mimeType,
-      byteSize: asset.byteSize
-    });
-
-    const response = await fetch(asset.uri);
-    if (!response.ok) throw backendError(new Error("The selected file could not be read."), "File could not be read.");
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength !== asset.byteSize) throw backendError(new Error("Selected file changed before upload."), "File changed before upload.");
-
-    const { error } = await this.client.storage.from(ticket.bucket).uploadToSignedUrl(ticket.path, ticket.token, bytes, {
-      contentType: asset.mimeType,
-      upsert: false
-    });
-    if (error) throw backendError(error, "Upload failed.");
-
-    return await this.edge.invoke<{ path: string }>("complete-upload", { ticketId: ticket.ticketId, ...metadata });
+      asset,
+      metadata
+    );
   }
 
   async signedUrl(bucket: string, path: string, expiresInSeconds = 900): Promise<string> {
@@ -46,4 +46,3 @@ export class UploadRepository {
     return data.signedUrl;
   }
 }
-

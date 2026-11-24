@@ -456,13 +456,12 @@ function ProfileEditor({
     });
     if (result.canceled || !result.assets[0]) return;
     const selected = result.assets[0];
-    const response = await fetch(selected.uri);
-    const byteSize = selected.fileSize ?? (await response.arrayBuffer()).byteLength;
     await onUploadAvatar({
       uri: selected.uri,
       fileName: selected.fileName ?? `equina-avatar-${Date.now()}.jpg`,
       mimeType: selected.mimeType ?? "image/jpeg",
-      byteSize
+      // Only what the picker said. The upload measures the file itself.
+      byteSize: selected.fileSize ?? 0
     });
   };
 
