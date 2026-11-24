@@ -19,13 +19,49 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE": "otp",
+        "EXPO_PUBLIC_ENABLE_ACCOUNT_SETTINGS": "true",
+        "EXPO_PUBLIC_ENABLE_HORSE_MANAGEMENT": "true",
+        "EXPO_PUBLIC_ENABLE_RECORD_MUTATIONS": "true",
+        "EXPO_PUBLIC_ENABLE_RIDE_LOGGING": "true",
+        "EXPO_PUBLIC_ENABLE_COACH_CHAT": "true",
+        "EXPO_PUBLIC_ENABLE_CLUB_INTERACTIONS": "true",
+        "EXPO_PUBLIC_ENABLE_CLUB_PUBLISHING": "true",
+        "EXPO_PUBLIC_ENABLE_CLUB_PHOTO_POSTS": "true",
+        "EXPO_PUBLIC_ENABLE_APPLE_AUTH": "false",
+        "EXPO_PUBLIC_ENABLE_GOOGLE_AUTH": "false",
+        "EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS": "false",
+        "EXPO_PUBLIC_ENABLE_SHOP_TRANSACTIONS": "false",
+        "EXPO_PUBLIC_ENABLE_SHOP_LISTING_CREATION": "false",
+        "EXPO_PUBLIC_ENABLE_SHOP_MESSAGING": "false",
+        "EXPO_PUBLIC_EQUINA_DEMO_MODE": "false"
       }
     },
     "production": {
       "extends": "base",
       "environment": "production",
       "distribution": "store",
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE": "otp",
+        "EXPO_PUBLIC_ENABLE_ACCOUNT_SETTINGS": "true",
+        "EXPO_PUBLIC_ENABLE_HORSE_MANAGEMENT": "true",
+        "EXPO_PUBLIC_ENABLE_RECORD_MUTATIONS": "true",
+        "EXPO_PUBLIC_ENABLE_RIDE_LOGGING": "true",
+        "EXPO_PUBLIC_ENABLE_COACH_CHAT": "true",
+        "EXPO_PUBLIC_ENABLE_CLUB_INTERACTIONS": "true",
+        "EXPO_PUBLIC_ENABLE_CLUB_PUBLISHING": "true",
+        "EXPO_PUBLIC_ENABLE_CLUB_PHOTO_POSTS": "true",
+        "EXPO_PUBLIC_ENABLE_APPLE_AUTH": "false",
+        "EXPO_PUBLIC_ENABLE_GOOGLE_AUTH": "false",
+        "EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS": "false",
+        "EXPO_PUBLIC_ENABLE_SHOP_TRANSACTIONS": "false",
+        "EXPO_PUBLIC_ENABLE_SHOP_LISTING_CREATION": "false",
+        "EXPO_PUBLIC_ENABLE_SHOP_MESSAGING": "false",
+        "EXPO_PUBLIC_EQUINA_DEMO_MODE": "false"
+      }
     }
   },
   "submit": {
