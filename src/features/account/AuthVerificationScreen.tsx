@@ -13,6 +13,7 @@ import { MailCheck } from "lucide-react-native";
 import { EquinaBackButton, EquinaButton } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { EmailAuthMode } from "./social-auth";
+import { cleanCode, codeReady } from "./verification-code";
 
 // Matches the auth service's one-email-per-minute limit (max_frequency).
 const resendCooldownSeconds = 60;
@@ -94,8 +95,8 @@ export function AuthVerificationScreen({
               ? `${sentTo} a link to it. Open it on this device and Equina will finish here.`
               : `${waitingNote}Tap the secure link sent to ${email}. Equina will finish here automatically.`
             : neutral
-              ? `${sentTo} a six-digit code to it. Enter it below.`
-              : `${waitingNote}Enter the six-digit code sent to ${email}.`}
+              ? `${sentTo} a code to it. Enter it below.`
+              : `${waitingNote}Enter the code sent to ${email}.`}
         </Text>
 
         {waitingForLink ? (
@@ -122,21 +123,22 @@ export function AuthVerificationScreen({
           >
             <TextInput
               testID="auth-otp-input"
-              accessibilityLabel="Six-digit verification code"
+              accessibilityLabel="Verification code"
               value={code}
-              onChangeText={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}
+              // No maxLength: the platform would cut a pasted "123 456" or a
+              // whole subject line before the digits are picked out of it.
+              onChangeText={(value) => setCode(cleanCode(value))}
               keyboardType="number-pad"
               textContentType="oneTimeCode"
               autoComplete="one-time-code"
-              maxLength={6}
               autoFocus
-              placeholder="000000"
+              placeholder="Code"
               placeholderTextColor={equinaTheme.text.tertiary}
               selectionColor={equinaTheme.colors.brass}
               returnKeyType="done"
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              onSubmitEditing={() => code.length === 6 && onVerify(code)}
+              onSubmitEditing={() => codeReady(code) && onVerify(code)}
               style={styles.codeInput}
             />
           </View>
@@ -191,7 +193,7 @@ export function AuthVerificationScreen({
           <EquinaButton
             testID="auth-otp-verify"
             label={verifying ? "Verifying..." : "Verify and continue"}
-            disabled={code.length !== 6 || verifying}
+            disabled={!codeReady(code) || verifying}
             onPress={() => onVerify(code)}
           />
         </View>

@@ -13,6 +13,7 @@ import {
   needsEmailConfirmation,
   signInErrorCopy
 } from "../src/features/account/sign-in-errors";
+import { cleanCode, codeMaxLength, codeMinLength, codeReady } from "../src/features/account/verification-code";
 
 // Provider visibility: App Store 4.8 and the iOS-only Apple flow.
 {
@@ -122,6 +123,49 @@ const offline = backendError(
     assert.match(`${sheetLines[index - 1] ?? ""}\n${text}`, /emailAuthMode === "magic-link"/,
       `OnboardingScreen.tsx:${index + 1} says "link" whatever the mode.`);
   }
+}
+
+// The emailed code. Its length is set in the hosted project (6 to 10 digits)
+// and cannot be read from outside, and a store build cannot be patched: the
+// field must take whatever the server sends.
+{
+  assert.equal(codeMinLength, 6);
+  assert.equal(codeMaxLength, 10, "Supabase Auth allows an email OTP of 6 to 10 digits.");
+  assert.equal(cleanCode("123456"), "123456");
+  assert.equal(cleanCode(" 123 456\n"), "123456", "Pasted with spaces around or inside.");
+  assert.equal(cleanCode("Your Equina sign-in code: 12345678"), "12345678", "Pasted with the subject line.");
+  assert.equal(cleanCode("12a3"), "123");
+  assert.equal(cleanCode("1234567890"), "1234567890", "The longest code the server can send fits.");
+  assert.equal(cleanCode("12345678901234"), "1234567890");
+  assert.equal(cleanCode(""), "");
+
+  for (const length of [0, 1, 5]) assert.equal(codeReady("1".repeat(length)), false, `${length} digits is not a code yet.`);
+  for (const length of [6, 7, 8, 9, 10]) assert.equal(codeReady("1".repeat(length)), true, `A ${length}-digit code can be sent.`);
+  assert.equal(codeReady("1".repeat(11)), false);
+
+  const root = process.cwd();
+  const screen = readFileSync(join(root, "src", "features", "account", "AuthVerificationScreen.tsx"), "utf8");
+  assert.doesNotMatch(screen, /length\s*[!=]==\s*6|slice\(0,\s*6\)|maxLength=\{6\}/, "Nothing on the code screen counts to six.");
+  assert.doesNotMatch(screen, /maxLength=/, "A native limit cuts pasted text before the digits are picked out.");
+  assert.match(screen, /onChangeText=\{\(value\) => setCode\(cleanCode\(value\)\)\}/);
+  // The code is sent by the Done key and by the button, when it can be a whole
+  // code, and by nothing else: sending at six digits would cut a longer one.
+  assert.deepEqual(
+    [...screen.matchAll(/^.*onVerify\(code\).*$/gm)].map(([line]) => line.trim()),
+    ["onSubmitEditing={() => codeReady(code) && onVerify(code)}", "onPress={() => onVerify(code)}"]
+  );
+  assert.match(screen, /disabled=\{!codeReady\(code\) \|\| verifying\}/);
+  assert.doesNotMatch(screen, /useEffect\([^)]*onVerify/, "No effect verifies on the rider's behalf.");
+
+  // No screen names a length the server may not use.
+  const lengthWords = /six[- ]digit|6[- ]digit|\b0{6,10}\b/i;
+  assert.doesNotMatch(screen, lengthWords);
+  assert.doesNotMatch(readFileSync(join(root, "src", "features", "onboarding", "OnboardingScreen.tsx"), "utf8"), lengthWords);
+  assert.doesNotMatch(readFileSync(join(root, "src", "App.tsx"), "utf8"), /six[- ]digit|6[- ]digit/i);
+
+  // The local project's own setting stays inside what the field accepts.
+  const otpLength = Number(readFileSync(join(root, "supabase", "config.toml"), "utf8").match(/^otp_length = (\d+)$/m)?.[1]);
+  assert.ok(otpLength >= codeMinLength && otpLength <= codeMaxLength, "supabase/config.toml otp_length");
 }
 
 // Sign-out: this device only, and the stored session goes even when

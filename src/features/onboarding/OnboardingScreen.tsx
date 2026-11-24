@@ -865,7 +865,7 @@ export function AccountMethodSheet({
               ? signingIn
                 ? emailAuthMode === "magic-link"
                   ? "We will email you a link that signs you in. No password needed."
-                  : "We will email you a six-digit code that signs you in. No password needed."
+                  : "We will email you a code that signs you in. No password needed."
                 : emailAuthMode === "magic-link"
                   ? "We will email a secure sign-in link. No password to remember."
                   : "We will send a short verification code. No password to remember."
