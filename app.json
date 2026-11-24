@@ -42,12 +42,10 @@
     "ios": {
       "supportsTablet": false,
       "usesAppleSignIn": true,
-      "bundleIdentifier": "com.equina.mobile",
-      "buildNumber": "1"
+      "bundleIdentifier": "com.equina.mobile"
     },
     "android": {
       "package": "com.equina.mobile",
-      "versionCode": 1,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#161512"
