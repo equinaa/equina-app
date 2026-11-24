@@ -152,7 +152,7 @@ export function AuthVerificationScreen({
         {!waitingForLink ? (
           <Text testID="auth-otp-no-code" style={styles.securityNote}>
             {purpose === "signin"
-              ? "No code after a few minutes? Go back and sign in with your password."
+              ? "No code after a few minutes? Tap the back arrow and sign in with your password."
               : `No code after a few minutes? Write to ${supportEmail}.`}
           </Text>
         ) : null}
