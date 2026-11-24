@@ -447,6 +447,9 @@ export type RideEntry = {
 
 export type RideEntryInput = Omit<RideEntry, "id" | "riderId" | "createdAt" | "updatedAt">;
 
+/** When a ride ended and on which horse: all the streak needs of it. */
+export type RideEnd = { completedAt: string; horseId?: string };
+
 /**
  * A horse off work for a stretch of days: resting, on a break, on stall rest,
  * injured, under vet treatment. Its planned rides on those days are not missed.

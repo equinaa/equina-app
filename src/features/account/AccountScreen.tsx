@@ -42,6 +42,7 @@ import type {
   UserPreferencesRecord
 } from "../../backend";
 import type { Discipline } from "../../domain/types";
+import { disciplineLabel } from "../../domain/labels";
 import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { SettingsGroup } from "../../ui/settings/SettingsGroup";
@@ -55,12 +56,10 @@ import { renewingStoreOf } from "../plans/purchase-catalog";
 import type { PurchasesController } from "../plans/usePurchases";
 import type { AccountMode, AccountRoute } from "./account-types";
 
-const disciplines: Array<{ value: Discipline; label: string }> = [
-  { value: "dressage", label: "Dressage" },
-  { value: "jumping", label: "Jumping" },
-  { value: "eventing", label: "Eventing" },
-  { value: "trail", label: "Trail" }
-];
+// The stored value stays 'trail'; the rider reads "Leisure".
+const disciplines: Array<{ value: Discipline; label: string }> = (
+  ["dressage", "jumping", "eventing", "trail"] as const
+).map((value) => ({ value, label: disciplineLabel(value) }));
 const levels: Array<{ value: NonNullable<ProfileRecord["skillLevel"]>; label: string }> = [
   { value: "beginner", label: "Beginner" },
   { value: "intermediate", label: "Intermediate" },
@@ -370,7 +369,7 @@ function AccountRoot({
         <SettingsRow
           Icon={SlidersHorizontal}
           title="Training profile"
-          value={`${labelFor(snapshot.profile.discipline)} · ${labelFor(snapshot.profile.skillLevel)}`}
+          value={`${disciplineLabel(snapshot.profile.discipline) ?? labelFor(undefined)} · ${labelFor(snapshot.profile.skillLevel)}`}
           testID="account-open-personalization"
           onPress={() => onNavigate("personalization")}
         />

@@ -84,4 +84,37 @@ const daysAgo = (days: number) => new Date(now - days * DAY).toISOString();
   assert.deepEqual(calls, [{ count: true }]);
 }
 
+// A horse last ridden before that page, one back from time off, has its
+// newest ride read on its own: that horse's alone.
+{
+  const rows: Row[] = dailyRides(3).map((row, index) => ({ ...row, horse_id: index === 2 ? "test" : "daimon" }));
+  const filters: Array<Array<[string, unknown]>> = [];
+  const client = {
+    from: () => {
+      const applied: Array<[string, unknown]> = [];
+      filters.push(applied);
+      const builder = {
+        select: () => builder,
+        eq: (column: string, value: unknown) => {
+          applied.push([column, value]);
+          return builder;
+        },
+        order: () => builder,
+        limit: () => builder,
+        // Newest first, as ordered.
+        maybeSingle: () => Promise.resolve({
+          data: rows.find((row) => applied.every(([column, value]) => row[column] === value)) ?? null,
+          error: null
+        })
+      };
+      return builder;
+    }
+  } as unknown as SupabaseClient;
+  const repository = new RideRepository(client);
+  assert.equal((await repository.latest("test"))?.id, "ride-2", "Test's newest, though Daimon was ridden since.");
+  assert.equal(await repository.latest("luna"), null, "A horse never ridden has none.");
+  assert.equal((await repository.latest())?.id, "ride-0", "Without a horse: the rider's newest, as before.");
+  assert.deepEqual(filters, [[["horse_id", "test"]], [["horse_id", "luna"]], []]);
+}
+
 console.log("Ride journal reads passed.");

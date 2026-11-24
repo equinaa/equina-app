@@ -14,10 +14,3 @@ export const plannedRidesLabel = (entries: readonly Pick<TrainingPlanDay, "train
   if (labels.length <= 1) return labels[0] ?? "";
   return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 };
-
-/**
- * Which of today's planned rides Start ride opens on: the one on Home's
- * horse when there is one, else the first.
- */
-export const plannedRideFor = <T extends Pick<TrainingPlanDay, "horseId">>(entries: readonly T[], homeHorseId?: string): T | undefined =>
-  entries.find((entry) => homeHorseId && entry.horseId === homeHorseId) ?? entries[0];

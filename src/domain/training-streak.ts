@@ -1,4 +1,4 @@
-import type { HorseTimeOff, TrainingPlan, TrainingPlanDay } from "../backend/contracts";
+import type { HorseTimeOff, RideEnd, RideEntry, TrainingPlan, TrainingPlanDay } from "../backend/contracts";
 import { localDayOf } from "./local-day";
 
 /**
@@ -15,9 +15,17 @@ import { localDayOf } from "./local-day";
  * Changing the plan applies from that day on (each version has its
  * effectiveFrom), so a change never breaks or rebuilds a week already ridden.
  *
- * A day can plan more than one horse. A planned ride on a horse that is off
- * that day (rest, break, stall rest, injury, vet treatment) is not due: it
- * neither needs a ride nor breaks the streak.
+ * Each horse has its own week and its own streak. The plan is stored as one
+ * week for the rider, every entry with its horse, and a horse's week is the
+ * entries that carry its id (`planForHorse`); its rides are the rides on it
+ * (`ridesForHorse`). A ride on one horse never covers another horse's
+ * planned day. An entry or a ride without a horse counts for no horse; only
+ * a rider with no horse at all reads the week unscoped, every entry and
+ * every ride together, as it always was.
+ *
+ * A planned ride on a horse that is off that day (rest, break, stall rest,
+ * injury, vet treatment) is not due: it neither needs a ride nor breaks the
+ * streak.
  *
  * Days are the rider's local calendar days, as YYYY-MM-DD. The arithmetic
  * between them is done in UTC on those strings, which have no time zone.
@@ -55,6 +63,87 @@ export const timeOffOn = (periods: readonly TimeOffPeriod[], horseId: string | u
 /** The planned rides that still need doing: those whose horse is not off that day. */
 export const dueOn = (versions: readonly PlanVersion[], periods: readonly TimeOffPeriod[], day: string) =>
   plannedOn(versions, day).filter((entry) => !timeOffOn(periods, entry.horseId, day));
+
+/**
+ * Whether a plan entry or a ride is the horse's. No horse to scope by (a
+ * rider with no horse at all) takes everything; otherwise only what carries
+ * that horse's id, so an entry or a ride without a horse counts for none.
+ */
+export const belongsTo = (item: { horseId?: string }, horseId: string | undefined) =>
+  horseId === undefined || item.horseId === horseId;
+
+/** The items of one horse; all of them for a rider with no horse. */
+export const ofHorse = <T extends { horseId?: string }>(items: readonly T[], horseId: string | undefined): T[] =>
+  items.filter((item) => belongsTo(item, horseId));
+
+/**
+ * One horse's training week, version by version. Its streak starts with the
+ * first version that planned it, so the versions before are left out; a
+ * later version without it stays, and means it was taken out of the plan
+ * from that day.
+ */
+export const planForHorse = (versions: readonly PlanVersion[], horseId: string | undefined): PlanVersion[] => {
+  if (horseId === undefined) return [...versions];
+  const scoped = [...versions]
+    .sort((left, right) => left.effectiveFrom.localeCompare(right.effectiveFrom))
+    .map((version) => ({ ...version, days: ofHorse(version.days, horseId) }));
+  const first = scoped.findIndex((version) => version.days.length > 0);
+  return first < 0 ? [] : scoped.slice(first);
+};
+
+/** When each ride on one horse ended; every ride for a rider with no horse. */
+export const ridesForHorse = (rides: readonly RideEnd[], horseId: string | undefined) =>
+  ofHorse(rides, horseId).map((ride) => ride.completedAt);
+
+/**
+ * One horse's latest ride, for its profile and Home's Up next: the newest of
+ * its newest ride in the journal (`entries`, newest first, as the journal
+ * keeps them), its newest ride read on its own (`older`, for a horse last
+ * ridden before the journal's page) and the ride just finished on it, which
+ * the journal may not hold yet. By the same rule as the rest, a ride with no
+ * horse is no horse's, and a rider with no horse reads every ride, as the
+ * rider's last ride always did. `rideFrom` is the journal's own conversion
+ * of a row into the ride the app shows, passed in: the hook it lives in
+ * loads only in the app, and this is tested without one.
+ */
+export const latestRideOf = <Ride extends { completedAt: string }>(
+  entries: readonly RideEntry[],
+  finished: (Ride & { horseId?: string }) | null,
+  horseId: string | undefined,
+  rideFrom: (entry: RideEntry) => Ride,
+  older: RideEntry | null = null
+): Ride | null => {
+  const inJournal = entries.find((candidate) => belongsTo(candidate, horseId));
+  const readAlone = older && belongsTo(older, horseId) ? older : null;
+  const entry = readAlone && (!inJournal || Date.parse(readAlone.completedAt) > Date.parse(inJournal.completedAt)) ? readAlone : inJournal;
+  const saved = entry ? rideFrom(entry) : null;
+  const local = finished && belongsTo(finished, horseId) ? finished : null;
+  // As instants: the database writes "+00:00" where the app wrote "Z". Once
+  // the journal holds the ride just finished, its saved row is the one shown.
+  return local && (!saved || Date.parse(local.completedAt) > Date.parse(saved.completedAt)) ? local : saved;
+};
+
+/**
+ * The plan to save after editing one horse's week: that horse's days from
+ * the editor, every other horse's as the plan has them now. With the rider's
+ * own horses in the stable (`activeHorseIds`), the days of a horse that is no
+ * longer one of them are dropped; without them, nothing is. They are read as
+ * the plan is saved: a list read earlier may not know a horse added since on
+ * another device, and would drop its week. Opened without a horse (a rider
+ * with none), the editor's days are the plan.
+ */
+export const mergeHorseWeek = (
+  current: readonly TrainingPlanDay[],
+  edited: readonly TrainingPlanDay[],
+  horseId: string | undefined,
+  activeHorseIds?: readonly string[]
+): TrainingPlanDay[] => {
+  if (horseId === undefined) return [...edited];
+  const kept = current.filter((entry) =>
+    entry.horseId !== horseId && (!activeHorseIds || !entry.horseId || activeHorseIds.includes(entry.horseId))
+  );
+  return [...kept, ...edited.filter((entry) => entry.horseId === horseId)];
+};
 
 /** The local days the rider rode on, from when each ride ended. */
 export const rideDays = (completedAt: readonly string[]) =>
@@ -161,23 +250,57 @@ export const trainingStreak = (
 };
 
 /**
+ * One horse's streak: its own week and the rides on it. A horse's week with
+ * no day in it is no plan: the horse was taken out of it, and Home offers to
+ * plan one again. A rider with no horse reads the week whole, exactly as it
+ * always was: a week of rest days is still their plan.
+ */
+export const trainingStreakFor = (
+  versions: readonly PlanVersion[],
+  rides: readonly RideEnd[],
+  horseId: string | undefined,
+  today: string,
+  periods: readonly TimeOffPeriod[] = []
+): StreakSummary => {
+  const week = planForHorse(versions, horseId);
+  const streak = trainingStreak(week, ridesForHorse(rides, horseId), today, periods);
+  return horseId === undefined ? streak : { ...streak, hasPlan: Boolean(planOn(week, today)?.days.length) };
+};
+
+/**
  * The planned days in the next `count` days from `today` on, for the
- * reminders, with the rides still due. Days already ridden, and rides on a
- * horse that is off, are skipped.
+ * reminders, with the rides still due: one reminder a day for every horse.
+ * A horse already ridden that day, a horse that is off, and a horse that is
+ * no longer the rider's own (`activeHorses`) are skipped. With no horses,
+ * the week is read unscoped: any ride that day covers it.
  */
 export const upcomingPlannedDays = (
   versions: readonly PlanVersion[],
-  completedAt: readonly string[],
+  rides: readonly RideEnd[],
   today: string,
   count: number,
-  periods: readonly TimeOffPeriod[] = []
+  periods: readonly TimeOffPeriod[] = [],
+  activeHorses: ReadonlySet<string> = new Set()
 ): Array<{ day: string; planned: TrainingPlanDay[] }> => {
-  const ridden = rideDays(completedAt);
+  const scoped = activeHorses.size > 0;
+  const riddenBy = new Map<string | undefined, Set<string>>();
+  const ridden = (horseId: string | undefined) => {
+    let days = riddenBy.get(horseId);
+    if (!days) {
+      days = rideDays(ridesForHorse(rides, horseId));
+      riddenBy.set(horseId, days);
+    }
+    return days;
+  };
   const days: Array<{ day: string; planned: TrainingPlanDay[] }> = [];
   for (let offset = 0; offset < count; offset += 1) {
     const day = addDays(today, offset);
-    const planned = dueOn(versions, periods, day);
-    if (planned.length && !ridden.has(day)) days.push({ day, planned });
+    const planned = scoped
+      ? dueOn(versions, periods, day).filter((entry) =>
+          entry.horseId !== undefined && activeHorses.has(entry.horseId) && !ridden(entry.horseId).has(day)
+        )
+      : ridden(undefined).has(day) ? [] : dueOn(versions, periods, day);
+    if (planned.length) days.push({ day, planned });
   }
   return days;
 };

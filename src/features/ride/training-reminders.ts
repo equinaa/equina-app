@@ -4,13 +4,15 @@ import type { TrainingPlanDay } from "../../backend";
 import { rideAlertsAllowed } from "./ride-cues";
 
 /**
- * A notification on the morning of each planned training day. On by default;
- * the rider turns them off in the plan. The hour is fixed for now.
+ * A notification on the morning of each planned training day, naming every
+ * horse still to ride that day. On by default; one switch for the rider,
+ * turned off in the plan. The hour is fixed for now.
  *
  * Scheduled as single days, three weeks ahead, rather than as a repeating
- * weekly alarm: a day the rider already logged gets no reminder, and a
- * change to the plan replaces exactly what is pending. They are rebuilt
- * whenever the plan or the journal changes and each time the app opens.
+ * weekly alarm: a horse already ridden that day is left out, a day with none
+ * left gets no reminder, and a change to the plan replaces exactly what is
+ * pending. They are rebuilt whenever the plan or the journal changes, each
+ * time the app opens and each time it comes back to the front.
  * Phones only -- a browser cannot wake up to remind anyone.
  */
 
@@ -61,7 +63,10 @@ export function cancelTrainingReminders() {
 
 /**
  * Replaces the pending reminders with these. `ask` asks for notification
- * permission -- only when the rider saves a plan, never on its own.
+ * permission, and the reminders wait for the answer: when the rider saves a
+ * plan, and once per app session on a phone whose rider already has
+ * reminders on (planned on the web, say), never during a ride. The phone
+ * asks only while the rider has not answered yet.
  */
 export function syncTrainingReminders(reminders: TrainingReminder[], ask: boolean) {
   if (Platform.OS === "web") return Promise.resolve();

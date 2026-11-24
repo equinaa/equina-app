@@ -1,4 +1,5 @@
 import type { HorseTimeOff } from "../../backend";
+import type { RangeLimits } from "../../domain/calendar-month";
 import { addDays } from "../../domain/training-streak";
 import { shortDayLabel } from "../../domain/local-day";
 
@@ -65,6 +66,17 @@ export const timeOffProblem = (input: { kind: string; startsOn: string; endsOn: 
   if ((input.note?.length ?? 0) > 500) return "Keep the note under 500 characters.";
   return null;
 };
+
+/**
+ * The same limits as timeOffProblem, for the calendar: the days it would
+ * refuse are not offered, rather than refused on Save. The first day reaches
+ * as far ahead as a period can last.
+ */
+export const timeOffLimits = (today: string): RangeLimits => ({
+  min: addDays(today, -timeOffBackDays),
+  maxStart: addDays(today, timeOffMaxSpan),
+  maxSpanDays: timeOffMaxSpan
+});
 
 /**
  * The periods worth showing: to come, under way, and those that ended in the

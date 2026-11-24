@@ -22,6 +22,7 @@ const shortTraining: Record<string, string> = {
   hack: "Hack",
   hunting: "Hunt",
   lunging: "Lunge",
+  // Retired from the pickers; a plan day saved with it still fits its cell.
   groundwork: "Ground"
 };
 const shortLabel = (trainingType: string) =>
@@ -166,8 +167,11 @@ export function TrainingProgram({
           ))}
         </View>
         <Text style={styles.summary}>
-          {planDays.length === 0
-            ? `No training week yet. Plan the days you ride ${horseName}.`
+          {!planDays.some((planned) => planned.horseId === horseId)
+            ? canEditPlan
+              ? `No training week yet. Plan the days you ride ${horseName}.`
+              // Shared with the rider: not theirs to plan, so nothing to offer.
+              : `${horseName} is not in your training week.`
             : rides === 0
               ? `${horseName} has no rides planned this week.`
               : `${rides === 1 ? "1 ride" : `${rides} rides`} planned this week${week.some((entry) => entry.entry && entry.off) ? ", not counting days off" : ""}.`}
@@ -178,7 +182,7 @@ export function TrainingProgram({
         <Text style={styles.subLabel}>Time off</Text>
       </View>
       {upcoming.length === 0 ? (
-        <Text style={styles.empty}>Rest, a break, stall rest, an injury or vet treatment. Planned rides those days are not due.</Text>
+        <Text style={styles.empty}>For rest, injury or vet care. Your streak stays safe.</Text>
       ) : (
         <View style={styles.list}>
           {upcoming.map((period) => {

@@ -3,6 +3,8 @@ import { ChevronRight, Flame, Moon } from "lucide-react-native";
 import type { StreakSummary, WeekDay } from "../../domain/training-streak";
 import { equinaTheme } from "../../ui/theme/theme";
 import { plannedRidesLabel } from "../ride/planned-rides";
+import { rideTrainingLabel } from "../ride/ride-plan";
+import { planCardTodayLine, type HomeToday } from "./home-hero";
 import { StreakFlame } from "./StreakFlame";
 
 const letters = ["M", "T", "W", "T", "F", "S", "S"] as const;
@@ -60,24 +62,34 @@ export function WeekRow({ week, size = "compact" }: { week: readonly WeekDay[]; 
   );
 }
 
-/** Home's card: the streak and this week, or the way to plan one. */
+/**
+ * Home's card: Home's horse's streak and this week, or the way to plan one.
+ * Each horse has its own; `horseName` is absent only for a rider with no
+ * horse, whose week is read whole.
+ */
 export function TrainingWeekCard({
   streak,
+  horseName,
   horseNames,
+  homeToday = { kind: "unplanned" },
   onOpen,
   onPlan
 }: {
   streak: StreakSummary;
+  horseName?: string;
   horseNames: Record<string, string>;
+  /** What today is for the horse, as the hero above says it. */
+  homeToday?: HomeToday;
   onOpen: () => void;
   onPlan: () => void;
 }) {
   if (!streak.hasPlan) {
+    const planTitle = horseName ? `Plan ${horseName}'s training week` : "Plan your training week";
     return (
       <Pressable
         testID="training-week-plan"
         accessibilityRole="button"
-        accessibilityLabel="Plan your training week"
+        accessibilityLabel={planTitle}
         onPress={onPlan}
         style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       >
@@ -86,9 +98,9 @@ export function TrainingWeekCard({
             <Flame size={18} color={equinaTheme.colors.brass} />
           </View>
           <View style={styles.copy}>
-            <Text style={styles.title}>Plan your training week</Text>
+            <Text style={styles.title}>{planTitle}</Text>
             <Text style={styles.body}>
-              Pick the days you ride, with the horse and the training for each. Your streak counts them, and rest days never break it.
+              Choose your riding days, your horse and the type of training. Rest days keep your streak going.
             </Text>
           </View>
           <ChevronRight size={17} color={equinaTheme.text.tertiary} />
@@ -97,18 +109,19 @@ export function TrainingWeekCard({
     );
   }
 
-  const today = streak.todayPlanned.length ? plannedRidesLabel(streak.todayPlanned, horseNames) : null;
-  const todayLine = streak.todayRidden
-    ? "Today's training is in the journal."
-    : today
-      ? `Today: ${today}`
-      : "Rest day. Nothing to keep today.";
+  // The card is the horse's already; its training is enough here.
+  const today = !streak.todayPlanned.length
+    ? null
+    : horseName
+      ? streak.todayPlanned.map((entry) => rideTrainingLabel(entry.trainingType) ?? "Training").join(", ")
+      : plannedRidesLabel(streak.todayPlanned, horseNames);
+  const todayLine = planCardTodayLine({ ridden: streak.todayRidden, planned: today, today: homeToday });
 
   return (
     <Pressable
       testID="training-week"
       accessibilityRole="button"
-      accessibilityLabel={`${streak.current} day training streak. ${todayLine}`}
+      accessibilityLabel={`${streak.current} day training streak${horseName ? ` with ${horseName}` : ""}. ${todayLine}`}
       accessibilityHint="Opens your streak and training plan"
       onPress={onOpen}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}

@@ -63,6 +63,8 @@ const phases = defaultRidePhases(dressage);
   assert.equal(new Set(rideTrainingTypes.map((type) => type.id)).size, rideTrainingTypes.length);
   assert.equal(rideTrainingLabel("pole-work"), "Pole work");
   assert.equal(rideTrainingLabel("show-jumping"), "Show jumping", "A type a later app added still reads as words.");
+  assert.equal(rideTrainingTypeById("groundwork"), undefined, "Groundwork is no longer offered in the pickers.");
+  assert.equal(rideTrainingLabel("groundwork"), "Groundwork", "A training the pickers no longer offer still reads as words on old rides.");
   assert.equal(rideTrainingLabel(undefined), undefined);
 
   // Minutes stay whole and inside the limits.
