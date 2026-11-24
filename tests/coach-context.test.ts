@@ -77,21 +77,27 @@ assert.match(migration, /use_selected_horse boolean not null default true/);
 assert.match(migration, /use_ride_history boolean not null default true/);
 assert.match(migration, /reduced_personalization boolean not null default false/);
 
-// The promise as Account words it. If these change, the server's reading of
-// each switch has to be looked at again.
+// The promise as Account words it. This fails on purpose when the screen is
+// reworded: read coach-context.ts against the new words, then update the
+// words here.
 const accountScreen = readFileSync(join(root, "src", "features", "account", "AccountScreen.tsx"), "utf8");
-assert.ok(accountScreen.includes("Turning context off changes the next server request, not just the interface."));
+const reworded = "Account > Privacy and Ralf was reworded: check coach-context.ts still does what the screen now says, then update this test.";
+assert.ok(accountScreen.includes("changes the next server request"), reworded);
 for (const title of ["Rider profile", "Selected horse", "Ride history", "Minimal context"]) {
-  assert.ok(accountScreen.includes(`title="${title}"`), `Account still offers "${title}".`);
+  assert.ok(accountScreen.includes(`title="${title}"`), `"${title}" is no longer a switch. ${reworded}`);
 }
-assert.ok(accountScreen.includes('detail="Send only the current question"'));
+assert.ok(accountScreen.includes('detail="Send only the current question"'), reworded);
 
 // Every switch Account saves is one the server reads. "Ride history" was saved
 // for months and read by nothing.
 const accountRepository = readFileSync(join(root, "src", "backend", "account-repository.ts"), "utf8");
 const coachContextSource = readFileSync(join(root, "supabase", "functions", "_shared", "coach-context.ts"), "utf8");
 const savedSwitches = [...accountRepository.matchAll(/payload\.(use_[a-z_]+|reduced_personalization) = /g)].map((match) => match[1] as string);
-assert.deepEqual([...savedSwitches].sort(), ["reduced_personalization", "use_ride_history", "use_rider_profile", "use_selected_horse"]);
+assert.deepEqual(
+  [...savedSwitches].sort(),
+  ["reduced_personalization", "use_ride_history", "use_rider_profile", "use_selected_horse"],
+  "Account saves a switch coach-context.ts does not know: decide what it allows there before shipping it."
+);
 for (const column of savedSwitches) {
   assert.match(coachContextSource, new RegExp(`switches\\?\\.${column}\\b`), `coach-chat must read ${column}.`);
 }
