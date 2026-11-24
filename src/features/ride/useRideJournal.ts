@@ -57,7 +57,9 @@ export const rideSessionFrom = (entry: RideEntry): RideSession => ({
   totalPhases: entry.totalPhases,
   ...(entry.phases ? { phases: entry.phases } : {}),
   // A logged activity can be saved without a feeling. None is invented.
-  ...(entry.mood ? { mood: moodFromRecord[entry.mood] } : {})
+  ...(entry.mood ? { mood: moodFromRecord[entry.mood] } : {}),
+  // Kept so the recap can tell a ride the clock timed from one typed in.
+  ...(entry.source ? { source: entry.source } : {})
 });
 
 const messageFor = (error: unknown, fallback: string) => {

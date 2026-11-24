@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View, type ScrollView } from "react-native";
 import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react-native";
 import type { RideEntry } from "../../backend";
+import { disciplineLabel } from "../../domain/labels";
 import { localDayOf, localMomentLabel, shortDayLabel } from "../../domain/local-day";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
@@ -17,7 +18,7 @@ const durationOf = (entry: RideEntry) => rideMinutesLabel(entry.elapsedSeconds);
 
 const trainingOf = (entry: RideEntry) =>
   rideTrainingLabel(entry.trainingType)
-    ?? `${entry.discipline.charAt(0).toUpperCase()}${entry.discipline.slice(1)}`;
+    ?? disciplineLabel(entry.discipline);
 
 /**
  * Every ride in the journal, one line each, newest first. A training logged

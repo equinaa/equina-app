@@ -145,7 +145,8 @@ import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
 import { localDayOf, localToday } from "./domain/local-day";
 import type { RideEntry } from "./backend/contracts";
-import { buildCareSchedule, completionFor, type CareItem } from "./domain/care-schedule";
+import { buildCareSchedule, completionFor, recordProviderLine, type CareItem } from "./domain/care-schedule";
+import { disciplineLabel, horseSexLabel } from "./domain/labels";
 import {
   useHorseRecords,
   type HorseRecordsController,
@@ -807,7 +808,7 @@ const createCoachReply = ({
       confidence: lastRide ? "medium" : "low",
       text: lastRide
         ? `${voice} ${horseName}'s latest ride was ${latestRideSummary}. ${lastRide.mood === "Tender" ? "Make the next ride a quiet recovery check and keep the first ask simple." : "Repeat the clearest phase once next time, then build only if the rhythm stays easy."}`
-        : `${voice} for ${levelArticle} ${level.toLowerCase()} ${discipline.toLowerCase()} rider, log three things: where the rhythm changed, which aid worked, and when ${horseName} felt easiest. With ${sessionCount} rides logged, compare the pattern before changing the exercise.`
+        : `${voice} for ${levelArticle} ${level.toLowerCase()} ${disciplineLabel(discipline).toLowerCase()} rider, log three things: where the rhythm changed, which aid worked, and when ${horseName} felt easiest. With ${sessionCount} rides logged, compare the pattern before changing the exercise.`
     };
   }
 
@@ -2092,8 +2093,8 @@ function EquinaApp() {
         label: "Welcome",
         confidence: "medium",
         text: onboardingHasHorse
-          ? `I have your ${onboardingLevel.toLowerCase()} ${onboardingDiscipline.toLowerCase()} profile and ${primaryHorseName}'s new training space. We can plan the first useful session.`
-          : `I have your ${onboardingLevel.toLowerCase()} ${onboardingDiscipline.toLowerCase()} profile. We can plan useful sessions for lesson, lease, or shared horses.`
+          ? `I have your ${onboardingLevel.toLowerCase()} ${disciplineLabel(onboardingDiscipline).toLowerCase()} profile and ${primaryHorseName}'s new training space. We can plan the first useful session.`
+          : `I have your ${onboardingLevel.toLowerCase()} ${disciplineLabel(onboardingDiscipline).toLowerCase()} profile. We can plan useful sessions for lesson, lease, or shared horses.`
       }
     ]);
     refresh(
@@ -2630,9 +2631,9 @@ function EquinaApp() {
             {tab === "home" && rideActive && ridePlan ? (
               <RideModeScreen
                 plan={ridePlan}
-                // For a training with no discipline of its own (lunging,
-                // groundwork), the ride's horse's -- not the Stable selection,
-                // and no longer the rider's, which Home now keeps.
+                // For a training with no discipline of its own (lunging),
+                // the ride's horse's -- not the Stable selection, and no
+                // longer the rider's, which Home now keeps.
                 discipline={rideHorseRecord?.discipline ? toCoachDiscipline(rideHorseRecord.discipline) : onboardingDiscipline}
                 image={rideHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
                 onFinish={finishRide}
@@ -3746,7 +3747,7 @@ function HomeScreen({
         : `That ride felt ${mood.toLowerCase()}. ${horse.sessionCount} rides are now in your journal.`
       : `${disciplinePlan.plan} ${loadNote}`;
   const rideTitle = horse.rideActive ? "Finish ride" : recapVisible ? "Ride again" : "Start ride";
-  const rideMeta = horse.rideActive ? `${discipline} · tap to save` : plannedRideMeta;
+  const rideMeta = horse.rideActive ? `${disciplineLabel(discipline)} · tap to save` : plannedRideMeta;
   const nextKicker = recapVisible ? "Coach recap" : horse.careLogged ? "Care complete" : "Next";
   const nextTitle = recapVisible
     ? "Shape tomorrow from this ride"
@@ -3861,12 +3862,12 @@ function HomeScreen({
               onPress={onOpenHorses}
               style={({ pressed }) => [styles.homeHorseSwitch, pressed && styles.tabItemPressed]}
             >
-              <Text numberOfLines={1} style={[styles.homeGreetingMeta, styles.homeHorseSwitchName]}>{horse.hasHorse ? horse.name : discipline}</Text>
+              <Text numberOfLines={1} style={[styles.homeGreetingMeta, styles.homeHorseSwitchName]}>{horse.hasHorse ? horse.name : disciplineLabel(discipline)}</Text>
               <ChevronDown size={15} color={equinaTheme.text.secondary} />
             </Pressable>
           ) : (
             <Text style={styles.homeGreetingMeta}>
-              {horse.hasHorse ? horse.name : discipline}
+              {horse.hasHorse ? horse.name : disciplineLabel(discipline)}
             </Text>
           )}
         </View>
@@ -3910,7 +3911,7 @@ function HomeScreen({
             <View style={styles.homeStageContext}>
               <Text style={styles.homeStageContextLabel}>TODAY</Text>
               <View style={styles.homeStageContextDot} />
-              <Text style={styles.homeStageContextValue}>{discipline}</Text>
+              <Text style={styles.homeStageContextValue}>{disciplineLabel(discipline)}</Text>
             </View>
             {(horse.rideActive || recapVisible) && (
               <View style={styles.homeStageState}>
@@ -5242,8 +5243,10 @@ function StableScreen({
     ? toCoachDiscipline(selectedHorse?.discipline)
     : discipline;
   const resolvedBreed = connected ? selectedHorse?.breed ?? "" : horseBreed;
+  // A horse saved as "Not Sure" (stored 'unknown') shows no sex here, as in
+  // the list, rather than the word "Unknown".
   const resolvedSex = connected && selectedHorse?.sex
-    ? `${selectedHorse.sex.charAt(0).toUpperCase()}${selectedHorse.sex.slice(1)}`
+    ? horseSexLabel(selectedHorse.sex)
     : horseSex;
   const resolvedHeight = connected
     ? selectedHorse?.heightCm ? String(selectedHorse.heightCm) : ""
@@ -5517,7 +5520,7 @@ function StableScreen({
             />
             <View style={styles.stableEmptyTopline}>
               <Text style={styles.stableEmptyEyebrow}>YOUR RIDING</Text>
-              <Text style={styles.stableEmptyMeta}>{discipline}</Text>
+              <Text style={styles.stableEmptyMeta}>{disciplineLabel(discipline)}</Text>
             </View>
             <View style={styles.stableEmptyCopy}>
               <Text style={styles.stableEmptyTitle}>No horse profile yet.</Text>
@@ -5595,9 +5598,7 @@ function StableScreen({
               const age = horseOption.birthDate
                 ? Math.max(0, new Date().getFullYear() - Number(horseOption.birthDate.slice(0, 4)))
                 : null;
-              const sex = horseOption.sex && horseOption.sex !== "unknown"
-                ? `${horseOption.sex.charAt(0).toUpperCase()}${horseOption.sex.slice(1)}`
-                : "";
+              const sex = horseSexLabel(horseOption.sex);
               const meta = [horseOption.breed, sex, age !== null && Number.isFinite(age) ? `${age} years` : "", horseOption.heightCm ? `${horseOption.heightCm} cm` : ""]
                 .filter(Boolean)
                 .join(" · ");
@@ -5618,7 +5619,7 @@ function StableScreen({
                     </View>
                   </View>
                   <View style={styles.stableProfileCopy}>
-                    <Text style={styles.stableKicker}>{toCoachDiscipline(horseOption.discipline)} horse</Text>
+                    <Text style={styles.stableKicker}>{disciplineLabel(toCoachDiscipline(horseOption.discipline))} horse</Text>
                     <Text numberOfLines={1} style={styles.stableHorseCardName}>{horseOption.name}</Text>
                     {meta ? <Text numberOfLines={1} style={styles.stableMeta}>{meta}</Text> : null}
                   </View>
@@ -5680,7 +5681,7 @@ function StableScreen({
             </View>
           </View>
           <View style={styles.stableProfileCopy}>
-            <Text style={styles.stableKicker}>{resolvedDiscipline} horse</Text>
+            <Text style={styles.stableKicker}>{disciplineLabel(resolvedDiscipline)} horse</Text>
             <Text style={styles.stableTitle}>{resolvedName}</Text>
             <Text style={styles.stableMeta}>
               {[resolvedBreed, resolvedSex, resolvedAge ? `${resolvedAge} years` : "", resolvedHeight ? `${resolvedHeight} cm` : ""]
@@ -5723,7 +5724,7 @@ function StableScreen({
                     <Text style={styles.stableLatestRideKicker}>Latest ride · {rideDurationLabel(lastRide.elapsedSeconds)}</Text>
                     <Text style={styles.stableLatestRideTitle}>{lastRide.focus}</Text>
                     <Text style={styles.stableLatestRideBody}>
-                      {[lastRide.discipline, lastRide.mood?.toLowerCase(), `${lastRide.completedPhases}/${lastRide.totalPhases} phases`].filter(Boolean).join(" · ")}
+                      {[disciplineLabel(lastRide.discipline), lastRide.mood?.toLowerCase(), `${lastRide.completedPhases}/${lastRide.totalPhases} phases`].filter(Boolean).join(" · ")}
                     </Text>
                   </View>
                 </View>
@@ -5765,16 +5766,17 @@ function StableScreen({
 
               {records.length > 0 ? (
                 <>
-                  <SectionTitle title="Recent" action="private timeline" />
+                  <SectionTitle title="Recent records" action="Private to you" quiet />
                   <View style={styles.documentStack}>
                     {records.slice(0, 4).map((record, index, recent) => {
                       const attachmentCount = filesByRecord[record.id]?.length ?? 0;
+                      const provider = recordProviderLine(record);
                       return (
                         <DocumentRow
                           key={record.id}
                           Icon={record.recordType === "lab" ? Activity : record.recordType === "passport" ? FileText : Stethoscope}
                           title={record.title}
-                          body={`${record.occurredOn}${record.providerName ? ` · ${record.providerName}` : ""}${attachmentCount ? ` · ${attachmentCount} private file` : ""}`}
+                          body={`${record.occurredOn}${provider ? ` · ${provider}` : ""}${attachmentCount ? ` · ${attachmentCount} private file` : ""}`}
                           status={record.status}
                           last={index === recent.length - 1}
                           onPress={() => openRecordEditor(record.recordType, record)}
@@ -6251,7 +6253,7 @@ function AcademyScreen({
       <View style={styles.personalAcademyHome}>
         <View style={styles.academyPersonalIntro}>
           <Text style={styles.academyPersonalEyebrow}>
-            {horse.hasHorse ? `${rider.name} + ${horse.name}` : rider.name} · {rider.level} {rider.discipline.toLowerCase()}
+            {horse.hasHorse ? `${rider.name} + ${horse.name}` : rider.name} · {rider.level} {disciplineLabel(rider.discipline).toLowerCase()}
           </Text>
           <Text style={styles.academyPersonalTitle}>{guidance.headline}</Text>
           <Text style={styles.academyPersonalBody}>{recommendationReason}</Text>
@@ -7103,7 +7105,7 @@ function CommunityScreen({
         <CommunityFeedCard
           author={rideShare.riderName}
           meta={`Just now · ${rideShare.horseName}`}
-          title={`${rideShare.horseName} finished today's ${rideShare.discipline.toLowerCase()} work`}
+          title={`${rideShare.horseName} finished today's ${disciplineLabel(rideShare.discipline).toLowerCase()} work`}
           body={`${rideShare.duration} · ${rideShare.focus} · rider marked ${rideShare.mood.toLowerCase()}.`}
           image={rideShare.image}
           // A ride the rider just shared has no likes and no comments yet, and
@@ -7319,7 +7321,7 @@ function ProfileScreen({
           </View>
           <View>
             <Text numberOfLines={1} adjustsFontSizeToFit style={styles.profileHorseFeatureTitle}>{horseName}</Text>
-            <Text style={styles.profileHorseFeatureMeta}>{discipline} · {horseBreed || "Breed"} · {horseSex}</Text>
+            <Text style={styles.profileHorseFeatureMeta}>{disciplineLabel(discipline)} · {horseBreed || "Breed"} · {horseSex}</Text>
             <Text style={styles.profileHorseFeatureDetail}>
               {[level, horseAge ? `${horseAge} years` : "", horseHeight ? `${horseHeight} cm` : ""]
                 .filter(Boolean)
@@ -7358,11 +7360,13 @@ function SectionHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
   );
 }
 
-function SectionTitle({ title, action }: { title: string; action: string }) {
+// `quiet` is for a caption that only describes the list: the brass of the
+// default reads as a link, and nothing happens when it is tapped.
+function SectionTitle({ title, action, quiet = false }: { title: string; action: string; quiet?: boolean }) {
   return (
     <View style={styles.sectionTitleRow}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.sectionAction}>{action}</Text>
+      <Text style={[styles.sectionAction, quiet && styles.sectionCaption]}>{action}</Text>
     </View>
   );
 }
@@ -10628,6 +10632,9 @@ const styles = StyleSheet.create({
     color: equinaTheme.colors.brass,
     fontSize: 13,
     fontWeight: "400"
+  },
+  sectionCaption: {
+    color: equinaTheme.text.tertiary
   },
   horizontalList: {
     gap: 12,

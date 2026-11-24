@@ -141,6 +141,9 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   assert.ok(!prompt.includes("The plan was"));
 }
 
+// The stored discipline 'trail' reads "Leisure", as everywhere the rider sees it.
+assert.equal(rideReviewFactsFromEntry({ ...liveEntry, trainingType: undefined, discipline: "trail" }, "Test").training, "Leisure");
+
 {
   // The ride just finished, as the recap holds it: capitalised names, no source.
   const session: RideSession = {
@@ -169,6 +172,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   const { mood: _mood, ...unrated } = session;
   assert.ok(!rideReviewPrompt(rideReviewFactsFromSession(unrated)).includes("felt"));
   assert.equal(rideReviewFactsFromSession({ ...session, trainingType: undefined }).training, "Jumping");
+  assert.equal(rideReviewFactsFromSession({ ...session, trainingType: undefined, discipline: "Trail" }).training, "Leisure");
 }
 
 {

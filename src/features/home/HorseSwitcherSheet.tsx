@@ -6,9 +6,7 @@ import { EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
-
-const disciplineLabel = (value?: HorseRecord["discipline"]) =>
-  value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : undefined;
+import { disciplineLabel } from "../../domain/labels";
 
 /**
  * The rider's horses, from the Home header. Picking one changes Home at once
@@ -114,7 +112,7 @@ export function HorseSwitcherSheet({
             <Text style={styles.addText}>Add a horse</Text>
           </MotionPressable>
         ) : null}
-        <Text style={styles.note}>The horse you pick is the one Home, your rides and Ralf start from.</Text>
+        <Text style={styles.note}>Tap a horse to switch. Home, your rides and Ralf will use the horse you choose.</Text>
       </View>
     </EquinaSheet>
   );

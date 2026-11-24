@@ -24,7 +24,8 @@ import {
   Sparkles,
   X
 } from "lucide-react-native";
-import type { RidePhaseEntry } from "../../backend";
+import type { RidePhaseEntry, RideSource } from "../../backend";
+import { disciplineLabel } from "../../domain/labels";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
@@ -58,6 +59,7 @@ import {
   type RidePlan,
   type RideRun
 } from "./ride-plan";
+import { rideRecapMessage } from "./ride-recap-message";
 
 export type RideMood = "Fresh" | "Focused" | "Tender";
 
@@ -76,9 +78,13 @@ export type RideSession = {
   phases?: RidePhaseEntry[];
   /** Absent when no feeling was recorded: a logged activity can leave it out. */
   mood?: RideMood;
+  /** Only on a ride read back from the journal. Absent means the clock timed it. */
+  source?: RideSource;
 };
 
-export type RideCompletion = Omit<RideSession, "mood">;
+// What the ride screen hands over at Finish. The feeling is picked on the
+// recap and the source is stated by whoever saves it, so neither is in here.
+export type RideCompletion = Omit<RideSession, "mood" | "source">;
 
 export type RideRecommendation = {
   title: string;
@@ -90,7 +96,7 @@ export type RideRecommendation = {
 
 /** What a ride was, in the words the rider chose: "Pole work", or the discipline for older rides. */
 export const rideSessionLabel = (session: Pick<RideSession, "trainingType" | "discipline">) =>
-  rideTrainingLabel(session.trainingType) ?? session.discipline;
+  rideTrainingLabel(session.trainingType) ?? disciplineLabel(session.discipline);
 
 const formatElapsed = (seconds: number) => {
   const hours = Math.floor(seconds / 3600);
@@ -540,6 +546,13 @@ export function RideRecapScreen({
           : `${horseName} stayed with the work. Build the next ride from the same simple rhythm.`,
     [horseName, mood]
   );
+  // A very short or a very long ride is told so, in place of the usual lines.
+  // The session on screen becomes the journal's newest row once the save
+  // lands, and that row can be an activity logged by hand: it gets no message.
+  const durationMessage = useMemo(
+    () => rideRecapMessage({ elapsedSeconds: session.elapsedSeconds, source: session.source }),
+    [session.elapsedSeconds, session.source]
+  );
 
   useEffect(() => {
     if (reducedMotion) {
@@ -607,8 +620,15 @@ export function RideRecapScreen({
           </View>
 
           <View style={styles.recapIntro}>
-            <Text accessibilityRole="header" style={styles.recapTitle}>A useful ride.</Text>
-            <Text style={styles.recapBody}>{completionBody}</Text>
+            <Text accessibilityRole="header" style={styles.recapTitle}>
+              {durationMessage ? durationMessage.title : "A useful ride."}
+            </Text>
+            <Text
+              testID={durationMessage ? `ride-recap-message-${durationMessage.kind}` : undefined}
+              style={[styles.recapBody, durationMessage && styles.recapBodyMessage]}
+            >
+              {durationMessage ? durationMessage.body : completionBody}
+            </Text>
           </View>
 
           <View style={styles.recapMetrics}>
@@ -1009,6 +1029,13 @@ const styles = StyleSheet.create({
     color: equinaTheme.text.secondary,
     fontSize: 14,
     lineHeight: 20
+  },
+  // Advice about the ride's length is the thing to read on this screen, so it
+  // is set a step up from the usual caption: full ivory, one size larger.
+  recapBodyMessage: {
+    color: equinaTheme.text.primary,
+    fontSize: 15,
+    lineHeight: 22
   },
   recapMetrics: {
     minHeight: 58,

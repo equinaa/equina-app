@@ -1,4 +1,5 @@
 import type { RideEntry, RideMoodRecord, RidePhaseEntry } from "../../backend";
+import { disciplineLabel } from "../../domain/labels";
 import { localMomentLabel } from "../../domain/local-day";
 import type { RideSession } from "./RideExperience";
 import { rideTrainingLabel } from "./ride-plan";
@@ -37,7 +38,6 @@ export type RideReviewFacts = {
 export const rideMinutesLabel = (seconds: number) =>
   seconds < 60 ? "<1 min" : `${Math.round(seconds / 60)} min`;
 
-const capitalised = (value: string) => `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 
 // An emoji is two UTF-16 units. A cut between them leaves half of one, and
 // coach-chat cannot save a message holding it (Postgres refuses it as JSON),
@@ -45,7 +45,7 @@ const capitalised = (value: string) => `${value.charAt(0).toUpperCase()}${value.
 const cutAt = (text: string, limit: number) => text.slice(0, limit).replace(/[\uD800-\uDBFF]$/, "");
 
 export const rideReviewFactsFromEntry = (entry: RideEntry, horseName?: string): RideReviewFacts => ({
-  training: rideTrainingLabel(entry.trainingType) ?? capitalised(entry.discipline),
+  training: rideTrainingLabel(entry.trainingType) ?? disciplineLabel(entry.discipline),
   ...(horseName ? { horseName } : {}),
   startedAt: entry.startedAt,
   elapsedSeconds: entry.elapsedSeconds,
@@ -61,7 +61,7 @@ export const rideReviewFactsFromEntry = (entry: RideEntry, horseName?: string): 
 
 /** The ride just finished, before or after the journal holds it. The clock timed it. */
 export const rideReviewFactsFromSession = (session: RideSession, horseName?: string): RideReviewFacts => ({
-  training: rideTrainingLabel(session.trainingType) ?? session.discipline,
+  training: rideTrainingLabel(session.trainingType) ?? disciplineLabel(session.discipline),
   ...(horseName ? { horseName } : {}),
   startedAt: session.startedAt,
   elapsedSeconds: session.elapsedSeconds,
