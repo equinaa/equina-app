@@ -51,9 +51,10 @@ max_frequency = "1m"
 otp_length = 6
 otp_expiry = 3600
 
-# Every email carries the six-digit code, not a link. The app asks for the code
-# when EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE=otp; switch it only once these are the
-# hosted templates.
+# Once these are the hosted templates, every email carries the six-digit code
+# (the email-change template still carries a link; no app flow uses it). The app
+# asks for the code when EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE=otp; switch it only
+# once these are the hosted templates.
 [auth.email.template.confirmation]
 subject = "Confirm your Equina email: {{ .Token }}"
 content_path = "./supabase/templates/confirmation.html"

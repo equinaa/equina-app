@@ -155,9 +155,10 @@ export const storeBuildProblems = ({ profile, env, switches = {} }) => {
     report(keyName, "holds a secret key. Only the publishable key may be built into the app.");
   }
 
-  // Every email carries a six-digit code. The app compares this value exactly.
+  // Store builds ask for the emailed code (docs/EQUINA_AUTH_DELIVERY.md). The
+  // app compares this value exactly.
   if (env.EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE !== "otp") {
-    report("EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE", 'is not "otp". The app would wait for a link the emails no longer carry.');
+    report("EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE", 'is not "otp". Store builds ask for the emailed code (docs/EQUINA_AUTH_DELIVERY.md).');
   }
 
   if (clean(env.EXPO_PUBLIC_EQUINA_DEMO_MODE).toLowerCase() === "true") {

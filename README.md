@@ -110,7 +110,7 @@ Things worth knowing before you touch it:
 
 - **Web:** every merge to `main` builds and deploys on Vercel.
 - **Admin:** a second Vercel project with Root Directory `admin`. Setup and staff accounts: [`admin/README.md`](admin/README.md).
-- **iOS / Android:** built by EAS for TestFlight and Google Play, see [Store builds](#store-builds). Release audit and checklist: [`docs/IOS_RELEASE_AUDIT.md`](docs/IOS_RELEASE_AUDIT.md).
+- **iOS / Android:** built by EAS for TestFlight and Google Play, see [Store builds](#store-builds). [`docs/IOS_RELEASE_AUDIT.md`](docs/IOS_RELEASE_AUDIT.md) is the September audit, kept as history: it predates the code sign-in and the icons.
 - **Backend:** migrations and functions are promoted with the CLI commands above. There is one Supabase project today; treat it as production.
 
 ## Store builds

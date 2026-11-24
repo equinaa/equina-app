@@ -10,9 +10,10 @@
   asks for it, instead of reading like a wrong password. Auth only reports "not confirmed" after the
   password matched, so this reveals nothing to someone who does not know it.
 - Signing in by email code and resetting a password answer the same way whether or not an account exists.
-- Every email is a code, not a link (`EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE=otp`). A code works on any device
-  and cannot be used up by a mail scanner that opens links. Link mode (`magic-link`) stays only for the
-  built-in mailer, until custom SMTP is live.
+- Every email is a code, not a link (`EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE=otp`), once the templates in
+  `supabase/templates/` are the hosted ones; the email-change template still carries a link, and no app
+  flow uses it. A code works on any device and cannot be used up by a mail scanner that opens links. Link
+  mode (`magic-link`) stays only for the built-in mailer, until custom SMTP is live.
 - Completing onboarding initializes the first ride plan, a zero-progress personalized Academy path, and Ralf's initial rider context.
 - The one-time starter pack is persisted in `onboarding_starter_packs`; retries cannot issue a duplicate reward.
 
