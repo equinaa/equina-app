@@ -1,0 +1,242 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { RideEntry } from "../src/backend";
+import type { RideSession } from "../src/features/ride/RideExperience";
+import { defaultRidePhases, rideTrainingTypes } from "../src/features/ride/ride-plan";
+import {
+  RIDE_REVIEW_NOTE_LIMIT,
+  RIDE_REVIEW_PROMPT_LIMIT,
+  rideMinutesLabel,
+  rideReviewFactsFromEntry,
+  rideReviewFactsFromSession,
+  rideReviewPrompt
+} from "../src/features/ride/ride-review-prompt";
+
+// "Ask Ralf about this ride": Ralf cannot be pointed at one ride, so the
+// ride's facts travel in the question. One builder writes it, for the ride
+// just finished and for one opened from the journal.
+
+// Local time on purpose: the prompt names the day and the hour as the rider
+// lived them, whatever zone the tests run in.
+const startedAt = new Date(2026, 10, 17, 14, 50).toISOString();
+const completedAt = new Date(2026, 10, 17, 15, 32).toISOString();
+const question = "What went well, and what is the one thing to work on next time?";
+
+const liveEntry: RideEntry = {
+  id: "ride-1",
+  riderId: "rider-a",
+  horseId: "horse-a",
+  discipline: "jumping",
+  trainingType: "pole-work",
+  focus: "Pole work",
+  plannedDuration: "52 min",
+  startedAt,
+  completedAt,
+  elapsedSeconds: 42 * 60,
+  completedPhases: 3,
+  totalPhases: 4,
+  phases: [
+    { title: "Pre warm-up", detail: "Walk", plannedSeconds: 600, actualSeconds: 660 },
+    { title: "Warm-up", detail: "Trot", plannedSeconds: 420, actualSeconds: 480 },
+    { title: "Training", detail: "Pole work", plannedSeconds: 1200, actualSeconds: 1380 },
+    { title: "Cool-down", plannedSeconds: 900 }
+  ],
+  mood: "focused",
+  source: "live",
+  createdAt: completedAt,
+  updatedAt: completedAt
+};
+
+const manualEntry: RideEntry = {
+  ...liveEntry,
+  id: "ride-2",
+  trainingType: "hack",
+  discipline: "trail",
+  focus: "Hack",
+  plannedDuration: "45 min",
+  elapsedSeconds: 45 * 60,
+  completedPhases: 2,
+  totalPhases: 2,
+  phases: [
+    { title: "Warm-up", detail: "Walk", plannedSeconds: 900, actualSeconds: 900 },
+    { title: "Training", detail: "Hack", plannedSeconds: 1800, actualSeconds: 1800 }
+  ],
+  mood: undefined,
+  riderNote: "Quiet in the woods, a little sharp past the tractor.",
+  source: "manual"
+};
+
+// The filter coach-chat runs on the whole message. A hit answers with the
+// fixed "contact your veterinarian" reply, so the template's own words must
+// never be what trips it. Read from the function, which Node cannot import.
+const coachChat = readFileSync(join(process.cwd(), "supabase/functions/coach-chat/index.ts"), "utf8");
+const healthSource = /const healthPattern = \/(.+)\/i;/.exec(coachChat)?.[1];
+assert.ok(healthSource, "coach-chat still declares healthPattern as a single /.../i literal");
+const healthPattern = new RegExp(healthSource, "i");
+assert.match("He felt lame behind", healthPattern);
+assert.match(coachChat, /message: z\.string\(\)\.trim\(\)\.min\(1\)\.max\(3000\)/);
+assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
+
+{
+  // A ride the clock timed: every fact, in plain sentences.
+  const prompt = rideReviewPrompt(rideReviewFactsFromEntry(liveEntry, "Test"));
+  const lines = prompt.split("\n");
+  assert.equal(lines[0], "Review my Pole work session with Test on Tue 17 Nov.");
+  assert.equal(lines[1], "");
+  assert.equal(lines.at(-1), question);
+  assert.equal(lines.at(-2), "");
+  assert.ok(prompt.includes("It started at 14:50."));
+  assert.ok(prompt.includes("The app timed it live. I rode for 42 min. The plan was 52 min."));
+  assert.ok(prompt.includes("I reached 3 of 4 phases."));
+  assert.ok(prompt.includes("Pre warm-up (Walk): planned 10 min, rode 11 min."));
+  assert.ok(prompt.includes("Training (Pole work): planned 20 min, rode 23 min."));
+  assert.ok(prompt.includes("Cool-down: planned 15 min, not reached."));
+  assert.ok(prompt.includes("Test felt focused."));
+  // The focus only repeats the training here, so it is not said twice.
+  assert.ok(!prompt.includes("I worked on"));
+  assert.ok(!prompt.includes("My note"));
+  assert.ok(!prompt.includes("by hand"));
+  assert.ok(!prompt.includes("—"));
+  assert.doesNotMatch(prompt, healthPattern);
+  assert.ok(prompt.length < RIDE_REVIEW_PROMPT_LIMIT);
+}
+
+{
+  // An activity added by hand says so: its minutes are not the clock's.
+  const prompt = rideReviewPrompt(rideReviewFactsFromEntry(manualEntry, "Test"));
+  assert.ok(prompt.startsWith("Review my Hack session with Test on Tue 17 Nov.\n\n"));
+  assert.ok(prompt.includes("I added it by hand afterwards, so the app did not time it. It lasted 45 min."));
+  assert.ok(prompt.includes("Warm-up (Walk): 15 min."));
+  assert.ok(prompt.includes("Training (Hack): 30 min."));
+  assert.ok(prompt.includes("My note: Quiet in the woods, a little sharp past the tractor."));
+  assert.ok(!prompt.includes("timed it live"));
+  assert.ok(!prompt.includes("The plan was"));
+  assert.ok(!prompt.includes("phases."));
+  assert.ok(!prompt.includes("planned"));
+  assert.ok(!prompt.includes("felt"));
+  assert.ok(prompt.endsWith(`\n\n${question}`));
+  assert.doesNotMatch(prompt, healthPattern);
+}
+
+{
+  // No horse on the ride, or one that is no longer the rider's.
+  const prompt = rideReviewPrompt(rideReviewFactsFromEntry({ ...liveEntry, horseId: undefined, mood: "fresh" }));
+  assert.ok(prompt.startsWith("Review my Pole work session on Tue 17 Nov.\n"));
+  assert.ok(prompt.includes("My horse felt fresh."));
+}
+
+{
+  // A ride from before the setup sheet: the discipline names it, the focus is its own.
+  const facts = rideReviewFactsFromEntry(
+    { ...liveEntry, trainingType: undefined, focus: "Rhythm", phases: undefined, plannedDuration: undefined },
+    "Test"
+  );
+  assert.equal(facts.training, "Jumping");
+  const prompt = rideReviewPrompt(facts);
+  assert.ok(prompt.startsWith("Review my Jumping session with Test on Tue 17 Nov."));
+  assert.ok(prompt.includes("I worked on: Rhythm."));
+  assert.ok(prompt.includes("The app timed it live. I rode for 42 min.\n"));
+  assert.ok(!prompt.includes("The plan was"));
+}
+
+{
+  // The ride just finished, as the recap holds it: capitalised names, no source.
+  const session: RideSession = {
+    id: "local-1",
+    startedAt,
+    completedAt,
+    discipline: "Jumping",
+    trainingType: "pole-work",
+    focus: "Pole work",
+    plannedDuration: "52 min",
+    elapsedSeconds: 42 * 60,
+    completedPhases: 3,
+    totalPhases: 4,
+    phases: liveEntry.phases,
+    mood: "Tender"
+  };
+  const facts = rideReviewFactsFromSession(session, "Test");
+  assert.equal(facts.mood, "tender");
+  assert.equal(facts.logged, false);
+  // The same words as the same ride opened from the journal later.
+  assert.equal(
+    rideReviewPrompt(facts),
+    rideReviewPrompt(rideReviewFactsFromEntry({ ...liveEntry, mood: "tender" }, "Test"))
+  );
+  // Before the rider picked a feeling, none is claimed.
+  const { mood: _mood, ...unrated } = session;
+  assert.ok(!rideReviewPrompt(rideReviewFactsFromSession(unrated)).includes("felt"));
+  assert.equal(rideReviewFactsFromSession({ ...session, trainingType: undefined }).training, "Jumping");
+}
+
+{
+  // A long note is cut where Ralf's own reading of the journal cuts it.
+  const note = `${"a".repeat(RIDE_REVIEW_NOTE_LIMIT)}ZZZ${"b".repeat(1600)}`;
+  const prompt = rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: note }, "Test"));
+  assert.ok(prompt.includes(`My note: ${"a".repeat(RIDE_REVIEW_NOTE_LIMIT)}...`));
+  assert.ok(!prompt.includes("Z"));
+  assert.ok(!prompt.includes("b".repeat(10)));
+  assert.ok(prompt.endsWith(question));
+  // A note typed on several lines stays one fact.
+  const spaced = rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "Calm.\n\nGood canter." }));
+  assert.ok(spaced.includes("My note: Calm. Good canter."));
+}
+
+{
+  // The most a ride can hold stays well inside the server's 3000 characters.
+  const fullest = rideReviewPrompt(rideReviewFactsFromEntry({
+    ...liveEntry,
+    trainingType: "cross-country",
+    focus: "f".repeat(120),
+    totalPhases: 12,
+    completedPhases: 12,
+    phases: Array.from({ length: 12 }, () => ({
+      title: "t".repeat(60), detail: "d".repeat(60), plannedSeconds: 5400, actualSeconds: 5400
+    })),
+    riderNote: "n".repeat(2000)
+  }, "h".repeat(80)));
+  assert.ok(fullest.length <= RIDE_REVIEW_PROMPT_LIMIT, `fullest prompt is ${fullest.length} characters`);
+  assert.ok(fullest.includes(`My note: ${"n".repeat(RIDE_REVIEW_NOTE_LIMIT)}...`));
+  assert.ok(fullest.endsWith(question));
+
+  // A row no screen could have written still cannot push the question out.
+  const absurd = rideReviewPrompt(rideReviewFactsFromEntry({
+    ...liveEntry,
+    phases: Array.from({ length: 400 }, (_, index) => ({ title: `Phase ${index}`, plannedSeconds: 600, actualSeconds: 600 }))
+  }, "Test"));
+  assert.ok(absurd.length <= RIDE_REVIEW_PROMPT_LIMIT);
+  assert.ok(absurd.startsWith("Review my Pole work session with Test on Tue 17 Nov."));
+  assert.ok(absurd.endsWith(`...\n\n${question}`));
+}
+
+// Every training the app offers, with its usual phases, timed and logged,
+// with every feeling: the fixed wording never reads as a health question.
+const neutral: string[] = [];
+for (const training of rideTrainingTypes) {
+  const phases = defaultRidePhases(training).map((phase, index) => ({
+    title: phase.title,
+    detail: phase.detail,
+    plannedSeconds: phase.minutes * 60,
+    ...(index < 2 ? { actualSeconds: phase.minutes * 60 } : {})
+  }));
+  for (const mood of ["fresh", "focused", "tender"] as const) {
+    for (const source of ["live", "manual"] as const) {
+      neutral.push(rideReviewPrompt(rideReviewFactsFromEntry({
+        ...liveEntry, trainingType: training.id, focus: training.label, phases, mood, source,
+        completedPhases: 2, totalPhases: phases.length
+      }, "Test")));
+    }
+  }
+}
+assert.equal(neutral.length, rideTrainingTypes.length * 6);
+assert.deepEqual(neutral.filter((prompt) => healthPattern.test(prompt)), []);
+// The rider's own words are still screened like any message to Ralf.
+assert.match(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." })), healthPattern);
+
+assert.equal(rideMinutesLabel(0), "<1 min");
+assert.equal(rideMinutesLabel(59), "<1 min");
+assert.equal(rideMinutesLabel(60), "1 min");
+assert.equal(rideMinutesLabel(42 * 60 + 40), "43 min");
+
+console.log("Ride review prompt passed.");

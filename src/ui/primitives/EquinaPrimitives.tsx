@@ -149,9 +149,15 @@ type EquinaSheetProps = {
   children: ReactNode;
   onDismiss: () => void;
   closeTestID?: string;
+  /**
+   * For a sheet that swaps what it shows (a list, then one item of it). A new
+   * key starts the content at the top; without it the item would open at the
+   * scroll position the list was left in.
+   */
+  contentKey?: string;
 };
 
-export function EquinaSheet({ visible, title, children, onDismiss, closeTestID }: EquinaSheetProps) {
+export function EquinaSheet({ visible, title, children, onDismiss, closeTestID, contentKey }: EquinaSheetProps) {
   const sheetMotion = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
 
@@ -220,6 +226,7 @@ export function EquinaSheet({ visible, title, children, onDismiss, closeTestID }
             </MotionPressable>
           </View>
           <ScrollView
+            key={contentKey}
             style={primitiveStyles.sheetScroll}
             contentContainerStyle={primitiveStyles.sheetContent}
             keyboardDismissMode="interactive"

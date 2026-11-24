@@ -505,6 +505,7 @@ export function RideRecapScreen({
   sharingEnabled,
   onMoodChange,
   onOpenAcademy,
+  onAskRalf,
   onShare,
   onHome
 }: {
@@ -513,13 +514,15 @@ export function RideRecapScreen({
   session: RideSession;
   /** Written to the journal, or kept for this session only. */
   saved: boolean;
-  /** Absent while the Academy has no lesson to suggest; the ride goes to Ralf. */
+  /** Absent while the Academy has no lesson to suggest. */
   recommendation?: RideRecommendation;
+  /** Ralf is offered after every ride he can be asked about, lesson or not. */
   ralfAvailable: boolean;
   shared: boolean;
   sharingEnabled: boolean;
   onMoodChange: (mood: RideMood) => void;
   onOpenAcademy: () => void;
+  onAskRalf: () => void;
   onShare: () => void;
   onHome: () => void;
 }) {
@@ -651,35 +654,48 @@ export function RideRecapScreen({
                 <Sparkles size={18} color={equinaTheme.colors.brass} />
               </View>
 
-              <MotionPressable
-                testID={recommendation ? "ride-recap-recommendation" : "ride-recap-ralf"}
-                accessibilityRole="button"
-                accessibilityLabel={recommendation ? `Open ${recommendation.title} in Academy` : "Review this ride with Ralf"}
-                onPress={onOpenAcademy}
-                style={styles.recapLessonRow}
-              >
-                {recommendation ? (
+              {recommendation ? (
+                <MotionPressable
+                  testID="ride-recap-recommendation"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${recommendation.title} in Academy`}
+                  onPress={onOpenAcademy}
+                  style={styles.recapLessonRow}
+                >
                   <Image source={{ uri: recommendation.image }} resizeMode="cover" style={styles.recapLessonImage} />
-                ) : (
-                  <View style={styles.recapRalfMark}>
-                    <Sparkles size={22} color={equinaTheme.colors.brass} />
-                  </View>
-                )}
-                <View style={styles.recapLessonCopy}>
-                  <Text numberOfLines={2} style={styles.recapLessonTitle}>
-                    {recommendation ? recommendation.title : "Review this ride with Ralf"}
-                  </Text>
-                  {recommendation ? (
+                  <View style={styles.recapLessonCopy}>
+                    <Text numberOfLines={2} style={styles.recapLessonTitle}>{recommendation.title}</Text>
                     <Text numberOfLines={1} style={styles.recapLessonMeta}>
                       {[recommendation.coach, recommendation.duration].filter(Boolean).join(" · ")}
                     </Text>
-                  ) : null}
-                  <Text numberOfLines={2} style={styles.recapLessonBody}>
-                    {recommendation ? recommendation.summary : "What went well, and the one thing to work on next time."}
-                  </Text>
-                </View>
-                <ChevronRight size={18} color={equinaTheme.text.tertiary} />
-              </MotionPressable>
+                    <Text numberOfLines={2} style={styles.recapLessonBody}>{recommendation.summary}</Text>
+                  </View>
+                  <ChevronRight size={18} color={equinaTheme.text.tertiary} />
+                </MotionPressable>
+              ) : null}
+
+              {/* Its own row, not a stand-in for a missing lesson: with a
+                  lesson to suggest the ride used to have no way to Ralf. */}
+              {ralfAvailable ? (
+                <MotionPressable
+                  testID="ride-recap-ralf"
+                  accessibilityRole="button"
+                  accessibilityLabel="Review this ride with Ralf"
+                  onPress={onAskRalf}
+                  style={styles.recapLessonRow}
+                >
+                  <View style={styles.recapRalfMark}>
+                    <Sparkles size={22} color={equinaTheme.colors.brass} />
+                  </View>
+                  <View style={styles.recapLessonCopy}>
+                    <Text numberOfLines={2} style={styles.recapLessonTitle}>Review this ride with Ralf</Text>
+                    <Text numberOfLines={2} style={styles.recapLessonBody}>
+                      What went well, and the one thing to work on next time.
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={equinaTheme.text.tertiary} />
+                </MotionPressable>
+              ) : null}
             </View>
           ) : null}
         </ScrollView>

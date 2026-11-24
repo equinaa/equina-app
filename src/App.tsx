@@ -162,6 +162,11 @@ import {
 } from "./features/ride/RideExperience";
 import { RideSetupSheet, type LoggedActivity, type RideSetupHorse } from "./features/ride/RideSetupSheet";
 import { RideJournalSheet } from "./features/ride/RideJournalSheet";
+import {
+  rideReviewFactsFromEntry,
+  rideReviewFactsFromSession,
+  rideReviewPrompt
+} from "./features/ride/ride-review-prompt";
 import { HorseSwitcherSheet } from "./features/home/HorseSwitcherSheet";
 import { TrainingWeekCard } from "./features/home/TrainingWeek";
 import { StreakScreen } from "./features/home/StreakScreen";
@@ -941,6 +946,9 @@ function EquinaApp() {
   const [coachStyle, setCoachStyle] = useState(defaultCoachStyle);
   const [coachOnboarded, setCoachOnboarded] = useState(false);
   const [pendingCoachPrompt, setPendingCoachPrompt] = useState("");
+  // The horse a question is about, when it is not the one on Home: a past
+  // ride opened from the journal belongs to the horse that was ridden.
+  const [coachHorseId, setCoachHorseId] = useState("");
   const [academyProgress, setAcademyProgress] = useState(0);
   const [academyMode, setAcademyMode] = useState<AcademyMode>("home");
   // Empty means "the lesson the Academy recommends", whichever that is today.
@@ -1714,18 +1722,46 @@ function EquinaApp() {
   };
 
   // A prompt arrives already asked, the way the place it came from put it.
-  const openRalf = (prompt?: string) => {
+  // `about` names the horse the question concerns; without it Ralf opens on
+  // the horse on Home, and a horse left over from an earlier question is dropped.
+  const openRalf = (prompt?: string, about?: { horseId?: string }) => {
     if (!ralfAvailable) return;
     void Haptics.selectionAsync().catch(() => undefined);
     setLastRideRecapVisible(false);
     if (prompt) setPendingCoachPrompt(prompt);
+    setCoachHorseId(about?.horseId ?? "");
     setRalfOpen(true);
     refresh("");
   };
 
   const closeRalf = () => {
     setPendingCoachPrompt("");
+    setCoachHorseId("");
     setRalfOpen(false);
+  };
+
+  // A horse that was archived or is no longer shared cannot be Ralf's subject
+  // (the server refuses it), so the question is then asked without one.
+  const knownHorseId = (horseId?: string) => (horseId && horseNames[horseId] ? horseId : undefined);
+
+  // The ride on the recap, whether or not the journal holds it yet: the facts
+  // go in the question, so a slow save cannot make Ralf review the ride before.
+  const reviewLastRideWithRalf = () => {
+    if (!lastRide) {
+      openRalf("Review last ride");
+      return;
+    }
+    const horseId = knownHorseId(ridePlan?.horseId);
+    const horseName = horseId ? horseNames[horseId] : ridePlan?.horseName || primaryHorseName || undefined;
+    openRalf(rideReviewPrompt(rideReviewFactsFromSession(lastRide, horseName)), { horseId });
+  };
+
+  const reviewJournalRideWithRalf = (entry: RideEntry) => {
+    const horseId = knownHorseId(entry.horseId);
+    // The sheet is a modal over the whole app and Ralf renders under it.
+    setRideJournalOpen(false);
+    rideJournal.clearError();
+    openRalf(rideReviewPrompt(rideReviewFactsFromEntry(entry, horseId ? horseNames[horseId] : undefined)), { horseId });
   };
 
   const openAccountAt = (route: AccountRoute) => {
@@ -1780,7 +1816,7 @@ function EquinaApp() {
     setLastRideRecapVisible(false);
     if (!postRideLesson) {
       // No lesson to continue with yet, so the ride goes to Ralf instead.
-      openRalf("Review last ride");
+      reviewLastRideWithRalf();
       return;
     }
     setSelectedAcademyLessonId(postRideLesson.id);
@@ -2491,11 +2527,16 @@ function EquinaApp() {
   const focusedTask = ralfOpen || accountOpen || shopNestedTask || academyNestedTask;
   const hideGlobalHeader = focusedTask;
   const headerTitle = tabTitles[tab];
+  // A question about another horse's ride puts Ralf on that horse, in his
+  // header and in what the server reads, until he is closed.
+  const coachHorseName = coachHorseId ? horseNames[coachHorseId] : undefined;
   const coachContext: CoachConversationContext = {
-    // The horse on Home, so Ralf talks about the one the rider picked.
-    selectedHorseId: horseRecords.selectedHorseId || accountController.snapshot.primaryHorse?.id,
-    hasHorse: horseState.hasHorse,
-    horseName: horseState.name,
+    // Otherwise the horse on Home, so Ralf talks about the one the rider picked.
+    selectedHorseId: coachHorseName
+      ? coachHorseId
+      : horseRecords.selectedHorseId || accountController.snapshot.primaryHorse?.id,
+    hasHorse: coachHorseName ? true : horseState.hasHorse,
+    horseName: coachHorseName ?? horseState.name,
     focus: coachGoal,
     load: coachLoad,
     style: coachStyle
@@ -2604,6 +2645,7 @@ function EquinaApp() {
                 sharingEnabled={clubSharing}
                 onMoodChange={updateDailyMood}
                 onOpenAcademy={openPostRideLesson}
+                onAskRalf={reviewLastRideWithRalf}
                 onShare={() => clubSharing ? shareRide(true) : openCommunity()}
                 onHome={closeRideRecap}
               />
@@ -3045,6 +3087,7 @@ function EquinaApp() {
           deletingId={deletingRideId || undefined}
           error={rideJournalOpen ? rideJournal.error : undefined}
           onDelete={deleteJournalRide}
+          onAskRalf={ralfAvailable ? reviewJournalRideWithRalf : undefined}
           onDismiss={() => {
             setRideJournalOpen(false);
             rideJournal.clearError();
