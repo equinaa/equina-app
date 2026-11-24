@@ -129,7 +129,7 @@ npx eas-cli@latest env:set --name EXPO_PUBLIC_SUPABASE_URL --value "https://<pro
 npx eas-cli@latest env:set --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value "<publishable key>" --environment preview --environment production --visibility plaintext
 ```
 
-- **Profiles.** `development` is the dev client. `preview` installs from a link, for the team: an APK on Android, ad hoc on iOS. `production` goes to the stores, and EAS keeps and raises its build number, so no build edits `app.json`. All three use the Node pinned in `base`.
+- **Profiles.** `development` is the dev client. `preview` installs from a link, for the team: an APK on Android, ad hoc on iOS. `production` goes to the stores. EAS keeps the build number and raises it for every `preview` and `production` build, so no build edits `app.json` and the version line in Account names one build only. All three use the Node pinned in `base`.
 - **The guard.** `scripts/eas-build-guard.mjs` runs on EAS before `npm install` and fails the build when a backend variable is missing, sign-in is not by code, the demo is on, a RevenueCat key or a privacy link is present (see "Selling stays off"), or a switch is not what `eas.json` says. It prints names, never values. To check from your machine before spending a build:
 
   ```bash

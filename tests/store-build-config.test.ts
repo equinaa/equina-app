@@ -154,6 +154,9 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   assert.equal(preview?.android?.buildType, "apk", "An internal Android build has to be an APK to install from a link.");
   assert.equal(production?.distribution, "store");
   assert.equal(production?.autoIncrement, true, "Each store build gets the next build number.");
+  // The version line (src/ui/states/app-version.ts) is how a tester's screenshot
+  // names a build. Without this a preview build reuses the last number EAS gave.
+  assert.equal(preview?.autoIncrement, true, "Each internal build gets its own build number too.");
   assert.ok(easJson.submit?.production, "eas submit --profile production has a profile to start from.");
 }
 
