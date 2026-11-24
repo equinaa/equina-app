@@ -168,14 +168,14 @@ assert.equal(
 
 const now = new Date("2026-10-06T12:00:00Z");
 const grant = (values: Record<string, string>) => readGrantForm((name) => values[name] ?? "", now);
-assert.deepEqual(grant({ email: " rider@equina.app ", tier: "premium", until: "2026-12-31", note: "" }).fields, {
-  email: "rider@equina.app", tier: "premium", endsAt: "2026-12-31T23:59:59.999Z", note: null
+assert.deepEqual(grant({ email: " rider@example.com ", tier: "premium", until: "2026-12-31", note: "" }).fields, {
+  email: "rider@example.com", tier: "premium", endsAt: "2026-12-31T23:59:59.999Z", note: null
 }, "A plan given until a day lasts through that whole day.");
-assert.equal(grant({ email: "rider@equina.app", tier: "mid", until: "" }).fields?.endsAt, null, "No date is no end date.");
-assert.ok(grant({ email: "rider@equina.app", tier: "mid", until: "2026-10-05" }).errors.until, "An end date must be after today.");
-assert.ok(grant({ email: "rider@equina.app", tier: "mid", until: "2026-02-30" }).errors.until, "A date that does not exist is refused.");
+assert.equal(grant({ email: "rider@example.com", tier: "mid", until: "" }).fields?.endsAt, null, "No date is no end date.");
+assert.ok(grant({ email: "rider@example.com", tier: "mid", until: "2026-10-05" }).errors.until, "An end date must be after today.");
+assert.ok(grant({ email: "rider@example.com", tier: "mid", until: "2026-02-30" }).errors.until, "A date that does not exist is refused.");
 assert.ok(grant({ email: "not an email", tier: "mid" }).errors.email);
-assert.ok(grant({ email: "rider@equina.app", tier: "gold" }).errors.tier);
+assert.ok(grant({ email: "rider@example.com", tier: "gold" }).errors.tier);
 
 assert.deepEqual(heldPlanState({ status: "active", live: true }), { label: "Active", tone: "positive" });
 assert.deepEqual(heldPlanState({ status: "active", live: false }), { label: "Ended", tone: "" },

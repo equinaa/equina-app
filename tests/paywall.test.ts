@@ -216,7 +216,7 @@ assert.equal(storeAndPlanDisagree(null, plan()), false);
     userId: "0e7c6b0c-1111-4222-8333-444455556666",
     platform: "ios",
     apiKey: "appl_public",
-    privacyPolicyUrl: "https://equina.app/privacy",
+    privacyPolicyUrl: "https://example.com/privacy",
     capability: true,
     enforced: true,
     access: true
@@ -316,10 +316,10 @@ assert.equal(purchaseErrorCode(null), null);
 assert.deepEqual(legalLinks({}), { privacyPolicyUrl: null, termsUrl: appleStandardEula });
 assert.equal(appleStandardEula, "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/");
 assert.deepEqual(
-  legalLinks({ privacyPolicyUrl: " https://equina.app/privacy ", termsUrl: "https://equina.app/terms" }),
-  { privacyPolicyUrl: "https://equina.app/privacy", termsUrl: "https://equina.app/terms" }
+  legalLinks({ privacyPolicyUrl: " https://example.com/privacy ", termsUrl: "https://example.com/terms" }),
+  { privacyPolicyUrl: "https://example.com/privacy", termsUrl: "https://example.com/terms" }
 );
-assert.equal(legalLinks({ privacyPolicyUrl: "equina.app/privacy" }).privacyPolicyUrl, null, "Only a web address opens.");
+assert.equal(legalLinks({ privacyPolicyUrl: "example.com/privacy" }).privacyPolicyUrl, null, "Only a web address opens.");
 assert.equal(legalLinks({ termsUrl: "javascript:alert(1)" }).termsUrl, appleStandardEula);
 
 // Deleting the account stops no store's billing, and the rider is told so.
