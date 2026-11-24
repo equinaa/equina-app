@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -28,6 +27,7 @@ import type { MarketplaceReportReason } from "../../backend";
 import { ConversationComposer } from "../../ui/conversation/ConversationComposer";
 import { ConversationMessage } from "../../ui/conversation/ConversationMessage";
 import { ConversationState } from "../../ui/conversation/ConversationState";
+import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingContainer";
 import { warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
@@ -94,11 +94,7 @@ export function ShopConversationScreen({
   };
 
   return (
-    <KeyboardAvoidingView
-      testID="shop-conversation"
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <KeyboardAvoidingContainer testID="shop-conversation" style={styles.root}>
       <View style={styles.header}>
         <MotionPressable
           testID="shop-route-back"
@@ -297,7 +293,7 @@ export function ShopConversationScreen({
           />
         ) : null}
       </ConversationSheet>
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingContainer>
   );
 }
 

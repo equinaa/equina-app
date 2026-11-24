@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { LockKeyhole } from "lucide-react-native";
+import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingContainer";
 import { EquinaButton, EquinaField } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 
@@ -33,10 +34,7 @@ export function PasswordRecoveryScreen({
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={styles.root}
-    >
+    <KeyboardAvoidingContainer style={styles.root}>
       <View style={styles.content}>
         <View style={styles.mark}>
           <LockKeyhole size={22} color={equinaTheme.colors.brass} />
@@ -89,7 +87,7 @@ export function PasswordRecoveryScreen({
           <Text style={styles.cancelText}>Cancel and sign out</Text>
         </Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingContainer>
   );
 }
 

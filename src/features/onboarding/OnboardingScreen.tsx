@@ -4,7 +4,6 @@ import {
   Easing,
   Image,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -27,6 +26,7 @@ import {
   Mail,
   ShieldCheck
 } from "lucide-react-native";
+import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingContainer";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { actionHaptic, selectionHaptic } from "../../ui/motion/haptics";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
@@ -373,10 +373,9 @@ export function OnboardingScreen({
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAvoidingContainer
       testID="onboarding-screen"
       style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={0}
     >
       <View style={styles.chrome}>
@@ -691,7 +690,7 @@ export function OnboardingScreen({
         onDismiss={dismissAccountSheet}
       />
 
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingContainer>
   );
 }
 

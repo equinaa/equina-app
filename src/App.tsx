@@ -1,9 +1,10 @@
-import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
+import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
   Alert,
   Animated,
+  BackHandler,
   Easing,
   Image,
   KeyboardAvoidingView,
@@ -220,6 +221,7 @@ import { MotionPressable } from "./ui/motion/MotionPressable";
 import { EquinaIconButton, EquinaSegmentedTabs } from "./ui/primitives/EquinaPrimitives";
 import { useReducedMotion } from "./ui/motion/useReducedMotion";
 import { RootErrorBoundary } from "./ui/states/RootErrorBoundary";
+import { androidBackAction, carryOutBack } from "./ui/navigation/android-back";
 import { equinaTheme } from "./ui/theme/theme";
 import { floatingDockContentInset, floatingDockMetrics } from "./ui/layout/metrics";
 
@@ -2698,6 +2700,98 @@ function EquinaApp() {
     if (!ralfAvailable && ralfOpen) setRalfOpen(false);
   }, [ralfAvailable, ralfOpen]);
 
+  // Android's Back button and back gesture. With no listener, React Native
+  // hands every Back to Android, which puts Equina in the background: from
+  // Ralf, a lesson, the account or onboarding's second step, Back left the
+  // app instead of going back. What Back does on each screen is decided in
+  // android-back.ts, which also carries it out with the handlers handed over
+  // here, the ones the on-screen arrows already use. Sheets are Modals and
+  // take Back themselves.
+  const androidBack = useRef<() => boolean>(() => false);
+  // Account and Horses keep their pages to themselves. While one shows a page
+  // whose back arrow stays inside it, it hands that arrow's handler up here,
+  // and null otherwise, so Back can take the same step.
+  const accountBackStep = useRef<(() => void) | null>(null);
+  const horseBackStep = useRef<(() => void) | null>(null);
+  const reportAccountBackStep = useCallback((step: (() => void) | null) => {
+    accountBackStep.current = step;
+  }, []);
+  const reportHorseBackStep = useCallback((step: (() => void) | null) => {
+    horseBackStep.current = step;
+  }, []);
+  // Only Android builds the handler; iOS and the web keep the inert default.
+  if (Platform.OS === "android") {
+    androidBack.current = () =>
+      carryOutBack(
+        androidBackAction({
+          phase: equinaSession.phase,
+          recoveryRequired: equinaSession.recoveryRequired,
+          betaDoor,
+          accountCreated,
+          onboardingTransitioning,
+          entryRoute,
+          otpVisible,
+          onboardingStep,
+          modalSheetOpen:
+            rideSetupOpen ||
+            addActivityOpen ||
+            horseSwitcherOpen ||
+            horseCreatorOpen ||
+            streakOpen ||
+            trainingPlanOpen ||
+            Boolean(timeOffHorseId) ||
+            rideJournalOpen ||
+            (signUpPlanOffer.visible && purchases.available),
+          tab,
+          rideActive,
+          rideReady: Boolean(ridePlan && rideRun),
+          recapVisible: lastRideRecapVisible && Boolean(lastRide),
+          ralfOpen,
+          accountPage: accountBackStep.current !== null,
+          academyMode,
+          shopMode,
+          shopBuyerView,
+          shopSellerView,
+          stableFromAccount,
+          horsePage: horseBackStep.current !== null
+        }),
+        {
+          onboardingBack: goBackOnboarding,
+          closeRecap: closeRideRecap,
+          closeRalf,
+          accountRoot: () => accountBackStep.current?.(),
+          closeAccount,
+          academyHome: () => navigateAcademy("home"),
+          shopBuyer: setShopBuyerView,
+          shopSeller: setShopSellerView,
+          stableList: () => horseBackStep.current?.(),
+          backToAccount,
+          goHome: () => {
+            setStableFromAccount(false);
+            setTab("home");
+          }
+        }
+      );
+  }
+  // Registered once, with the latest state read through the ref: React
+  // Native asks its listeners last registered first, so one that registered
+  // again on every change would jump ahead of any a screen adds later. Only
+  // Android: react-native-web logs an error for this call, and iOS has no
+  // Back to hear.
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      try {
+        return androidBack.current();
+      } catch {
+        // An error thrown here is out of the error boundary's reach, and
+        // React Native would treat it as fatal. Back does what it always did.
+        return false;
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   const immersiveConversation =
     ralfOpen ||
     (tab === "gear" && (
@@ -3032,6 +3126,7 @@ function EquinaApp() {
                 nutritionAvailable={false}
                 onOpenRalf={ralfAvailable ? openRalf : undefined}
                 onBackToAccount={stableFromAccount ? backToAccount : undefined}
+                onBackStep={reportHorseBackStep}
                 onToggleNutritionMeal={toggleNutritionMeal}
                 onLogNutritionWater={logNutritionWater}
                 program={ridePersistence ? {
@@ -3156,6 +3251,7 @@ function EquinaApp() {
                 onCancelDeletion={accountController.cancelDeletion}
                 onSignOut={accountController.signOut}
                 onClose={closeAccount}
+                onBackStep={reportAccountBackStep}
               />
             )}
           </ScrollView>
@@ -5401,6 +5497,7 @@ function StableScreen({
   nutritionAvailable,
   onOpenRalf,
   onBackToAccount,
+  onBackStep,
   onToggleNutritionMeal,
   onLogNutritionWater,
   program
@@ -5424,6 +5521,11 @@ function StableScreen({
   onOpenRalf?: (prompt?: string) => void;
   /** Present when the rider came here from the account's "Horses" row. */
   onBackToAccount?: () => void;
+  /**
+   * For Android's Back (android-back.ts): gets what the "Horses" arrow does
+   * while a horse's page is drawn, and null while it is not.
+   */
+  onBackStep?: (step: (() => void) | null) => void;
   onToggleNutritionMeal: (mealId: NutritionMealId) => void;
   onLogNutritionWater: () => void;
   /** The rider's training week seen from each horse. Absent where rides are not saved. */
@@ -5708,6 +5810,17 @@ function StableScreen({
     </>
   );
 
+  // A horse's page goes back to the list with its "Horses" arrow, and with
+  // Android's Back while that page is the one drawn (the early returns below
+  // draw loading, no horse, and the list).
+  const backToHorseList = () => setStableMode("list");
+  const horsePageDrawn = connected && !(loading && !loaded) && resolvedHasHorse && stableMode === "profile";
+  useEffect(() => {
+    if (!onBackStep) return;
+    onBackStep(horsePageDrawn ? backToHorseList : null);
+    return () => onBackStep(null);
+  }, [horsePageDrawn, onBackStep]);
+
   // Every state the account's "Horses" row can land on offers the way back:
   // the list, an empty or failed list, loading, and the sample horse.
   const backToAccount = onBackToAccount ? (
@@ -5896,7 +6009,7 @@ function StableScreen({
             accessibilityRole="button"
             accessibilityLabel="Back to your horses"
             hitSlop={8}
-            onPress={() => setStableMode("list")}
+            onPress={backToHorseList}
             style={({ pressed }) => [styles.stableBack, pressed && styles.tabItemPressed]}
           >
             <ChevronLeft size={20} color={equinaTheme.text.secondary} />

@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -10,6 +8,7 @@ import {
   View
 } from "react-native";
 import { MailCheck } from "lucide-react-native";
+import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingContainer";
 import { EquinaBackButton, EquinaButton } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { EmailAuthMode } from "./social-auth";
@@ -75,10 +74,7 @@ export function AuthVerificationScreen({
   const waitingNote = purpose === "confirm" ? "This account has not confirmed its email yet. " : "";
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <KeyboardAvoidingContainer style={styles.root}>
       <View style={styles.top}>
         <EquinaBackButton testID="auth-otp-back" onPress={onBack} />
         <Text style={styles.brand}>Equina</Text>
@@ -156,7 +152,7 @@ export function AuthVerificationScreen({
         {!waitingForLink ? (
           <Text testID="auth-otp-no-code" style={styles.securityNote}>
             {purpose === "signin"
-              ? "No code after a few minutes? Go back and sign in with your password."
+              ? "No code after a few minutes? Tap the back arrow and sign in with your password."
               : `No code after a few minutes? Write to ${supportEmail}.`}
           </Text>
         ) : null}
@@ -208,7 +204,7 @@ export function AuthVerificationScreen({
           />
         </View>
       )}
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingContainer>
   );
 }
 

@@ -107,7 +107,8 @@ export function AccountScreen({
   onScheduleDeletion,
   onCancelDeletion,
   onSignOut,
-  onClose
+  onClose,
+  onBackStep
 }: {
   mode: AccountMode;
   /** Buying, selling or messaging is on, so its settings mean something. */
@@ -153,6 +154,12 @@ export function AccountScreen({
   onSignOut: () => Promise<void> | void;
   /** Account opens over a tab; this goes back to it. */
   onClose: () => void;
+  /**
+   * For Android's Back (android-back.ts): gets what the header's arrow does
+   * on a page Account was not opened at, which is to return to the list, and
+   * null elsewhere, where the arrow and Back close Account.
+   */
+  onBackStep?: (step: (() => void) | null) => void;
 }) {
   const [route, setRoute] = useState<AccountRoute>(initialRoute);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
@@ -167,6 +174,16 @@ export function AccountScreen({
     setRoute(next);
     setExportReady("");
   };
+
+  // Off the list, the header's arrow returns to the list, except on the page
+  // Account was opened at, where it closes Account. Android's Back does the
+  // same; the step to the list is the one only Account can take.
+  const backToList = route !== "root" && route !== initialRoute;
+  useEffect(() => {
+    if (!onBackStep) return;
+    onBackStep(backToList ? () => navigate("root") : null);
+    return () => onBackStep(null);
+  }, [backToList, onBackStep]);
 
   // Deleting the account cancels nothing in the App Store or Google Play, so
   // a rider whose plan still renews there is told before they delete.
@@ -200,7 +217,7 @@ export function AccountScreen({
       {route !== "root" ? (
         <AccountRouteHeader
           title={routeTitle(route)}
-          onBack={() => (route === initialRoute ? onClose() : navigate("root"))}
+          onBack={() => (backToList ? navigate("root") : onClose())}
         />
       ) : (
         <View style={styles.rootHeader}>
