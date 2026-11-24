@@ -170,7 +170,7 @@ import { useTrainingPlan } from "./features/ride/useTrainingPlan";
 import { TrainingProgram } from "./features/records/TrainingProgram";
 import { HorseTimeOffSheet } from "./features/records/HorseTimeOffSheet";
 import type { HorseTimeOff, TrainingPlanDay } from "./backend";
-import { mergeHorseWeek, ofHorse, type StreakSummary } from "./domain/training-streak";
+import { latestRideOf, mergeHorseWeek, ofHorse, type StreakSummary } from "./domain/training-streak";
 import { ownHorseIdsNow, reminderHorsesFor, switchableHorses, trainingScopeFor } from "./features/records/horse-selection";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
@@ -195,7 +195,7 @@ import {
   rideTrainingTypeById,
   type RidePlan
 } from "./features/ride/ride-plan";
-import { useRideJournal } from "./features/ride/useRideJournal";
+import { rideSessionFrom, useRideJournal } from "./features/ride/useRideJournal";
 import { createSeededEquinaApi } from "./seed/seed-data";
 import { getFitScreening, type HorseFitContext } from "./product/product-truth";
 import { MotionPressable } from "./ui/motion/MotionPressable";
@@ -244,8 +244,12 @@ type HorseState = {
   sessionCount: number;
   careLogged: boolean;
   rideActive: boolean;
+  /** The rider's latest ride, on any horse. A card about one horse shows its own (latestRideOf). */
   lastRide: RideSession | null;
 };
+// The ride finished this session and the horse it was on (none for a ride on
+// no horse): until the journal holds it, it shows on that horse alone.
+type FinishedRide = RideSession & { horseId?: string };
 type AcademyState = {
   progress: number;
   mode: AcademyMode;
@@ -943,7 +947,7 @@ function EquinaApp() {
   const dailyMoodRef = useRef<MoodOption>("Focused");
   // Kept as the fallback for demo mode and for accounts where ride_logging is
   // still off. When the capability is on, the journal below is the source.
-  const [localLastRide, setLocalLastRide] = useState<RideSession | null>(null);
+  const [localLastRide, setLocalLastRide] = useState<FinishedRide | null>(null);
   const [focusStarted, setFocusStarted] = useState(false);
   const [focusProgress, setFocusProgress] = useState(64);
   const [coachDiscipline, setCoachDiscipline] = useState<CoachDiscipline>(defaultCoachDiscipline);
@@ -1204,6 +1208,14 @@ function EquinaApp() {
   const lastRide = localLastRide && (!journalRide || Date.parse(localLastRide.completedAt) > Date.parse(journalRide.completedAt))
     ? localLastRide
     : journalRide ?? localLastRide;
+  // That is the rider's latest ride, on any horse. A card about one horse
+  // shows that horse's own latest ride, by the same rule, or none: Home's Up
+  // next for Home's horse (the summary's), and the Latest ride on the
+  // profile of the horse the Stable has open. Both used to show the rider's
+  // latest ride, another horse's included.
+  const journalEntries = ridePersistence ? rideJournal.entries : [];
+  const homeHorseLastRide = latestRideOf(journalEntries, localLastRide, summaryHorse, rideSessionFrom);
+  const profileLastRide = latestRideOf(journalEntries, localLastRide, horseRecords.selectedHorse?.id, rideSessionFrom);
   // The app states this number back to the rider as fact ("N rides are now in
   // your journal"), so it has to come from the journal, never from a seed.
   const sessionCount = ridePersistence ? rideJournal.total : localSessionCount;
@@ -1658,7 +1670,7 @@ function EquinaApp() {
 
   const finishRide = (session: RideCompletion) => {
     setRideActive(false);
-    setLocalLastRide({ ...session, mood: dailyMood });
+    setLocalLastRide({ ...session, mood: dailyMood, ...(ridePlan?.horseId ? { horseId: ridePlan.horseId } : {}) });
     setCareLogged(false);
     setSharedRide(false);
     setLocalSessionCount((count) => count + 1);
@@ -2722,6 +2734,7 @@ function EquinaApp() {
             {!ralfOpen && tab === "home" && (
               <HomeScreen
                 horse={horseState}
+                horseLastRide={homeHorseLastRide}
                 rideEntries={ridePersistence ? rideJournal.entries : []}
                 horseRideEntries={homeHorseRides}
                 horseRideName={summaryHorseName}
@@ -2838,7 +2851,7 @@ function EquinaApp() {
                 horseAge={onboardingHorseAge}
                 horseHeight={onboardingHorseHeight}
                 nutrition={nutritionState}
-                lastRide={lastRide}
+                lastRide={profileLastRide}
                 // No horse has a real feeding plan yet; the sample plan stays
                 // out of the tab rather than reading as advice.
                 nutritionAvailable={false}
@@ -3562,6 +3575,7 @@ const shownHeroPhotos = new Set<string>();
 
 function HomeScreen({
   horse,
+  horseLastRide,
   rideEntries,
   horseRideEntries,
   horseRideName,
@@ -3594,7 +3608,10 @@ function HomeScreen({
   onOpenProfile,
   onShareRide
 }: {
-  horse: HorseState;
+  /** Without the rider's latest ride: Home speaks of its horse's own (horseLastRide). */
+  horse: Omit<HorseState, "lastRide">;
+  /** Home's horse's latest ride, for Up next; for a rider with no horse, their latest ride. */
+  horseLastRide: RideSession | null;
   rideEntries: readonly RideEntry[];
   /** Home's horse's rides, for the summary; every ride for a rider with no horse. */
   horseRideEntries: readonly RideEntry[];
@@ -3748,13 +3765,13 @@ function HomeScreen({
   const careLine = !horse.hasHorse
     ? horse.careLogged
       ? "Your ride note is saved. Nothing else is needed now."
-      : horse.lastRide
-        ? `${rideDurationLabel(horse.lastRide.elapsedSeconds)} ${horse.lastRide.focus.toLowerCase()} saved. Add one note about rhythm or confidence.`
+      : horseLastRide
+        ? `${rideDurationLabel(horseLastRide.elapsedSeconds)} ${horseLastRide.focus.toLowerCase()} saved. Add one note about rhythm or confidence.`
         : "Save one useful feeling after the ride."
     : horse.careLogged
       ? `${horse.name} is up to date. Nothing else is needed now.`
-    : horse.lastRide
-      ? `${rideDurationLabel(horse.lastRide.elapsedSeconds)} ${horse.lastRide.focus.toLowerCase()} saved. Check legs, water, and saddle marks.`
+    : horseLastRide
+      ? `${rideDurationLabel(horseLastRide.elapsedSeconds)} ${horseLastRide.focus.toLowerCase()} saved. Check legs, water, and saddle marks.`
     : carePriority === "Recovery"
       ? "Cool down longer and check legs."
       : carePriority === "Vet records"
@@ -3784,10 +3801,10 @@ function HomeScreen({
     : horse.careLogged
       ? horse.hasHorse ? `${horse.name} is up to date` : "Ride note saved"
       : horse.hasHorse ? "Log post-ride care" : "Add a ride note";
-  const nextBody = recapVisible ? `${horse.lastRide ? rideDurationLabel(horse.lastRide.elapsedSeconds) : "Ride"} saved · choose one useful next step` : careLine;
+  const nextBody = recapVisible ? `${horseLastRide ? rideDurationLabel(horseLastRide.elapsedSeconds) : "Ride"} saved · choose one useful next step` : careLine;
   const shareOpportunity = recapVisible && !sharedRide;
-  const latestRideLabel = horse.lastRide
-    ? `${rideDurationLabel(horse.lastRide.elapsedSeconds)} · ${horse.lastRide.focus}`
+  const latestRideLabel = horseLastRide
+    ? `${rideDurationLabel(horseLastRide.elapsedSeconds)} · ${horseLastRide.focus}`
     : horse.sessionCount > 0
       ? "Recent sessions saved"
       : "No ride saved yet";
@@ -5219,6 +5236,7 @@ function StableScreen({
   horseAge: string;
   horseHeight: string;
   nutrition: NutritionState;
+  /** The latest ride on the horse whose profile is open; none when it has no ride. */
   lastRide: RideSession | null;
   /** Only a horse with a real feeding plan gets a Nutrition view. */
   nutritionAvailable: boolean;

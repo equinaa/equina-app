@@ -1,4 +1,4 @@
-import type { HorseTimeOff, RideEnd, TrainingPlan, TrainingPlanDay } from "../backend/contracts";
+import type { HorseTimeOff, RideEnd, RideEntry, TrainingPlan, TrainingPlanDay } from "../backend/contracts";
 import { localDayOf } from "./local-day";
 
 /**
@@ -94,6 +94,30 @@ export const planForHorse = (versions: readonly PlanVersion[], horseId: string |
 /** When each ride on one horse ended; every ride for a rider with no horse. */
 export const ridesForHorse = (rides: readonly RideEnd[], horseId: string | undefined) =>
   ofHorse(rides, horseId).map((ride) => ride.completedAt);
+
+/**
+ * One horse's latest ride, for its profile and Home's Up next: the newer of
+ * its newest ride in the journal (`entries`, newest first, as the journal
+ * keeps them) and the ride just finished on it, which the journal may not
+ * hold yet. By the same rule as the rest, a ride with no horse is no
+ * horse's, and a rider with no horse reads every ride, as the rider's last
+ * ride always did. `rideFrom` is the journal's own conversion of a row into
+ * the ride the app shows, passed in: the hook it lives in loads only in the
+ * app, and this is tested without one.
+ */
+export const latestRideOf = <Ride extends { completedAt: string }>(
+  entries: readonly RideEntry[],
+  finished: (Ride & { horseId?: string }) | null,
+  horseId: string | undefined,
+  rideFrom: (entry: RideEntry) => Ride
+): Ride | null => {
+  const entry = entries.find((candidate) => belongsTo(candidate, horseId));
+  const saved = entry ? rideFrom(entry) : null;
+  const local = finished && belongsTo(finished, horseId) ? finished : null;
+  // As instants: the database writes "+00:00" where the app wrote "Z". Once
+  // the journal holds the ride just finished, its saved row is the one shown.
+  return local && (!saved || Date.parse(local.completedAt) > Date.parse(saved.completedAt)) ? local : saved;
+};
 
 /**
  * The plan to save after editing one horse's week: that horse's days from

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import type { RideEnd } from "../src/backend/contracts";
+import type { RideEnd, RideEntry } from "../src/backend/contracts";
 import {
   addDays,
   dueOn,
   isoWeekday,
+  latestRideOf,
   mergeHorseWeek,
   planForHorse,
   planOn,
@@ -312,6 +313,57 @@ const streakOf = (versions: PlanVersion[], rides: RideEnd[], horseId: string | u
     trainingStreak([withHack], [...bothRides, ...loose].map((entry) => entry.completedAt), TODAY),
     "A rider with no horse gets exactly the streak as it always was."
   );
+}
+
+// A horse's latest ride, as its profile and Home's card after a ride show it.
+// Daimon was ridden on 3 November, 52 minutes of jumping logged by hand; Test,
+// the rider's other horse, never -- and Test's profile showed Daimon's ride.
+// The journal is newest first; `card` stands in for its conversion.
+{
+  const row = (id: string, completedAt: string, horseId?: string): RideEntry => ({
+    id,
+    riderId: "rider-a",
+    ...(horseId ? { horseId } : {}),
+    discipline: "jumping",
+    focus: "Jumping",
+    startedAt: completedAt,
+    completedAt,
+    elapsedSeconds: 3120,
+    completedPhases: 4,
+    totalPhases: 4,
+    createdAt: completedAt,
+    updatedAt: completedAt
+  });
+  const card = (entry: RideEntry) => ({ id: entry.id, completedAt: entry.completedAt });
+  const journal = [
+    row("no-horse", "2026-11-04T07:30:00+00:00"),
+    row("daimon-3-nov", "2026-11-03T16:00:00+00:00", "daimon"),
+    row("daimon-1-nov", "2026-11-01T16:00:00+00:00", "daimon")
+  ];
+  assert.equal(latestRideOf(journal, null, "test", card), null, "Test was never ridden: its profile shows no ride, not Daimon's.");
+  assert.deepEqual(
+    latestRideOf(journal, null, "daimon", card),
+    { id: "daimon-3-nov", completedAt: "2026-11-03T16:00:00+00:00" },
+    "Daimon's newest, through the journal's conversion. The newer ride saved with no horse is no horse's."
+  );
+  assert.equal(latestRideOf(journal, null, undefined, card)?.id, "no-horse", "A rider with no horse: the latest of every ride, as before.");
+  assert.equal(latestRideOf([], null, "daimon", card), null);
+
+  // Test ridden just now: on Test at once, before the journal holds the ride.
+  const finished = { id: "ride-1", completedAt: "2026-11-05T15:00:00.000Z", horseId: "test" };
+  assert.equal(latestRideOf(journal, finished, "test", card), finished, "On Test the moment it ends, while the save is on its way.");
+  assert.equal(latestRideOf(journal, finished, "daimon", card)?.id, "daimon-3-nov", "Never on Daimon.");
+  const saved = [row("ride-1-saved", "2026-11-05T15:00:00+00:00", "test"), ...journal];
+  assert.equal(latestRideOf(saved, finished, "test", card)?.id, "ride-1-saved", "Once saved, the same instant written \"+00:00\": the journal's row.");
+  const loggedLater = [row("test-evening", "2026-11-05T19:00:00+00:00", "test"), ...journal];
+  assert.equal(latestRideOf(loggedLater, finished, "test", card)?.id, "test-evening", "A newer ride logged on Test takes its place.");
+  const daimonLater = [row("daimon-evening", "2026-11-05T19:00:00+00:00", "daimon"), ...journal];
+  assert.equal(latestRideOf(daimonLater, finished, "test", card), finished, "A newer ride on Daimon does not hide Test's.");
+
+  // A ride finished on no horse is no horse's; a rider with no horse sees it.
+  const loose = { id: "ride-2", completedAt: "2026-11-05T15:00:00.000Z" };
+  assert.equal(latestRideOf(journal, loose, "daimon", card)?.id, "daimon-3-nov");
+  assert.equal(latestRideOf(journal, loose, undefined, card), loose);
 }
 
 // A week of rest days. A rider with no horse who turned every day to rest
