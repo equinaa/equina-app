@@ -14,6 +14,7 @@ import type {
 import { EdgeClient } from "./edge-client";
 import { backendError, requireData } from "./errors";
 import { signedUrlsFor } from "./signed-urls";
+import { withAvatarUrl } from "./profile-photo";
 import { UploadRepository } from "./upload-repository";
 
 type Row = Record<string, unknown>;
@@ -198,10 +199,11 @@ export class AccountRepository {
   }
 
   // Other accounts can read only a rider's name and photo (202610050002), so
-  // the rider's own full profile comes from my_profile(), not the table.
+  // the rider's own full profile comes from my_profile(), not the table. Its
+  // photo is signed as snapshot() signs it (profile-photo.ts).
   private async ownProfile(failure: string): Promise<ProfileRecord> {
     const { data, error } = await this.client.rpc("my_profile").single();
-    return mapProfile(requireData(data as Row | null, error, failure));
+    return await withAvatarUrl(this.client, mapProfile(requireData(data as Row | null, error, failure)));
   }
 
   async updatePreferences(
