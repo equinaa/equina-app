@@ -7,6 +7,7 @@ import {
   createChunkedSessionStorage,
   type AsyncStringStore
 } from "../src/backend/chunked-session-storage";
+import { cleanablePhotoTypes, cleanedUploadKinds } from "../supabase/functions/_shared/image-metadata";
 
 const root = process.cwd();
 const migrationsDir = join(root, "supabase", "migrations");
@@ -243,26 +244,32 @@ assert.doesNotMatch(coachEdgeSource, /console\.(log|error)\([^)]*(message|email|
 // its own status and code, which the app turns into the plans rather than an
 // error.
 assert.match(coachEdgeSource, /PT402[\s\S]{0,200}402[\s\S]{0,200}coach_credits_exhausted/);
-// Where a step of coach-chat sits. The step is named by a statement the
-// function holds exactly once, so comparing two positions compares the order
-// the handler runs them in. A looser anchor proves nothing: `role: "user"`
-// also matches the MessageRow type at the top of the file.
-const coachStep = (statement: string) => {
-  const at = coachEdgeSource.indexOf(statement);
-  assert.ok(at > 0 && at === coachEdgeSource.lastIndexOf(statement), `coach-chat must hold "${statement}" exactly once.`);
-  return at;
+// Reading the order of an edge function's steps from its source.
+//   step: where a step sits. The step is named by a statement the function
+//     holds exactly once, so comparing two positions compares the order the
+//     handler runs them in. A looser anchor proves nothing: `role: "user"`
+//     also matches the MessageRow type at the top of coach-chat, and
+//     `inspectUploadForMalware` the import at the top of complete-upload.
+//   block: the text of a block, from the statement that opens it to the brace
+//     that closes it.
+const stepsOf = (functionName: string, source: string) => {
+  const step = (statement: string) => {
+    const at = source.indexOf(statement);
+    assert.ok(at > 0 && at === source.lastIndexOf(statement), `${functionName} must hold "${statement}" exactly once.`);
+    return at;
+  };
+  const block = (opener: string) => {
+    const start = step(opener);
+    let depth = 0;
+    for (let at = start + opener.lastIndexOf("{"); at < source.length; at += 1) {
+      if (source[at] === "{") depth += 1;
+      else if (source[at] === "}" && --depth === 0) return source.slice(start, at + 1);
+    }
+    throw new Error(`"${opener}" is never closed.`);
+  };
+  return { step, block };
 };
-// The text of a block of coach-chat, from the statement that opens it to the
-// brace that closes it.
-const coachBlock = (opener: string) => {
-  const start = coachStep(opener);
-  let depth = 0;
-  for (let at = start + opener.lastIndexOf("{"); at < coachEdgeSource.length; at += 1) {
-    if (coachEdgeSource[at] === "{") depth += 1;
-    else if (coachEdgeSource[at] === "}" && --depth === 0) return coachEdgeSource.slice(start, at + 1);
-  }
-  throw new Error(`"${opener}" is never closed.`);
-};
+const { step: coachStep, block: coachBlock } = stepsOf("coach-chat", coachEdgeSource);
 const coachRequestCounted = coachStep('admin.rpc("record_coach_request"');
 const coachRiderMessageSaved = coachStep("body: input.message,");
 const coachPreferencesRead = coachStep('admin.from("user_preferences")');
@@ -374,15 +381,83 @@ assert.match(exportCleanupSource, /cleanup_lease_token/);
 
 const completeUploadSource = readFileSync(join(root, "supabase", "functions", "complete-upload", "index.ts"), "utf8");
 const mediaSafetySource = readFileSync(join(root, "supabase", "functions", "_shared", "media-safety.ts"), "utf8");
-assert.match(completeUploadSource, /inspectUploadForMalware/);
-assert.ok(
-  completeUploadSource.indexOf("inspectUploadForMalware") <
-    completeUploadSource.indexOf('ticket.kind === "avatar"'),
-  "Malware inspection must run before an active media reference is created."
-);
+const { step: uploadStep, block: uploadBlock } = stepsOf("complete-upload", completeUploadSource);
+// Registration is one chain of branches, and it starts with the avatar's.
+const uploadInspected = uploadStep("await inspectUploadForMalware({");
+const uploadRegistered = uploadStep('if (ticket.kind === "avatar") {');
+assert.ok(uploadInspected < uploadRegistered, "Malware inspection must run before an active media reference is created.");
 assert.match(mediaSafetySource, /MALWARE_SCAN_REQUIRED/);
 assert.match(mediaSafetySource, /media_scan_unavailable/);
 assert.doesNotMatch(mediaSafetySource, /console\.(log|error)/);
+
+// A picture other riders can open is stored without where, when or on what it
+// was taken (docs/EQUINA_MEDIA_PROCESSING_BOUNDARY.md). What the cleaner takes
+// out is in image-metadata.test.ts; here, that complete-upload runs it on every
+// such upload before a row can point at the file, and never keeps a picture it
+// could not clean.
+assert.deepEqual([...cleanedUploadKinds], ["avatar", "club_post"]);
+{
+  const cleaningStart = uploadStep("if (cleanedUploadKinds.includes(ticket.kind)) {");
+  const cleaning = uploadBlock("if (cleanedUploadKinds.includes(ticket.kind)) {");
+  assert.ok(
+    uploadInspected < cleaningStart && cleaningStart + cleaning.length < uploadRegistered,
+    "A picture is cleaned after it is inspected and before anything is registered."
+  );
+  // A type the cleaner cannot handle is refused, not let through.
+  assert.match(
+    cleaning,
+    /if \(!cleanablePhotoTypes\.includes\(ticket\.mime_type\)\) \{\s*return await rejectRegistration\(\s*new HttpError\(415, "[^"]+", "unsupported_file_type"\),\s*\);\s*\}/
+  );
+  // The cleaner reads the stored upload by its declared type, and a file it
+  // cannot read is refused.
+  assert.match(
+    cleaning,
+    /cleaned = stripPhotoMetadata\(ticket\.mime_type, new Uint8Array\(await uploadedPhoto\.arrayBuffer\(\)\)\);\s*\} catch \{\s*return await rejectRegistration\(new HttpError\(422, "[^"]+", "invalid_photo"\)\);\s*\}/
+  );
+  // The cleaned file is written over the upload, at the same path.
+  assert.match(
+    cleaning,
+    /if \(cleaned\.changed\) \{\s*const \{ error: replaceError \} = await admin\.storage\.from\(ticket\.bucket_id\)\s*\.upload\(ticket\.object_path, cleaned\.bytes, \{ contentType: ticket\.mime_type, upsert: true \}\);\s*if \(replaceError\) return await rejectRegistration\(replaceError\);/
+  );
+  // The ticket then names the size of the file as it is stored. A second call
+  // for the same ticket would otherwise take the smaller, cleaned file for a
+  // mismatch and remove the picture a profile already points at.
+  assert.match(
+    cleaning,
+    /\.update\(\{ byte_size: cleaned\.bytes\.byteLength \}\)\.eq\("id", ticket\.id\);\s*if \(sizeError\) return await rejectRegistration\(sizeError\);/
+  );
+  assert.match(cleaning, /storedSize = cleaned\.bytes\.byteLength;\s*\}$/);
+  assert.match(uploadBlock('} else if (ticket.kind === "club_post") {'), /byte_size: storedSize,/);
+  // Whatever goes wrong in this step ends in rejectRegistration, which removes
+  // the upload and cancels the ticket: there is no way out of it that leaves
+  // the original in storage with a row pointing at it.
+  assert.doesNotMatch(cleaning, /\bthrow\b|return json\(/);
+  assert.equal(cleaning.split("return await rejectRegistration(").length - 1, 5);
+  const rejection = uploadBlock("const rejectRegistration = async (registrationError: unknown): Promise<never> => {");
+  assert.match(
+    rejection,
+    /queueStorageCleanup\(admin, ticket\.bucket_id, \[ticket\.object_path\]\);[\s\S]*update\(\{ status: "canceled" \}\)[\s\S]*throw registrationError;/
+  );
+  // One way to clean, chosen by type: nothing calls a single format's cleaner
+  // and so skips the check on the type.
+  assert.doesNotMatch(completeUploadSource, /stripJpegMetadata|stripPngMetadata/);
+
+  // create-upload-ticket only issues a ticket for a type complete-upload can
+  // clean, so a rider with a HEIC photo is told before uploading it.
+  const ticketSource = readFileSync(join(root, "supabase", "functions", "create-upload-ticket", "index.ts"), "utf8");
+  for (const kind of cleanedUploadKinds) {
+    const rule = new RegExp(`\\n  ${kind}: \\{ bucket: "[a-z-]+", max: [0-9* ]+, mime: (cleanablePhotoTypes|\\[[^\\]]*\\]) \\},`).exec(ticketSource);
+    assert.ok(rule, `create-upload-ticket must state the types it takes for ${kind}.`);
+    const accepted = rule[1] === "cleanablePhotoTypes"
+      ? [...cleanablePhotoTypes]
+      : [...(rule[1] as string).matchAll(/"([^"]+)"/g)].map((match) => match[1] as string);
+    assert.ok(
+      accepted.length > 0 && accepted.every((type) => cleanablePhotoTypes.includes(type)),
+      `The ticket rule for ${kind} must only list types complete-upload can clean.`
+    );
+  }
+  assert.match(ticketSource, /\n  avatar: \{ bucket: "avatars", max: 10 \* 1024 \* 1024, mime: cleanablePhotoTypes \},/);
+}
 
 const oldUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const oldKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;

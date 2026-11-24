@@ -1,5 +1,10 @@
 import { HttpError, handleOptions, json, readJson, requestIdFor, requireMethod, respondToError } from "../_shared/http.ts";
-import { stripJpegMetadata } from "../_shared/image-metadata.ts";
+import {
+  cleanablePhotoTypes,
+  cleanedUploadKinds,
+  stripPhotoMetadata,
+  type CleanedPhoto,
+} from "../_shared/image-metadata.ts";
 import { inspectUploadForMalware } from "../_shared/media-safety.ts";
 import { queueStorageCleanup } from "../_shared/storage-cleanup.ts";
 import { createAdminClient, requireUser } from "../_shared/supabase.ts";
@@ -150,6 +155,40 @@ Deno.serve(async (request) => {
       await rejectRegistration(scanError);
     }
 
+    // A picture other riders can open is stored without where, when or on
+    // what it was taken (docs/EQUINA_MEDIA_PROCESSING_BOUNDARY.md). The
+    // cleaned file replaces the upload before any row points at it, so nobody
+    // can be given a link to the original. A picture that cannot be cleaned
+    // is refused and removed: it is never kept as it came.
+    let storedSize: number = ticket.byte_size;
+    if (cleanedUploadKinds.includes(ticket.kind)) {
+      if (!cleanablePhotoTypes.includes(ticket.mime_type)) {
+        return await rejectRegistration(
+          new HttpError(415, "This photo format is not supported. Use a JPEG or PNG.", "unsupported_file_type"),
+        );
+      }
+      const { data: uploadedPhoto, error: photoError } = await admin.storage.from(ticket.bucket_id).download(ticket.object_path);
+      if (photoError || !uploadedPhoto) return await rejectRegistration(photoError ?? new Error("Uploaded photo could not be read."));
+      let cleaned: CleanedPhoto;
+      try {
+        cleaned = stripPhotoMetadata(ticket.mime_type, new Uint8Array(await uploadedPhoto.arrayBuffer()));
+      } catch {
+        return await rejectRegistration(new HttpError(422, "The photo could not be read.", "invalid_photo"));
+      }
+      if (cleaned.changed) {
+        const { error: replaceError } = await admin.storage.from(ticket.bucket_id)
+          .upload(ticket.object_path, cleaned.bytes, { contentType: ticket.mime_type, upsert: true });
+        if (replaceError) return await rejectRegistration(replaceError);
+        // The ticket names the file as it is now stored. Asked again for the
+        // same ticket, this function finds the size it expects instead of
+        // taking its own cleaned file for a mismatch and removing it.
+        const { error: sizeError } = await admin.from("upload_tickets")
+          .update({ byte_size: cleaned.bytes.byteLength }).eq("id", ticket.id);
+        if (sizeError) return await rejectRegistration(sizeError);
+      }
+      storedSize = cleaned.bytes.byteLength;
+    }
+
     if (ticket.kind === "avatar") {
       const { data: profile } = await admin.from("profiles").select("avatar_path").eq("id", user.id).single();
       const { error: updateError } = await admin.from("profiles").update({ avatar_path: ticket.object_path }).eq("id", user.id);
@@ -167,26 +206,9 @@ Deno.serve(async (request) => {
       });
       if (insertError) await rejectRegistration(insertError);
     } else if (ticket.kind === "club_post") {
-      // A Club photo reaches readers without where, when or on what it was
-      // taken (docs/EQUINA_MEDIA_PROCESSING_BOUNDARY.md). The cleaned file
-      // replaces the upload before the media row exists, so no reader can be
-      // given a link to the original.
-      const { data: uploadedPhoto, error: photoError } = await admin.storage.from(ticket.bucket_id).download(ticket.object_path);
-      if (photoError || !uploadedPhoto) return await rejectRegistration(photoError ?? new Error("Uploaded photo could not be read."));
-      let cleaned: Uint8Array;
-      try {
-        cleaned = stripJpegMetadata(new Uint8Array(await uploadedPhoto.arrayBuffer())).bytes;
-      } catch {
-        return await rejectRegistration(new HttpError(422, "The photo could not be read.", "invalid_photo"));
-      }
-      if (cleaned.byteLength !== ticket.byte_size) {
-        const { error: replaceError } = await admin.storage.from(ticket.bucket_id)
-          .upload(ticket.object_path, cleaned, { contentType: "image/jpeg", upsert: true });
-        if (replaceError) return await rejectRegistration(replaceError);
-      }
       const { error: insertError } = await admin.from("club_post_media").insert({
         post_id: ticket.entity_id, uploaded_by: user.id, object_path: ticket.object_path,
-        media_type: "image", mime_type: "image/jpeg", byte_size: cleaned.byteLength, position: input.position ?? 0,
+        media_type: "image", mime_type: ticket.mime_type, byte_size: storedSize, position: input.position ?? 0,
       });
       if (insertError) await rejectRegistration(insertError);
     } else if (ticket.kind === "listing_photo") {

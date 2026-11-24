@@ -23,6 +23,13 @@ export type CleanedPhoto = { bytes: Uint8Array; removed: string[]; changed: bool
 /** The types this file can clean. */
 export const cleanablePhotoTypes: readonly string[] = ["image/jpeg", "image/png"];
 
+/**
+ * The uploads that are cleaned: pictures someone other than the rider who sent
+ * them can open. A profile photo is shown to every rider let into the app, and
+ * a Club photo to the Club's readers.
+ */
+export const cleanedUploadKinds: readonly string[] = ["avatar", "club_post"];
+
 const ascii = (data: Uint8Array, length: number) => String.fromCharCode(...data.subarray(0, length));
 
 const concat = (parts: Uint8Array[]) => {

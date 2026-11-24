@@ -50,8 +50,35 @@ clean file. `create-upload-ticket` accepts only `image/jpeg` for a Club post, up
 15 MB, and `complete-upload` runs the cleaner and writes the cleaned file over the
 upload before the media row exists.
 
-Other uploads (listing photos, record files, avatars) still go through the full
-processor below before they can be public.
+**Profile photos** are shown to every rider let into the app, beside their posts
+and on their profile, and they arrive as the picker hands them over: cropped on a
+phone (on Android the crop copies the original's EXIF, location included, onto the
+new file) and the original file on the web. `complete-upload` runs the cleaner on
+them as well, and `create-upload-ticket` issues a profile photo ticket for JPEG and
+PNG only.
+
+Which uploads are cleaned is one list, `cleanedUploadKinds`, decided by who can
+open the file:
+
+| Upload | Who can open it | Stored |
+| --- | --- | --- |
+| Profile photo (`avatar`) | every rider let into the app, and staff | cleaned |
+| Club photo (`club_post`) | the Club's readers | cleaned |
+| Horse portrait (`horse_photo`) | its owner, the riders the owner shares the horse with, and staff | as sent |
+| Listing photo (`listing_photo`) | anyone, once the listing is visible | as sent |
+| Record file (`horse_record`) | the horse's owner, the riders it is shared with, and staff | as sent, with its SHA-256 |
+| Dispute evidence (`dispute_evidence`) | the buyer, the seller and staff | as sent, with its SHA-256 |
+
+**A picture that cannot be cleaned is not stored.** A type the cleaner does not
+handle is refused with `unsupported_file_type`, and a file that is not a well-formed
+JPEG or PNG with `invalid_photo`. Either way the upload is removed from storage, the
+ticket is canceled and nothing is registered, so the rider keeps the photo they had.
+The cleaned file replaces the upload at the same path before any row points at it,
+and the ticket then names the cleaned file's size, so completing the same ticket
+twice finds the file it expects.
+
+Uploads stored as sent still go through the full processor below before they can
+be public.
 
 Required processor contract:
 
