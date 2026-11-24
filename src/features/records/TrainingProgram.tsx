@@ -22,6 +22,7 @@ const shortTraining: Record<string, string> = {
   hack: "Hack",
   hunting: "Hunt",
   lunging: "Lunge",
+  // Retired from the pickers; a plan day saved with it still fits its cell.
   groundwork: "Ground"
 };
 const shortLabel = (trainingType: string) =>
@@ -178,7 +179,7 @@ export function TrainingProgram({
         <Text style={styles.subLabel}>Time off</Text>
       </View>
       {upcoming.length === 0 ? (
-        <Text style={styles.empty}>Rest, a break, stall rest, an injury or vet treatment. Planned rides those days are not due.</Text>
+        <Text style={styles.empty}>For rest, injury or vet care. Your streak stays safe.</Text>
       ) : (
         <View style={styles.list}>
           {upcoming.map((period) => {

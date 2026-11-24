@@ -11,7 +11,8 @@ import {
   describeDue,
   isCareType,
   needsAttention,
-  nextDueOn
+  nextDueOn,
+  recordProviderLine
 } from "../src/domain/care-schedule";
 
 const TODAY = "2026-09-27";
@@ -29,7 +30,7 @@ const record = (patch: Partial<HorseTimelineRecord> = {}): HorseTimelineRecord =
   createdBy: "rider-a",
   recordType: "farrier",
   status: "current",
-  title: "Shoeing",
+  title: "Farrier",
   occurredOn: "2026-08-16",
   source: "rider",
   details: {},
@@ -210,6 +211,29 @@ const record = (patch: Partial<HorseTimelineRecord> = {}): HorseTimelineRecord =
   assert.equal(phrase("2026-09-27"), "Due today");
   assert.equal(phrase("2026-09-28"), "Due tomorrow");
   assert.equal(phrase("2026-10-04"), "Due in 7 days");
+}
+
+// A record's row prints the provider only when it adds something: a name,
+// not the record's own type or title typed a second time.
+{
+  assert.equal(
+    recordProviderLine(record({ title: "Shoeing", providerName: "Farrier" })),
+    undefined,
+    "The profession typed as the provider only repeats the record's type."
+  );
+  assert.equal(recordProviderLine(record({ providerName: " farrier " })), undefined, "Case and spaces do not matter.");
+  assert.equal(recordProviderLine(record({ title: "Spring shots", providerName: "spring shots" })), undefined, "Nor does the title twice.");
+  assert.equal(recordProviderLine(record({ recordType: "vet", title: "Lameness exam", providerName: "Vet check" })), undefined, "The type's label counts as the type.");
+  assert.equal(recordProviderLine(record({ recordType: "lab", title: "Blood panel", providerName: "Lab" })), undefined, "A type with no care label is matched by its id.");
+  assert.equal(
+    recordProviderLine(record({ recordType: "vaccination", title: "Flu booster", providerName: "Vaccine" })),
+    undefined,
+    "The editor's chip label counts as the type, even where it is not the id or the Care tab label."
+  );
+  assert.equal(recordProviderLine(record({ providerName: "  John Smith " })), "John Smith", "A real name prints, trimmed.");
+  assert.equal(recordProviderLine(record({ providerName: "Farrier John" })), "Farrier John", "Only an exact repeat is dropped.");
+  assert.equal(recordProviderLine(record({ providerName: "   " })), undefined);
+  assert.equal(recordProviderLine(record()), undefined, "No provider, nothing to print.");
 }
 
 console.log("Care schedule derivation passed.");

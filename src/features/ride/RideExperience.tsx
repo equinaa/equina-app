@@ -25,6 +25,7 @@ import {
   X
 } from "lucide-react-native";
 import type { RidePhaseEntry, RideSource } from "../../backend";
+import { disciplineLabel } from "../../domain/labels";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
@@ -95,7 +96,7 @@ export type RideRecommendation = {
 
 /** What a ride was, in the words the rider chose: "Pole work", or the discipline for older rides. */
 export const rideSessionLabel = (session: Pick<RideSession, "trainingType" | "discipline">) =>
-  rideTrainingLabel(session.trainingType) ?? session.discipline;
+  rideTrainingLabel(session.trainingType) ?? disciplineLabel(session.discipline);
 
 const formatElapsed = (seconds: number) => {
   const hours = Math.floor(seconds / 3600);
