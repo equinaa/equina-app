@@ -275,6 +275,11 @@ type EquinaSelectorProps<T extends string> = {
   value: T;
   onChange: (value: T) => void;
   testPrefix: string;
+  /**
+   * What the rider reads, for options whose stored value is not the word to
+   * show ("trail" reads "Leisure"). The testID keeps using the value.
+   */
+  labels?: Partial<Record<T, string>>;
 };
 
 export function EquinaSelector<T extends string>({
@@ -282,7 +287,8 @@ export function EquinaSelector<T extends string>({
   options,
   value,
   onChange,
-  testPrefix
+  testPrefix,
+  labels
 }: EquinaSelectorProps<T>) {
   return (
     <View style={primitiveStyles.selectorBlock}>
@@ -290,12 +296,13 @@ export function EquinaSelector<T extends string>({
       <View accessibilityRole="radiogroup" style={primitiveStyles.selector}>
         {options.map((option) => {
           const selected = option === value;
+          const text = labels?.[option] ?? option;
           return (
             <MotionPressable
               key={option}
               testID={`${testPrefix}-${option.toLowerCase().replaceAll(" ", "-")}`}
               accessibilityRole="radio"
-              accessibilityLabel={option}
+              accessibilityLabel={text}
               accessibilityState={{ selected }}
               pressedScale={0.97}
               onPress={() => {
@@ -304,8 +311,8 @@ export function EquinaSelector<T extends string>({
               }}
               style={[
                 primitiveStyles.selectorItem,
-                option.length >= 10 && primitiveStyles.selectorItemWide,
-                option.length <= 3 && primitiveStyles.selectorItemCompact,
+                text.length >= 10 && primitiveStyles.selectorItemWide,
+                text.length <= 3 && primitiveStyles.selectorItemCompact,
                 selected && primitiveStyles.selectorItemSelected
               ]}
             >
@@ -315,7 +322,7 @@ export function EquinaSelector<T extends string>({
                 minimumFontScale={0.86}
                 style={[primitiveStyles.selectorText, selected && primitiveStyles.selectorTextSelected]}
               >
-                {option}
+                {text}
               </Text>
             </MotionPressable>
           );

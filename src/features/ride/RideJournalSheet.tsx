@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Trash2 } from "lucide-react-native";
 import type { RideEntry } from "../../backend";
+import { disciplineLabel } from "../../domain/labels";
 import { localDayOf, localMomentLabel, shortDayLabel } from "../../domain/local-day";
 import { EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
@@ -62,8 +63,7 @@ export function RideJournalSheet({
           <Text style={styles.empty}>No rides yet. A ride you finish or an activity you add appears here.</Text>
         ) : null}
         {entries.map((entry) => {
-          const training = rideTrainingLabel(entry.trainingType)
-            ?? `${entry.discipline.charAt(0).toUpperCase()}${entry.discipline.slice(1)}`;
+          const training = rideTrainingLabel(entry.trainingType) ?? disciplineLabel(entry.discipline);
           const horse = entry.horseId ? horseNames[entry.horseId] : undefined;
           // When it started, as the rider enters it in Add activity and as a
           // yard thinks of a ride: "the 12:45 hack", not when it ended.

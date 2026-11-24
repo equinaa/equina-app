@@ -88,7 +88,7 @@ export function TrainingWeekCard({
           <View style={styles.copy}>
             <Text style={styles.title}>Plan your training week</Text>
             <Text style={styles.body}>
-              Pick the days you ride, with the horse and the training for each. Your streak counts them, and rest days never break it.
+              Choose your riding days, your horse and the type of training. Rest days keep your streak going.
             </Text>
           </View>
           <ChevronRight size={17} color={equinaTheme.text.tertiary} />
