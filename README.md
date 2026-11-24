@@ -59,7 +59,7 @@ Set `EXPO_PUBLIC_EQUINA_DEMO_MODE=true` to explore the UI with local sample data
 | `npm test` | Client flows, backend contract, and migration/RLS isolation tests |
 | `npm run backend:check` | Type-check every Edge Function with Deno |
 | `npm run backend:audit` | Schema audit: grants, RLS, and policy coverage |
-| `npm run security:bundle-scan` | Fails if a secret-shaped value would ship in the client bundle |
+| `npm run security:bundle-scan` | Fails if a secret-shaped value would ship in the client bundle. Reads the web export in `dist`; run `npx expo export --platform all --no-bytecode --clear` first to include the iOS and Android bundles. Keep `--clear` (for the web export alone, `npm run build -- --clear`): Metro's cache is shared by every checkout on this machine and does not notice a changed `EXPO_PUBLIC_` value, so without it an export can carry the values of an earlier one |
 
 Run `typecheck`, `test`, `backend:check`, `backend:audit` and `security:bundle-scan` before opening a pull request.
 
@@ -80,7 +80,7 @@ supabase/
   functions/         Edge Functions (one directory each) + _shared/
   templates/         Auth email templates
   config.toml        Project configuration (auth, storage, functions)
-scripts/             Schema audit and client secret scan
+scripts/             Schema audit, client secret scan, EAS build guard
 tests/               Test suites and the runner
 docs/                Design contracts, security model, runbook, audits, plans
 ```
@@ -93,9 +93,10 @@ The database schema lives entirely in `supabase/migrations/`. Never change produ
 supabase link --project-ref <ref>     # once per machine
 supabase db push                      # apply pending migrations
 supabase functions deploy <name>      # deploy one Edge Function
-supabase config push                  # sync config.toml (auth, storage, templates)
 supabase secrets set KEY=value        # server-side secrets only
 ```
+
+**Never run `supabase config push` against the hosted project.** Its Auth settings (email confirmation, the SMTP sender, the email templates, the redirect URLs) are set by hand in the Dashboard, and a push overwrites them with whatever `supabase/config.toml` declares. That file describes the local stack. For some weeks in late 2026 it had email confirmation turned off, and a push then would have stopped the hosted project from confirming new sign-ups: anyone could have signed up with an invited address and walked through the beta door. Keep the two in step by hand, as [`docs/EQUINA_AUTH_DELIVERY.md`](docs/EQUINA_AUTH_DELIVERY.md) describes.
 
 Things worth knowing before you touch it:
 
@@ -109,8 +110,39 @@ Things worth knowing before you touch it:
 
 - **Web:** every merge to `main` builds and deploys on Vercel.
 - **Admin:** a second Vercel project with Root Directory `admin`. Setup and staff accounts: [`admin/README.md`](admin/README.md).
-- **iOS / Android:** dev-client builds only, until the Apple Developer account exists. Release audit and checklist: [`docs/IOS_RELEASE_AUDIT.md`](docs/IOS_RELEASE_AUDIT.md).
+- **iOS / Android:** built by EAS for TestFlight and Google Play, see [Store builds](#store-builds). Release audit and checklist: [`docs/IOS_RELEASE_AUDIT.md`](docs/IOS_RELEASE_AUDIT.md).
 - **Backend:** migrations and functions are promoted with the CLI commands above. There is one Supabase project today; treat it as production.
+
+## Store builds
+
+EAS makes the TestFlight and Google Play builds from `eas.json`. A build made there never sees `.env.local`, so what the app reads when it is bundled comes from two places, and a name lives in only one of them:
+
+| Where | What |
+| --- | --- |
+| `eas.json`, the `env` of `preview` and `production` | The switches: sign-in by email code, and each feature on or off. Reviewed in git. |
+| EAS environment variables, `preview` and `production` | `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Never committed: this repository has a public mirror. |
+
+Set the two variables once. Plain text is right for them: they ship inside the app anyway, and EAS CLI cannot read a secret one back to check it.
+
+```bash
+npx eas-cli@latest env:set --name EXPO_PUBLIC_SUPABASE_URL --value "https://<project-ref>.supabase.co" --environment preview --environment production --visibility plaintext
+npx eas-cli@latest env:set --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value "<publishable key>" --environment preview --environment production --visibility plaintext
+```
+
+- **Profiles.** `development` is the dev client. `preview` installs from a link, for the team: an APK on Android, ad hoc on iOS. `production` goes to the stores, and EAS keeps and raises its build number, so no build edits `app.json`. All three use the Node pinned in `base`.
+- **The guard.** `scripts/eas-build-guard.mjs` runs on EAS before `npm install` and fails the build when a backend variable is missing, sign-in is not by code, the demo is on, a RevenueCat Test Store key or the placeholder privacy link is present, or a switch is not what `eas.json` says. It prints names, never values. To check from your machine before spending a build:
+
+  ```bash
+  npx eas-cli@latest env:exec production "node scripts/eas-build-guard.mjs --rehearse production"
+  ```
+
+- **Local builds.** `eas build --local` runs the same guard, and its `.ipa` or `.aab` can go to a store like any other. It is not the same build, though: it uses the Node installed on this computer, not the one pinned in `base`, and it cannot read an EAS variable of Secret visibility, one more reason the two above are plain text. It also takes whatever the terminal exports. The guard's first line lists every `EXPO_PUBLIC_` name the build sees: read it before you submit.
+- **One place for each name.** When a name is in `eas.json` and also an EAS variable, EAS CLI says the `eas.json` value is used and prints a warning, but Expo does not document the order and the build machine joins the two itself. Do not depend on it: the guard stops a build whose switch differs from `eas.json`, and the rehearsal names anything set twice.
+- **Never run `eas env:push` without `--path`.** It uploads `.env.local` by default, with its development-only keys and tokens. `eas env:pull` without `--path` overwrites `.env.local`.
+- **Selling stays off** while no store key (`EXPO_PUBLIC_REVENUECAT_*`) and no privacy policy link are set. Plans are given from the Admin.
+- **Icons and launch screen.** The icons in `assets/` are provisional, a plain E: replace the files and keep their names. `assets/splash.png` is transparent on purpose. Expo SDK 55 only colours the iOS launch screen when it has an image.
+
+`tests/store-build-config.test.ts` holds the reviewed answer for every `EXPO_PUBLIC_` name the app reads. A new name fails the tests until it has one.
 
 ## Documents
 

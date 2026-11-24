@@ -14,3 +14,7 @@ supabase/.temp/
 .DS_Store
 .env*
 !.env.example
+# Local worktrees, screenshots and working files. EAS uploads everything this
+# file does not ignore, and it never reads a global gitignore: without this
+# line a build from the main checkout sends the whole folder to Expo.
+.claude/

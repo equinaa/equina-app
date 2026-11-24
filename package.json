@@ -14,7 +14,8 @@
     "backend:check": "npx deno check --config supabase/functions/deno.json supabase/functions/*/index.ts",
     "backend:audit": "tsx scripts/backend-schema-audit.ts",
     "security:bundle-scan": "tsx scripts/scan-client-secrets.ts",
-    "seed:print": "tsx src/seed/seed-data.ts"
+    "seed:print": "tsx src/seed/seed-data.ts",
+    "eas-build-pre-install": "node scripts/eas-build-guard.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~55.0.12",

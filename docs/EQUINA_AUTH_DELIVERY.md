@@ -79,7 +79,7 @@ website and Google mail untouched.
    | Change email address | `email_change.html` |
 7. **Switch the apps to codes,** right after step 6 (from then on the emails carry no link):
    - Vercel project `equina`: `EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE=otp` for Production and Preview, then redeploy.
-   - iOS builds: the same variable in EAS (`eas env:create`) or in `eas.json` before the next build.
+   - iOS and Android builds: already `otp` in `eas.json` (`preview` and `production`). Do not also set it as an EAS variable: a name lives in one place (README, "Store builds").
    - Local: the same line in `.env.local`, then restart Metro with `--clear`.
 8. **Test with an address outside the Supabase organization** (a fresh Gmail):
    - create an account with a password -> code arrives from `auth.equina.ai` -> enter it -> onboarding;
