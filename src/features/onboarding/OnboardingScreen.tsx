@@ -44,6 +44,7 @@ import {
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import { disciplineLabel } from "../../domain/labels";
+import { newPasswordReady, signInPasswordReady } from "../account/password-rules";
 import { visibleProviders } from "../account/provider-visibility";
 import { emailStepCopy, signInCopy } from "../account/sign-in-copy";
 
@@ -322,7 +323,7 @@ export function OnboardingScreen({
   };
 
   const continueWithPassword = async () => {
-    if (!emailReady || password.length < 10 || password.length > 128 || completing || busy) return;
+    if (!emailReady || !newPasswordReady(password) || completing || busy) return;
     setCompleting(true);
     try {
       await onPasswordContinue(password);
@@ -332,7 +333,7 @@ export function OnboardingScreen({
   };
 
   const signInWithPassword = async () => {
-    if (!emailReady || password.length < 10 || password.length > 128 || completing || busy) return;
+    if (!emailReady || !signInPasswordReady(password) || completing || busy) return;
     setCompleting(true);
     try {
       await onPasswordSignIn(password);
@@ -745,7 +746,8 @@ export function AccountMethodSheet({
   onEmailLinkSignIn?: () => void;
 }) {
   const emailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const passwordReady = password.length >= 10 && password.length <= 128;
+  // Choosing a password has a minimum length; signing in with one does not.
+  const passwordReady = method === "signin" ? signInPasswordReady(password) : newPasswordReady(password);
   const providers = visibleProviders(Platform.OS, socialAuthAvailability);
   const hasSocialAuth = providers.apple || providers.google;
   const signingIn = intent === "signin";
@@ -900,7 +902,7 @@ export function AccountMethodSheet({
               label="Password"
               value={password}
               onChangeText={onPasswordChange}
-              placeholder="10+ characters"
+              placeholder={method === "signin" ? "Your password" : "10+ characters"}
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete={method === "password" ? "new-password" : "current-password"}

@@ -4,6 +4,12 @@ import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AuthRepository } from "../src/backend/auth-repository";
 import { backendError, EquinaBackendError } from "../src/backend/errors";
+import {
+  newPasswordMinLength,
+  newPasswordReady,
+  passwordMaxLength,
+  signInPasswordReady
+} from "../src/features/account/password-rules";
 import { visibleProviders } from "../src/features/account/provider-visibility";
 import { emailStepCopy, signInCopy as copy } from "../src/features/account/sign-in-copy";
 import {
@@ -166,6 +172,60 @@ const offline = backendError(
   // The local project's own setting stays inside what the field accepts.
   const otpLength = Number(readFileSync(join(root, "supabase", "config.toml"), "utf8").match(/^otp_length = (\d+)$/m)?.[1]);
   assert.ok(otpLength >= codeMinLength && otpLength <= codeMaxLength, "supabase/config.toml otp_length");
+}
+
+// The 10-character minimum is for choosing a password. Signing in takes the
+// password the account has: one set by staff can be shorter, and the form must
+// still let the rider try it.
+{
+  for (const password of ["x", "short", "123456789", "a password of ten or more", " "]) {
+    assert.equal(signInPasswordReady(password), true, `"${password}" can be tried.`);
+  }
+  assert.equal(signInPasswordReady(""), false, "An empty password is the only one the form refuses.");
+
+  assert.equal(newPasswordMinLength, 10);
+  assert.equal(passwordMaxLength, 128);
+  assert.equal(newPasswordReady("x".repeat(9)), false);
+  assert.equal(newPasswordReady("x".repeat(10)), true);
+  assert.equal(newPasswordReady("x".repeat(128)), true);
+  assert.equal(newPasswordReady("x".repeat(129)), false);
+
+  // The repository agrees: nothing is checked locally on the way in, and a new
+  // password outside the limits never reaches the server.
+  const calls: { method: string; password: string }[] = [];
+  const session = { access_token: "a" };
+  const client = {
+    auth: {
+      signInWithPassword: async (input: { password: string }) => {
+        calls.push({ method: "signIn", password: input.password });
+        return { data: { session }, error: null };
+      },
+      signUp: async (input: { password: string }) => {
+        calls.push({ method: "signUp", password: input.password });
+        return { data: { user: { id: "u", identities: [{ id: "i" }] }, session: null }, error: null };
+      },
+      updateUser: async (input: { password: string }) => {
+        calls.push({ method: "update", password: input.password });
+        return { data: {}, error: null };
+      }
+    }
+  } as unknown as SupabaseClient;
+  const auth = new AuthRepository(client);
+  assert.equal(await auth.signInWithPassword(" Rider@Example.com ", "short"), session);
+  await assert.rejects(auth.signUpWithPassword({ email: "rider@example.com", password: "short" }), /Password length is invalid/);
+  await assert.rejects(auth.setPassword("short"), /Password length is invalid/);
+  await assert.rejects(auth.setPassword("x".repeat(129)), /Password length is invalid/);
+  assert.deepEqual(calls, [{ method: "signIn", password: "short" }], "Only the sign-in reached the service.");
+
+  // The sheet serves both: each method asks its own rule, and neither the
+  // sheet nor the onboarding handlers count characters themselves.
+  const sheet = readFileSync(join(process.cwd(), "src", "features", "onboarding", "OnboardingScreen.tsx"), "utf8");
+  assert.doesNotMatch(sheet, /password\.length/, "Password rules live in password-rules.ts.");
+  assert.match(sheet, /const passwordReady = method === "signin" \? signInPasswordReady\(password\) : newPasswordReady\(password\);/);
+  assert.match(sheet, /const signInWithPassword = async \(\) => \{\n    if \(!emailReady \|\| !signInPasswordReady\(password\)/);
+  assert.match(sheet, /const continueWithPassword = async \(\) => \{\n    if \(!emailReady \|\| !newPasswordReady\(password\)/);
+  assert.match(sheet, /placeholder=\{method === "signin" \? "Your password" : "10\+ characters"\}/,
+    "The sign-in field does not ask for the length a new password needs.");
 }
 
 // Sign-out: this device only, and the stored session goes even when
