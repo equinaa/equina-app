@@ -41,6 +41,7 @@ import type {
   UploadAsset,
   UserPreferencesRecord
 } from "../../backend";
+import { supportEmail, supportMailto } from "../../config/support-contact";
 import type { Discipline } from "../../domain/types";
 import { disciplineLabel } from "../../domain/labels";
 import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
@@ -892,8 +893,11 @@ function HelpAndLegal({ marketplaceOpen }: { marketplaceOpen: boolean }) {
         <SettingsRow
           Icon={MessageCircle}
           title="Contact support"
+          // The address is printed as well: a device with no mail app set up
+          // opens nothing, and the rider can still read where to write.
+          detail={supportEmail}
           value="Email"
-          onPress={() => void Linking.openURL("mailto:support@equina.app?subject=Equina%20support")}
+          onPress={() => void Linking.openURL(supportMailto).catch(() => undefined)}
         />
       </SettingsGroup>
       <SettingsGroup title="Legal">
