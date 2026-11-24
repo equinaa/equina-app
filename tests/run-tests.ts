@@ -14,6 +14,7 @@ import "./image-metadata.test";
 import "./horse-selection.test";
 import "./training-streak.test";
 import "./time-off.test";
+import "./calendar-month.test";
 import "./coach-scripted-replies.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./home-hero.test");

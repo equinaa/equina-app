@@ -1,91 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
-import { Minus, Plus } from "lucide-react-native";
 import type { HorseTimeOffInput } from "../../backend";
 import { localToday } from "../../domain/local-day";
-import { addDays } from "../../domain/training-streak";
+import { EquinaDateRangeCalendar } from "../../ui/primitives/EquinaDateRangeCalendar";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
-import { timeOffBackDays, timeOffKinds, timeOffMaxSpan, timeOffProblem } from "./time-off";
-
-const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
-const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
-
-/** "Today", "Tomorrow", "Yesterday", else "Mon 3 Nov". */
-const dayLabel = (day: string, today: string) => {
-  if (day === today) return "Today";
-  if (day === addDays(today, 1)) return "Tomorrow";
-  if (day === addDays(today, -1)) return "Yesterday";
-  const date = new Date(`${day}T00:00:00Z`);
-  return `${weekdays[date.getUTCDay()]} ${date.getUTCDate()} ${months[date.getUTCMonth()]}`;
-};
-
-/** A day stepped a day at a time; held, a week at a time. No native date picker. */
-function DayStepper({
-  label,
-  day,
-  today,
-  min,
-  max,
-  testID,
-  onChange
-}: {
-  label: string;
-  day: string;
-  today: string;
-  min: string;
-  max: string;
-  testID: string;
-  onChange: (day: string) => void;
-}) {
-  const step = (by: number) => {
-    let next = addDays(day, by);
-    if (next < min) next = min;
-    if (next > max) next = max;
-    if (next !== day) selectionHaptic();
-    onChange(next);
-  };
-  return (
-    <View style={styles.stepRow}>
-      <Text style={styles.stepLabel}>{label}</Text>
-      <View
-        accessible
-        accessibilityRole="adjustable"
-        accessibilityLabel={label}
-        accessibilityValue={{ text: dayLabel(day, today) }}
-        accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
-        onAccessibilityAction={(event) => step(event.nativeEvent.actionName === "increment" ? 1 : -1)}
-        style={styles.stepper}
-      >
-        <MotionPressable
-          testID={`${testID}-earlier`}
-          accessibilityRole="button"
-          accessibilityLabel={`${label} earlier`}
-          disabled={day <= min}
-          onPress={() => step(-1)}
-          onLongPress={() => step(-7)}
-          style={[styles.stepButton, day <= min && styles.disabled]}
-        >
-          <Minus size={16} color={equinaTheme.text.primary} />
-        </MotionPressable>
-        <Text testID={testID} style={styles.stepValue}>{dayLabel(day, today)}</Text>
-        <MotionPressable
-          testID={`${testID}-later`}
-          accessibilityRole="button"
-          accessibilityLabel={`${label} later`}
-          disabled={day >= max}
-          onPress={() => step(1)}
-          onLongPress={() => step(7)}
-          style={[styles.stepButton, day >= max && styles.disabled]}
-        >
-          <Plus size={16} color={equinaTheme.text.primary} />
-        </MotionPressable>
-      </View>
-    </View>
-  );
-}
+import { timeOffKinds, timeOffLimits, timeOffProblem } from "./time-off";
 
 /**
  * Putting a horse on time off: why, the first and the last day. While it is
@@ -113,7 +35,13 @@ export function HorseTimeOffSheet({
   const inFlight = useRef(false);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      // The calendar opens on the month of the first day and keeps its place
+      // from there. Without a first day it is not shown, so the next opening
+      // mounts it anew, on today, rather than where the last one was left.
+      setStartsOn("");
+      return;
+    }
     const today = localToday();
     setKind("rest");
     setStartsOn(today);
@@ -178,26 +106,17 @@ export function HorseTimeOffSheet({
 
         {startsOn ? (
           <View style={styles.section}>
-            <DayStepper
-              label="From"
-              day={startsOn}
+            <Text style={styles.sectionLabel}>When</Text>
+            <EquinaDateRangeCalendar
+              testID="time-off"
+              startsOn={startsOn}
+              endsOn={endsOn}
               today={today}
-              min={addDays(today, -timeOffBackDays)}
-              max={addDays(today, timeOffMaxSpan)}
-              testID="time-off-from"
-              onChange={(day) => {
-                setStartsOn(day);
-                if (endsOn < day) setEndsOn(day);
+              {...timeOffLimits(today)}
+              onChange={(from, until) => {
+                setStartsOn(from);
+                setEndsOn(until);
               }}
-            />
-            <DayStepper
-              label="Until"
-              day={endsOn}
-              today={today}
-              min={startsOn}
-              max={addDays(startsOn, timeOffMaxSpan)}
-              testID="time-off-until"
-              onChange={setEndsOn}
             />
           </View>
         ) : null}
@@ -256,26 +175,6 @@ const styles = StyleSheet.create({
   chipSelected: { borderColor: equinaTheme.colors.brass, backgroundColor: equinaTheme.material.selected },
   chipText: { ...equinaTheme.typography.meta, color: equinaTheme.text.primary, fontWeight: "600" },
   chipTextSelected: { color: equinaTheme.colors.brass },
-  stepRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: equinaTheme.spacing.compact },
-  stepLabel: { ...equinaTheme.typography.body, color: equinaTheme.text.primary },
-  stepper: { flexDirection: "row", alignItems: "center", gap: 2 },
-  stepButton: {
-    width: 36,
-    height: 36,
-    borderRadius: equinaTheme.radius.compact,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: equinaTheme.material.quietPressed
-  },
-  stepValue: {
-    minWidth: 112,
-    color: equinaTheme.text.primary,
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: "600",
-    textAlign: "center"
-  },
-  disabled: { opacity: 0.4 },
   noteInput: {
     minHeight: 72,
     paddingVertical: 10,
