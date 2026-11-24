@@ -225,6 +225,11 @@ const record = (patch: Partial<HorseTimelineRecord> = {}): HorseTimelineRecord =
   assert.equal(recordProviderLine(record({ title: "Spring shots", providerName: "spring shots" })), undefined, "Nor does the title twice.");
   assert.equal(recordProviderLine(record({ recordType: "vet", title: "Lameness exam", providerName: "Vet check" })), undefined, "The type's label counts as the type.");
   assert.equal(recordProviderLine(record({ recordType: "lab", title: "Blood panel", providerName: "Lab" })), undefined, "A type with no care label is matched by its id.");
+  assert.equal(
+    recordProviderLine(record({ recordType: "vaccination", title: "Flu booster", providerName: "Vaccine" })),
+    undefined,
+    "The editor's chip label counts as the type, even where it is not the id or the Care tab label."
+  );
   assert.equal(recordProviderLine(record({ providerName: "  John Smith " })), "John Smith", "A real name prints, trimmed.");
   assert.equal(recordProviderLine(record({ providerName: "Farrier John" })), "Farrier John", "Only an exact repeat is dropped.");
   assert.equal(recordProviderLine(record({ providerName: "   " })), undefined);

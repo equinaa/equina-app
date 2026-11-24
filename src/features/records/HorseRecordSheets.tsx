@@ -31,7 +31,7 @@ import {
   EquinaSheet
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
-import { cadenceOf, isCareType, nextDueOn } from "../../domain/care-schedule";
+import { cadenceOf, isCareType, nextDueOn, recordTypeLabels } from "../../domain/care-schedule";
 import { disciplineLabel, horseSexOptionLabels } from "../../domain/labels";
 import { localToday } from "../../domain/local-day";
 import type { HorseInput, TimelineRecordInput } from "./useHorseRecords";
@@ -70,15 +70,17 @@ const recordTypes: Array<{
   label: string;
   Icon: typeof FileText;
 }> = [
-  { type: "passport", label: "Passport", Icon: FileText },
-  { type: "vet", label: "Vet", Icon: Stethoscope },
-  { type: "lab", label: "Lab", Icon: Activity },
-  { type: "vaccination", label: "Vaccine", Icon: ShieldCheck },
-  { type: "dental", label: "Dental", Icon: HeartPulse },
-  { type: "farrier", label: "Farrier", Icon: CalendarCheck },
-  { type: "nutrition", label: "Nutrition", Icon: Wheat },
-  { type: "care", label: "Care", Icon: Plus },
-  { type: "note", label: "Note", Icon: NotebookPen }
+  // The labels live in the domain so the Recent records rows know these words
+  // too, and drop a provider that only repeats one of them.
+  { type: "passport", label: recordTypeLabels.passport, Icon: FileText },
+  { type: "vet", label: recordTypeLabels.vet, Icon: Stethoscope },
+  { type: "lab", label: recordTypeLabels.lab, Icon: Activity },
+  { type: "vaccination", label: recordTypeLabels.vaccination, Icon: ShieldCheck },
+  { type: "dental", label: recordTypeLabels.dental, Icon: HeartPulse },
+  { type: "farrier", label: recordTypeLabels.farrier, Icon: CalendarCheck },
+  { type: "nutrition", label: recordTypeLabels.nutrition, Icon: Wheat },
+  { type: "care", label: recordTypeLabels.care, Icon: Plus },
+  { type: "note", label: recordTypeLabels.note, Icon: NotebookPen }
 ];
 
 const today = () => localToday();

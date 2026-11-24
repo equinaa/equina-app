@@ -49,6 +49,23 @@ export const careTypeLabels: Record<CareType, string> = {
   care: "Routine care"
 };
 
+/**
+ * What the record editor calls each type on its chips, and the title a new
+ * record starts with. Not always the Care tab's word: "Vaccine" here,
+ * "Vaccination" there.
+ */
+export const recordTypeLabels: Record<HorseTimelineRecord["recordType"], string> = {
+  passport: "Passport",
+  vet: "Vet",
+  lab: "Lab",
+  vaccination: "Vaccine",
+  dental: "Dental",
+  farrier: "Farrier",
+  nutrition: "Nutrition",
+  care: "Care",
+  note: "Note"
+};
+
 const sameText = (left: string, right: string | undefined): boolean =>
   left.trim().toLowerCase() === (right ?? "").trim().toLowerCase();
 
@@ -63,9 +80,11 @@ export const recordProviderLine = (
 ): string | undefined => {
   const provider = record.providerName?.trim();
   if (!provider) return undefined;
-  // The type ids are English words ("farrier", "vet", "dental"), so the id
-  // covers the types that have no care label.
+  // A type goes by its id ("vaccination"), its chip in the record editor
+  // ("Vaccine") and, for care types, its Care tab label ("Vaccination").
+  // A provider that is any of them only names the type again.
   if (sameText(provider, record.title) || sameText(provider, record.recordType)) return undefined;
+  if (sameText(provider, recordTypeLabels[record.recordType])) return undefined;
   if (isCareType(record.recordType) && sameText(provider, careTypeLabels[record.recordType])) return undefined;
   return provider;
 };
