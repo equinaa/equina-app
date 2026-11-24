@@ -218,9 +218,6 @@ export function HorseTimeOffSheet({
           />
         </View>
 
-        <Text style={styles.hint}>
-          Planned rides on {horseName} these days are not due: no reminder, and your streak carries on.
-        </Text>
         {problem ? <Text accessibilityRole="alert" style={styles.error}>{problem}</Text> : null}
         {!problem && saveError ? <Text accessibilityRole="alert" style={styles.error}>{saveError}</Text> : null}
         <EquinaButton
@@ -290,6 +287,5 @@ const styles = StyleSheet.create({
     textAlignVertical: "top"
   },
   webInput: { outlineStyle: "none" } as never,
-  hint: { ...equinaTheme.typography.meta, color: equinaTheme.text.tertiary },
   error: { ...equinaTheme.typography.meta, color: equinaTheme.colorRole.criticalOnDark }
 });

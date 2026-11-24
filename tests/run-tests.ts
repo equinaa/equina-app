@@ -12,6 +12,7 @@ import "./mux.test";
 import "./data-export.test";
 import "./image-metadata.test";
 import "./horse-selection.test";
+import "./labels.test";
 import "./training-streak.test";
 import "./time-off.test";
 import "./coach-scripted-replies.test";

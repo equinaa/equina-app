@@ -32,6 +32,7 @@ import {
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import { cadenceOf, isCareType, nextDueOn } from "../../domain/care-schedule";
+import { disciplineLabel, horseSexOptionLabels } from "../../domain/labels";
 import { localToday } from "../../domain/local-day";
 import type { HorseInput, TimelineRecordInput } from "./useHorseRecords";
 
@@ -58,6 +59,10 @@ const omitCadence = (details: Record<string, unknown>): Record<string, unknown> 
 };
 
 const disciplines = ["dressage", "jumping", "eventing", "trail"] as const;
+// The stored values stay; the rider reads "Leisure" for trail.
+const disciplineOptionLabels = Object.fromEntries(
+  disciplines.map((value) => [value, disciplineLabel(value)])
+) as Record<(typeof disciplines)[number], string>;
 const sexOptions = ["mare", "gelding", "stallion", "unknown"] as const;
 const recordStatuses = ["current", "due", "expired"] as const;
 const recordTypes: Array<{
@@ -237,6 +242,7 @@ export function HorseEditorSheet({
           options={disciplines}
           value={discipline}
           testPrefix="horse-editor-discipline"
+          labels={disciplineOptionLabels}
           onChange={setDiscipline}
         />
         <EquinaSelector
@@ -244,6 +250,7 @@ export function HorseEditorSheet({
           options={sexOptions}
           value={sex}
           testPrefix="horse-editor-sex"
+          labels={horseSexOptionLabels}
           onChange={setSex}
         />
         <View style={styles.fieldPair}>
@@ -501,6 +508,9 @@ export function RecordEditorSheet({
           testID="record-editor-provider"
           label="Provider"
           optional
+          // Without a hint the field read as "what kind of provider" and
+          // riders typed the profession, which the record's type already says.
+          placeholder="Name of the person or clinic"
           value={providerName}
           maxLength={120}
           onChangeText={setProviderName}

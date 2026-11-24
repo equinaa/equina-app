@@ -43,6 +43,7 @@ import {
   EquinaSheet
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
+import { disciplineLabel } from "../../domain/labels";
 import { visibleProviders } from "../account/provider-visibility";
 import { signInCopy } from "../account/sign-in-copy";
 
@@ -468,7 +469,7 @@ export function OnboardingScreen({
                     style={styles.absoluteImage}
                   />
                   <View style={styles.disciplineCopy}>
-                    <Text style={styles.disciplineName}>{discipline}</Text>
+                    <Text style={styles.disciplineName}>{disciplineLabel(discipline)}</Text>
                     <Text style={styles.disciplineMeta}>{disciplineNotes[discipline]}</Text>
                   </View>
                 </View>
@@ -476,9 +477,10 @@ export function OnboardingScreen({
                   {disciplines.map((option) => (
                     <MotionPressable
                       key={option}
+                      // The key stays in the testID; the rider reads its label.
                       testID={`onboarding-discipline-${option.toLowerCase()}`}
                       accessibilityRole="radio"
-                      accessibilityLabel={option}
+                      accessibilityLabel={disciplineLabel(option)}
                       accessibilityState={{ selected: discipline === option }}
                       onPress={() => {
                         if (discipline !== option) selectionHaptic();
@@ -498,7 +500,7 @@ export function OnboardingScreen({
                           discipline === option && styles.disciplineOptionTextSelected
                         ]}
                       >
-                        {option}
+                        {disciplineLabel(option)}
                       </Text>
                     </MotionPressable>
                   ))}
@@ -605,7 +607,7 @@ export function OnboardingScreen({
                   <View style={styles.previewContext}>
                     <Text style={styles.previewContextLabel}>YOUR EQUINA</Text>
                     <View style={styles.previewContextDot} />
-                    <Text style={styles.previewContextValue}>{discipline}</Text>
+                    <Text style={styles.previewContextValue}>{disciplineLabel(discipline)}</Text>
                   </View>
                   <Text numberOfLines={1} style={styles.previewDiscipline}>{level}</Text>
                 </View>
@@ -622,7 +624,7 @@ export function OnboardingScreen({
                     <Text style={styles.previewHorse}>
                       {hasHorse
                         ? `${horseName.trim() || "Your horse"} · ${ridePreview.meta}`
-                        : `Your ${discipline.toLowerCase()} plan · ${ridePreview.meta}`}
+                        : `Your ${disciplineLabel(discipline).toLowerCase()} plan · ${ridePreview.meta}`}
                     </Text>
                     <Text numberOfLines={2} style={styles.previewTitle}>{ridePreview.title}</Text>
                     <Text style={styles.previewPlan}>{ridePreview.plan}</Text>
@@ -1251,7 +1253,7 @@ function HorseProfileEditor({
             {horseName.trim() || "Name your horse"}
           </Text>
           <Text numberOfLines={1} style={styles.horseProfileMeta}>
-            {horseBreed.trim() ? `${horseBreed.trim()} · ${discipline}` : discipline}
+            {horseBreed.trim() ? `${horseBreed.trim()} · ${disciplineLabel(discipline)}` : disciplineLabel(discipline)}
           </Text>
         </View>
       </View>
@@ -1355,7 +1357,7 @@ function RiderFirstSetup({
       />
       <View style={styles.riderFirstTopline}>
         <Text style={styles.riderFirstEyebrow}>RIDER-FIRST PROFILE</Text>
-        <Text style={styles.riderFirstMeta}>{level} · {discipline}</Text>
+        <Text style={styles.riderFirstMeta}>{level} · {disciplineLabel(discipline)}</Text>
       </View>
       <View style={styles.riderFirstCopy}>
         <Text style={styles.riderFirstTitle}>Every ride still counts.</Text>
