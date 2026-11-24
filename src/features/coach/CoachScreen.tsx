@@ -779,7 +779,9 @@ const styles = StyleSheet.create({
   },
   aiNotice: {
     ...equinaTheme.typography.meta,
-    color: equinaTheme.text.tertiary,
+    // The one line that says the question leaves Equina: quiet in size, not in
+    // contrast. Tertiary text is under 4.5:1 on this background.
+    color: equinaTheme.text.secondary,
     marginTop: 12
   },
   messageBlock: {
