@@ -44,7 +44,7 @@ Admin → Plans with no migration or release.
     posts, with Report and Block. Comments on a rider's posts, replies to their comments and likes
     are written to `club_activity` by the database and shown behind the bell in the feed and a dot
     on the Club tab. Push waits for the Apple account.
-- **Ralf.** One credit is one message, three with a photo. Credits are only spent while the
+- **Ralf.** One credit is one message. Ralf takes no photos, so nothing costs more. Credits are only spent while the
   `coach_credits` flag is on; the allowance always follows the plan the rider holds. Premium's
   draft says "full access"; 300 a month (about EUR 1.60 at full use) keeps the cost bounded.
 - **Sessions and the event ticket** are shown on the plan screen. Until there is a booking flow the

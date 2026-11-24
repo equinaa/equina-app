@@ -85,8 +85,12 @@ handle is refused with `unsupported_file_type`, and a file that is not a well-fo
 JPEG or PNG with `invalid_photo`. Either way the upload is removed from storage, the
 ticket is canceled and nothing is registered, so the rider keeps the photo they had.
 The cleaned file replaces the upload at the same path before any row points at it,
-and the ticket then names the cleaned file's size, so completing the same ticket
-twice finds the file it expects.
+and the ticket then names the cleaned file's size, so a second completion of the
+same ticket finds the size it expects. For a profile photo and a horse portrait
+that second call then succeeds. For a Club or listing photo it is still refused
+one step later, at the row whose path is unique, and the refusal removes the file
+the first call registered: the app completes a ticket once, so only a request
+repeated from outside the app gets there, and it did before this rule too.
 
 **Pictures stored before this rule** are not touched by a deploy.
 `scripts/clean-stored-photos.ts` runs the same cleaner over every file in the
