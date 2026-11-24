@@ -21,17 +21,34 @@ documentation.
 
 ## Image Metadata Processing
 
+The cleaner (`_shared/image-metadata.ts`, `tests/image-metadata.test.ts`) takes a
+JPEG or a PNG apart into its labelled parts and copies only the ones needed to draw
+the picture. Nothing is decoded: the compressed picture is copied byte for byte, so
+nothing about how it looks changes.
+
+- **JPEG.** Every APP1 (EXIF, XMP), APP3-APP13 (IPTC), APP15 and comment segment
+  goes; JFIF, Adobe and ICC colour data stay. The file ends where its picture ends:
+  a second picture with an EXIF of its own, the clip of a motion photo or a maker's
+  block after it is not copied.
+- **PNG.** Text, EXIF and time chunks go, and so does any chunk the cleaner does not
+  know, and anything after the end of the file. Transparency, gamma, colour and
+  animation chunks stay.
+- **Orientation.** The one value kept from an EXIF is which way up the picture is,
+  and only when it is stored turned: it is written back in an EXIF that holds
+  nothing else. Without it, a photo sent as the camera wrote it would be shown lying
+  down.
+- **HEIC and HEIF** keep their metadata where the rest of the file points at it by
+  position, so they cannot be cleaned without decoding. They are not accepted for a
+  picture that gets cleaned.
+
 **Club photos** (202610060004) are handled in two places. The app redraws every
 photo as a JPEG of at most 2048 px (`src/features/club/club-photo.ts`), which drops
 the original's EXIF. On iOS the redrawn file still carries a small EXIF header of
 its own (orientation, resolution, colour space; no location, time or device, checked
-on the simulator) and an empty IPTC block, so the server step below is what
-guarantees a clean file. `create-upload-ticket` accepts only `image/jpeg` for a
-Club post, up to 15 MB, and `complete-upload` takes out every APP1 (EXIF, XMP),
-APP3-APP13 (IPTC), APP15 and comment segment, keeping only JFIF, Adobe and ICC
-colour data, then writes the cleaned file over the upload before the media row
-exists (`_shared/image-metadata.ts`, `tests/image-metadata.test.ts`). The compressed
-picture is copied byte for byte, so nothing about how it looks changes.
+on the simulator) and an empty IPTC block, so the server step is what guarantees a
+clean file. `create-upload-ticket` accepts only `image/jpeg` for a Club post, up to
+15 MB, and `complete-upload` runs the cleaner and writes the cleaned file over the
+upload before the media row exists.
 
 Other uploads (listing photos, record files, avatars) still go through the full
 processor below before they can be public.
