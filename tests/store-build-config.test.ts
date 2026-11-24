@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { equinaTheme } from "../src/ui/theme/theme";
 
 // The store builds (TestFlight and Google Play) are the "preview" and
 // "production" profiles in eas.json. The app reads EXPO_PUBLIC_* when it is
@@ -28,7 +29,20 @@ type EasJson = {
 const root = process.cwd();
 const easJson = JSON.parse(readFileSync(join(root, "eas.json"), "utf8")) as EasJson;
 const appJson = JSON.parse(readFileSync(join(root, "app.json"), "utf8")) as {
-  expo: { ios?: Record<string, unknown>; android?: Record<string, unknown> };
+  expo: {
+    plugins?: Array<string | [string, Record<string, unknown>?]>;
+    ios?: {
+      buildNumber?: string;
+      config?: { usesNonExemptEncryption?: boolean };
+      splash?: { backgroundColor?: string; image?: string };
+    };
+    android?: {
+      versionCode?: number;
+      backgroundColor?: string;
+      splash?: { backgroundColor?: string };
+      blockedPermissions?: string[];
+    };
+  };
 };
 
 /**
@@ -132,6 +146,56 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   assert.equal(production?.distribution, "store");
   assert.equal(production?.autoIncrement, true, "Each store build gets the next build number.");
   assert.ok(easJson.submit?.production, "eas submit --profile production has a profile to start from.");
+}
+
+// What app.json has to say before a binary goes to a store.
+{
+  const { ios, android, plugins = [] } = appJson.expo;
+  const options = (name: string): Record<string, unknown> => {
+    const plugin = plugins.find((entry) => (Array.isArray(entry) ? entry[0] : entry) === name);
+    return (Array.isArray(plugin) ? plugin[1] : undefined) ?? {};
+  };
+
+  assert.equal(
+    ios?.config?.usesNonExemptEncryption,
+    false,
+    "Without the export compliance answer, every TestFlight build waits on Missing Compliance."
+  );
+
+  // The binary links the camera and microphone APIs through expo-image-picker
+  // and expo-audio, although the app never asks for either. Apple refuses an
+  // upload whose Info.plist has no purpose string for them (ITMS-90683), and
+  // `false` in these options deletes the string.
+  const picker = options("expo-image-picker");
+  const audio = options("expo-audio");
+  for (const purpose of [picker.photosPermission, picker.cameraPermission, picker.microphonePermission, audio.microphonePermission]) {
+    assert.equal(typeof purpose, "string", "A purpose string is a sentence, never false.");
+    assert.match(String(purpose), /^[A-Z][^!]+\.$/, "One plain sentence, no exclamation mark.");
+  }
+  assert.equal(
+    audio.microphonePermission,
+    picker.microphonePermission,
+    "Both plugins write the microphone string and the order of the plugins decides which one stays, so they say the same."
+  );
+  assert.match(String(picker.photosPermission), /profile.*horses.*records.*Club posts/, "The photo library is opened for all four.");
+
+  // With the strings in place the image picker plugin no longer removes these itself.
+  for (const permission of ["CAMERA", "RECORD_AUDIO", "SYSTEM_ALERT_WINDOW"]) {
+    assert.ok(
+      android?.blockedPermissions?.includes(`android.permission.${permission}`),
+      `${permission} stays out of the Android manifest.`
+    );
+  }
+
+  // A dark launch on both platforms, in the app's own ink.
+  const { ink } = equinaTheme.colors;
+  assert.equal(ios?.splash?.backgroundColor, ink);
+  assert.equal(android?.splash?.backgroundColor, ink);
+  assert.equal(android?.backgroundColor, ink, "The window behind React is dark too, from the launch screen until the first frame.");
+  assert.ok(
+    ios?.splash?.image && existsSync(join(root, ios.splash.image)),
+    "Without an image, SDK 55 leaves the iOS launch screen on the system colour and ignores the background colour."
+  );
 }
 
 console.log("Store build configuration passed.");

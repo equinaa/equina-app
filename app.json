@@ -18,9 +18,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Choose a photo for your horse profile in Equina.",
-          "cameraPermission": false,
-          "microphonePermission": false
+          "photosPermission": "Equina uses the photos you choose for your profile, your horses, their records and Club posts.",
+          "cameraPermission": "Equina does not use the camera.",
+          "microphonePermission": "Equina does not use the microphone."
         }
       ],
       "expo-video",
@@ -33,7 +33,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": false,
+          "microphonePermission": "Equina does not use the microphone.",
           "recordAudioAndroid": false,
           "enableBackgroundPlayback": false
         }
@@ -42,16 +42,32 @@
     "ios": {
       "supportsTablet": false,
       "usesAppleSignIn": true,
-      "bundleIdentifier": "com.equina.mobile"
+      "bundleIdentifier": "com.equina.mobile",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "splash": {
+        "backgroundColor": "#161512",
+        "image": "./assets/splash.png"
+      }
     },
     "android": {
       "package": "com.equina.mobile",
       "softwareKeyboardLayoutMode": "resize",
+      "backgroundColor": "#161512",
+      "splash": {
+        "backgroundColor": "#161512"
+      },
       "adaptiveIcon": {
         "backgroundColor": "#161512"
       },
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM"
+      ],
+      "blockedPermissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {
