@@ -30,6 +30,7 @@ const root = process.cwd();
 const easJson = JSON.parse(readFileSync(join(root, "eas.json"), "utf8")) as EasJson;
 const appJson = JSON.parse(readFileSync(join(root, "app.json"), "utf8")) as {
   expo: {
+    icon?: string;
     plugins?: Array<string | [string, Record<string, unknown>?]>;
     ios?: {
       buildNumber?: string;
@@ -40,6 +41,7 @@ const appJson = JSON.parse(readFileSync(join(root, "app.json"), "utf8")) as {
       versionCode?: number;
       backgroundColor?: string;
       splash?: { backgroundColor?: string };
+      adaptiveIcon?: { foregroundImage?: string; backgroundColor?: string };
       blockedPermissions?: string[];
     };
   };
@@ -196,6 +198,38 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     ios?.splash?.image && existsSync(join(root, ios.splash.image)),
     "Without an image, SDK 55 leaves the iOS launch screen on the system colour and ignores the background colour."
   );
+}
+
+// The icons, whoever draws them. Today they are provisional: a plain E, ivory on ink.
+{
+  const { icon, android, plugins = [] } = appJson.expo;
+  const notifications = plugins.find((entry) => Array.isArray(entry) && entry[0] === "expo-notifications");
+  const notificationIcon = Array.isArray(notifications) ? notifications[1]?.icon : undefined;
+
+  // A PNG says its size and whether it has an alpha channel in its first 26 bytes.
+  const png = (path: unknown, what: string) => {
+    assert.equal(typeof path, "string", `app.json names ${what}.`);
+    const file = join(root, String(path));
+    assert.ok(existsSync(file), `${what} exists at ${String(path)}.`);
+    const header = readFileSync(file).subarray(0, 26);
+    assert.equal(header.subarray(1, 4).toString("ascii"), "PNG", `${what} is a PNG.`);
+    const colorType = header[25];
+    return { width: header.readUInt32BE(16), height: header.readUInt32BE(20), alpha: colorType === 4 || colorType === 6 };
+  };
+
+  assert.deepEqual(
+    png(icon, "the app icon"),
+    { width: 1024, height: 1024, alpha: false },
+    "The app icon is 1024 x 1024 with no alpha channel: Apple refuses transparency, and Expo would paint transparent corners white."
+  );
+  assert.deepEqual(
+    png(android?.adaptiveIcon?.foregroundImage, "the Android adaptive icon foreground"),
+    { width: 1024, height: 1024, alpha: true },
+    "The Android foreground is 1024 x 1024 on a transparent ground, with the mark inside the middle two thirds."
+  );
+  assert.equal(android?.adaptiveIcon?.backgroundColor, equinaTheme.colors.ink, "Behind the foreground, the app's ink.");
+  const glyph = png(notificationIcon, "the Android notification icon");
+  assert.ok(glyph.alpha && glyph.width === glyph.height && glyph.width >= 96, "The notification icon is a white shape on transparent, 96 px or more.");
 }
 
 console.log("Store build configuration passed.");

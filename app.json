@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "scheme": "equina",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "extra": {
       "eas": {
         "projectId": "e42e13a7-0029-41ca-9d7e-3bb6af63a8a1"
@@ -26,7 +27,12 @@
       "expo-video",
       "expo-asset",
       "expo-secure-store",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png"
+        }
+      ],
       "expo-web-browser",
       "expo-apple-authentication",
       "./plugins/with-storekit-configuration.cjs",
@@ -59,6 +65,7 @@
         "backgroundColor": "#161512"
       },
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#161512"
       },
       "permissions": [
