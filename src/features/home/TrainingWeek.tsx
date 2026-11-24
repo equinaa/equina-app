@@ -3,6 +3,7 @@ import { ChevronRight, Flame, Moon } from "lucide-react-native";
 import type { StreakSummary, WeekDay } from "../../domain/training-streak";
 import { equinaTheme } from "../../ui/theme/theme";
 import { plannedRidesLabel } from "../ride/planned-rides";
+import { rideTrainingLabel } from "../ride/ride-plan";
 import { StreakFlame } from "./StreakFlame";
 
 const letters = ["M", "T", "W", "T", "F", "S", "S"] as const;
@@ -60,14 +61,20 @@ export function WeekRow({ week, size = "compact" }: { week: readonly WeekDay[]; 
   );
 }
 
-/** Home's card: the streak and this week, or the way to plan one. */
+/**
+ * Home's card: Home's horse's streak and this week, or the way to plan one.
+ * Each horse has its own; `horseName` is absent only for a rider with no
+ * horse, whose week is read whole.
+ */
 export function TrainingWeekCard({
   streak,
+  horseName,
   horseNames,
   onOpen,
   onPlan
 }: {
   streak: StreakSummary;
+  horseName?: string;
   horseNames: Record<string, string>;
   onOpen: () => void;
   onPlan: () => void;
@@ -97,7 +104,12 @@ export function TrainingWeekCard({
     );
   }
 
-  const today = streak.todayPlanned.length ? plannedRidesLabel(streak.todayPlanned, horseNames) : null;
+  // The card is the horse's already; its training is enough here.
+  const today = !streak.todayPlanned.length
+    ? null
+    : horseName
+      ? streak.todayPlanned.map((entry) => rideTrainingLabel(entry.trainingType) ?? "Training").join(", ")
+      : plannedRidesLabel(streak.todayPlanned, horseNames);
   const todayLine = streak.todayRidden
     ? "Today's training is in the journal."
     : today
@@ -108,7 +120,7 @@ export function TrainingWeekCard({
     <Pressable
       testID="training-week"
       accessibilityRole="button"
-      accessibilityLabel={`${streak.current} day training streak. ${todayLine}`}
+      accessibilityLabel={`${streak.current} day training streak${horseName ? ` with ${horseName}` : ""}. ${todayLine}`}
       accessibilityHint="Opens your streak and training plan"
       onPress={onOpen}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}

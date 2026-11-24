@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { forgetSignedUrls, signedUrlsFor } from "../src/backend/signed-urls";
-import { disciplineFromHorse, heroPhotoFor, heroPhotoPending, snapshotSetsHomeHorse } from "../src/features/home/home-hero";
+import { planForHorse, ridesForHorse, trainingStreak, type PlanVersion, type TimeOffPeriod } from "../src/domain/training-streak";
+import {
+  disciplineFromHorse,
+  heroPhotoFor,
+  heroPhotoPending,
+  homeTodayFor,
+  homeTodayLabel,
+  snapshotSetsHomeHorse
+} from "../src/features/home/home-hero";
 
 // After sign-in, Home showed a stock picture and then swapped to the rider's
 // own horse photo. These are the rules that keep the swap from happening.
@@ -75,6 +83,53 @@ import { disciplineFromHorse, heroPhotoFor, heroPhotoPending, snapshotSetsHomeHo
   assert.equal(disciplineFromHorse("dressage", undefined), null, "A horse without a discipline no longer turns the rider into Jumping.");
   assert.equal(disciplineFromHorse(undefined, "eventing"), "eventing", "The horse fills in only for a profile with none.");
   assert.equal(disciplineFromHorse(undefined, undefined), null);
+}
+
+// --- What TODAY says ---------------------------------------------------------------------
+// Read from Home's horse's own week, the same scoped streak as the plan card.
+
+{
+  // Monday 26 October 2026. Daimon has dressage on Mondays, Luna jumping on
+  // Tuesdays, Nova has no week.
+  const today = "2026-10-26";
+  const versions: PlanVersion[] = [{
+    effectiveFrom: "2026-10-05",
+    days: [
+      { weekday: 1, trainingType: "dressage", horseId: "daimon" },
+      { weekday: 2, trainingType: "cross-country", horseId: "luna" }
+    ]
+  }];
+  const streakFor = (horseId: string | undefined, periods: TimeOffPeriod[] = []) =>
+    trainingStreak(planForHorse(versions, horseId), ridesForHorse([], horseId), today, periods);
+  const startRide = "Flatwork";
+  const say = (horseId: string | undefined, periods: TimeOffPeriod[] = [], loaded = true) =>
+    homeTodayLabel(
+      homeTodayFor({ streak: loaded ? streakFor(horseId, periods) : undefined, timeOff: periods, horseId, today }),
+      startRide
+    );
+
+  assert.equal(say("daimon"), "Dressage", "The training planned today for Home's horse.");
+  assert.equal(say("luna"), "Rest day", "Luna has a week, with nothing today: never Daimon's dressage.");
+  assert.equal(say("nova"), startRide, "No week at all: the training Start ride opens with, in the same words.");
+  assert.equal(say("daimon", [], false), startRide, "The plan not read yet is never called a rest day.");
+  const daimonOff: TimeOffPeriod[] = [{ horseId: "daimon", kind: "injury", startsOn: "2026-10-25", endsOn: "2026-10-30" }];
+  assert.equal(say("daimon", daimonOff), "Time off", "Time off wins over a ride planned that day.");
+  assert.equal(homeTodayFor({ streak: streakFor("daimon", daimonOff), timeOff: daimonOff, horseId: "daimon", today }).kind, "time-off");
+  assert.equal(say("luna", daimonOff), "Rest day", "Another horse's time off is not Luna's.");
+  const lunaOff: TimeOffPeriod[] = [{ horseId: "luna", kind: "break", startsOn: "2026-10-26", endsOn: "2026-10-26" }];
+  assert.equal(say("luna", lunaOff), "Time off", "Off today, planned or not.");
+  assert.equal(say(undefined), "Dressage", "A rider with no horse reads the week whole.");
+  assert.equal(
+    homeTodayLabel({ kind: "training", trainingType: "cross-country" }, startRide),
+    "Cross-country",
+    "The training's own words."
+  );
+  const later: PlanVersion[] = [{ effectiveFrom: "2026-11-02", days: versions[0]!.days }];
+  assert.equal(
+    homeTodayLabel(homeTodayFor({ streak: trainingStreak(planForHorse(later, "daimon"), [], today), timeOff: [], horseId: "daimon", today }), startRide),
+    startRide,
+    "A week that starts next Monday is no plan today."
+  );
 }
 
 // --- One signed URL per stored file --------------------------------------------------------

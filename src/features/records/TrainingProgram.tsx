@@ -166,7 +166,7 @@ export function TrainingProgram({
           ))}
         </View>
         <Text style={styles.summary}>
-          {planDays.length === 0
+          {!planDays.some((planned) => planned.horseId === horseId)
             ? `No training week yet. Plan the days you ride ${horseName}.`
             : rides === 0
               ? `${horseName} has no rides planned this week.`

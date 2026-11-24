@@ -1,4 +1,6 @@
+import { timeOffOn, type StreakSummary, type TimeOffPeriod } from "../../domain/training-streak";
 import type { Discipline } from "../../domain/types";
+import { rideTrainingLabel } from "../ride/ride-plan";
 
 /**
  * The Home hero waits, dark, while the rider's own horse photo is known to
@@ -46,3 +48,41 @@ export const heroPhotoFor = (input: { pending: boolean; own: string; failed: str
  */
 export const disciplineFromHorse = (profileDiscipline?: Discipline, horseDiscipline?: Discipline) =>
   profileDiscipline ? null : horseDiscipline ?? null;
+
+/**
+ * What today is for Home's horse, for the word after TODAY on the hero.
+ * Read from the same scoped streak as the plan card, so the hero and the
+ * card never disagree: the training planned today; time off when the horse
+ * is off (a ride planned that day is not due); a rest day when the horse has
+ * a week with nothing today. No plan for the horse, or none read yet:
+ * "unplanned", and Home names the training Start ride will open with.
+ */
+export type HomeToday =
+  | { kind: "training"; trainingType: string }
+  | { kind: "time-off" }
+  | { kind: "rest" }
+  | { kind: "unplanned" };
+
+export const homeTodayFor = (input: {
+  /** Home's horse's streak; absent while the plan or the horses are not in. */
+  streak?: Pick<StreakSummary, "hasPlan" | "todayPlanned">;
+  timeOff: readonly TimeOffPeriod[];
+  horseId?: string;
+  today: string;
+}): HomeToday => {
+  if (!input.streak) return { kind: "unplanned" };
+  if (timeOffOn(input.timeOff, input.horseId, input.today)) return { kind: "time-off" };
+  const planned = input.streak.todayPlanned[0];
+  if (planned) return { kind: "training", trainingType: planned.trainingType };
+  return input.streak.hasPlan ? { kind: "rest" } : { kind: "unplanned" };
+};
+
+/** The word after TODAY. `startRideTraining` is the training under Start ride, in the same words. */
+export const homeTodayLabel = (today: HomeToday, startRideTraining: string) =>
+  today.kind === "training"
+    ? rideTrainingLabel(today.trainingType) ?? startRideTraining
+    : today.kind === "time-off"
+      ? "Time off"
+      : today.kind === "rest"
+        ? "Rest day"
+        : startRideTraining;

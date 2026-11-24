@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { plannedRideFor, plannedRidesLabel } from "../src/features/ride/planned-rides";
+import { plannedRidesLabel } from "../src/features/ride/planned-rides";
 import { currentTimeOff, timeOffAction, timeOffIsOver, timeOffLabel, timeOffProblem, timeOffRange } from "../src/features/records/time-off";
 
 // A horse's time off (202610250003) and how a day's planned rides read.
@@ -63,10 +63,6 @@ const TODAY = "2026-10-25";
     "Dressage with Daimon, Jumping with Luna and Hack"
   );
   assert.equal(plannedRidesLabel([], names), "");
-  const today = [{ horseId: "daimon", trainingType: "dressage" }, { horseId: "luna", trainingType: "jumping" }];
-  assert.equal(plannedRideFor(today, "luna")?.horseId, "luna", "Start ride opens on Home's horse when it is planned today.");
-  assert.equal(plannedRideFor(today, "nova")?.horseId, "daimon", "Else on the first planned ride.");
-  assert.equal(plannedRideFor([], "luna"), undefined);
 }
 
 console.log("Horse time off passed.");

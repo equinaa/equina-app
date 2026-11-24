@@ -1,19 +1,26 @@
 import assert from "node:assert/strict";
+import type { RideEnd } from "../src/backend/contracts";
 import {
   addDays,
   dueOn,
   isoWeekday,
+  mergeHorseWeek,
+  planForHorse,
   planOn,
   plannedOn,
+  ridesForHorse,
   trainingStreak,
   trainingWeek,
   rideDays,
   upcomingPlannedDays,
-  type PlanVersion
+  type PlanVersion,
+  type TimeOffPeriod
 } from "../src/domain/training-streak";
 
-// The training streak counts training days in a row against the rider's plan:
+// The training streak counts training days in a row against a horse's plan:
 // planned days need a ride, days off never break it, an extra ride adds one.
+// Each horse has its own; the blocks without a horse are the unscoped week
+// of a rider with none.
 
 // Rides are placed by the rider's local day, so the file runs in one zone.
 const machineZone = process.env.TZ;
@@ -141,19 +148,26 @@ const faithful = [
   );
 }
 
-// Two horses on Monday, Luna added on top of Daimon. The day needs a ride,
-// and one ride on either horse keeps the streak: it counts training days.
+// Two horses on Monday, Luna added on top of Daimon. Each horse has its own
+// streak: Daimon's rides keep Daimon's, and do nothing for Luna's Monday.
 {
   const twoHorses: PlanVersion = {
     effectiveFrom: "2026-10-05",
     days: [...plan.days, { weekday: 1, trainingType: "jumping", horseId: "luna" }]
   };
-  assert.equal(plannedOn([twoHorses], "2026-10-19").length, 2);
-  assert.equal(trainingStreak([twoHorses], faithful, TODAY).current, 9);
+  assert.equal(plannedOn([twoHorses], "2026-10-19").length, 2, "The stored week still holds both horses.");
+  const onDaimon = faithful.map((completedAt) => ({ completedAt, horseId: "daimon" }));
+  const daimon = trainingStreak(planForHorse([twoHorses], "daimon"), ridesForHorse(onDaimon, "daimon"), TODAY);
+  assert.equal(daimon.current, 9, "Every ride on Daimon counts; the Saturdays, not his planned days, as rides on a day off.");
+  assert.equal(daimon.week.find((day) => day.day === "2026-10-24")?.planned.length, 0, "Saturday's hack has no horse: it is not Daimon's.");
+  const luna = trainingStreak(planForHorse([twoHorses], "luna"), ridesForHorse(onDaimon, "luna"), TODAY);
+  assert.equal(luna.current, 0, "A ride on Daimon does not cover Luna's planned Monday.");
+  assert.equal(luna.hasPlan, true);
+  const lunaMonday = trainingStreak(planForHorse([twoHorses], "luna"), [], "2026-10-26");
   assert.deepEqual(
-    trainingStreak([twoHorses], faithful, "2026-10-26").todayPlanned.map((entry) => entry.horseId),
-    ["daimon", "luna"],
-    "Today lists every horse still to ride."
+    lunaMonday.todayPlanned.map((entry) => entry.horseId),
+    ["luna"],
+    "Today lists only this horse's ride."
   );
 }
 
@@ -189,17 +203,158 @@ const faithful = [
 }
 
 {
-  const upcoming = upcomingPlannedDays([plan], [ride(TODAY)], "2026-10-24", 10);
+  // A rider with no horse: the week is read whole, any ride covers the day.
+  const upcoming = upcomingPlannedDays([plan], [{ completedAt: ride(TODAY) }], "2026-10-24", 10);
   assert.deepEqual(
     upcoming.map((entry) => entry.day),
     ["2026-10-24", "2026-10-26", "2026-10-28", "2026-10-31", "2026-11-02"],
     "The planned days ahead, for the morning reminders."
   );
   assert.deepEqual(
-    upcomingPlannedDays([plan], [ride("2026-10-24")], "2026-10-24", 3).map((entry) => entry.day),
+    upcomingPlannedDays([plan], [{ completedAt: ride("2026-10-24") }], "2026-10-24", 3).map((entry) => entry.day),
     ["2026-10-26"],
     "A planned day already ridden gets no reminder."
   );
+}
+
+// Each horse has its own week and streak. Daimon on Monday and Wednesday,
+// Luna on Tuesday and Saturday, both from Monday 5 October.
+const stable: PlanVersion = {
+  effectiveFrom: "2026-10-05",
+  days: [
+    { weekday: 1, trainingType: "dressage", horseId: "daimon" },
+    { weekday: 3, trainingType: "jumping", horseId: "daimon" },
+    { weekday: 2, trainingType: "flatwork", horseId: "luna" },
+    { weekday: 6, trainingType: "hack", horseId: "luna" }
+  ]
+};
+const on = (horseId: string | undefined, days: string[]) =>
+  days.map((day) => (horseId ? { completedAt: ride(day), horseId } : { completedAt: ride(day) }));
+const daimonRides = on("daimon", ["2026-10-05", "2026-10-07", "2026-10-12", "2026-10-14", "2026-10-19", "2026-10-21"]);
+const lunaRides = on("luna", ["2026-10-06", "2026-10-10", "2026-10-13", "2026-10-17", "2026-10-20", "2026-10-24"]);
+const bothRides = [...daimonRides, ...lunaRides];
+const streakOf = (versions: PlanVersion[], rides: RideEnd[], horseId: string | undefined, today = TODAY, periods: TimeOffPeriod[] = []) =>
+  trainingStreak(planForHorse(versions, horseId), ridesForHorse(rides, horseId), today, periods);
+
+// Two horses, two streaks, each from its own days and rides.
+{
+  const daimon = streakOf([stable], bothRides, "daimon");
+  assert.equal(daimon.current, 6);
+  assert.equal(daimon.startedOn, "2026-10-05");
+  const luna = streakOf([stable], bothRides, "luna");
+  assert.equal(luna.current, 6);
+  assert.equal(luna.startedOn, "2026-10-06");
+  assert.deepEqual(
+    luna.week.map((day) => day.state),
+    ["rest", "ridden", "rest", "rest", "rest", "ridden", "rest"],
+    "Luna's week shows Luna's rides only."
+  );
+}
+
+// A ride on Daimon on Luna's Tuesday does not cover it.
+{
+  const lunaMissed = lunaRides.filter((entry) => !entry.completedAt.startsWith("2026-10-20"));
+  const rides = [...daimonRides, ...on("daimon", ["2026-10-20"]), ...lunaMissed];
+  const luna = streakOf([stable], rides, "luna");
+  assert.equal(luna.current, 1, "Luna's missed Tuesday starts her streak over: only Saturday counts.");
+  assert.equal(luna.best, 4);
+  assert.equal(streakOf([stable], rides, "daimon").current, 7, "For Daimon the Tuesday is a ride on a day off: it adds one.");
+}
+
+// Luna joins the plan on Monday 19: her streak starts there, and her rides
+// before it count for nothing.
+{
+  const daimonOnly: PlanVersion = { effectiveFrom: "2026-10-05", days: stable.days.filter((entry) => entry.horseId === "daimon") };
+  const joined: PlanVersion = { ...stable, effectiveFrom: "2026-10-19" };
+  const versions = [joined, daimonOnly];
+  assert.deepEqual(planForHorse(versions, "luna").map((version) => version.effectiveFrom), ["2026-10-19"]);
+  const luna = streakOf(versions, bothRides, "luna");
+  assert.equal(luna.current, 2);
+  assert.equal(luna.best, 2);
+  assert.equal(luna.startedOn, "2026-10-20");
+  assert.equal(streakOf(versions, bothRides, "daimon").current, 6, "Daimon's streak goes back to his own first week.");
+
+  // From Saturday 24 Luna is taken out of the plan: she has no week again.
+  const lunaOut: PlanVersion = { effectiveFrom: "2026-10-24", days: daimonOnly.days };
+  const later = [...versions, lunaOut];
+  assert.equal(streakOf(later, bothRides, "luna").hasPlan, false, "Home offers to plan Luna's week again.");
+  assert.equal(streakOf(later, bothRides, "daimon").hasPlan, true);
+  assert.equal(streakOf(later, bothRides, "nova").hasPlan, false, "A horse never planned has no week.");
+}
+
+// Time off on Daimon leaves Luna's days due.
+{
+  const daimonOff: TimeOffPeriod[] = [{ horseId: "daimon", kind: "stall-rest", startsOn: "2026-10-19", endsOn: "2026-10-21" }];
+  const daimonRested = daimonRides.filter((entry) => entry.completedAt < ride("2026-10-19"));
+  const lunaMissed = lunaRides.filter((entry) => !entry.completedAt.startsWith("2026-10-20"));
+  const rides = [...daimonRested, ...lunaMissed];
+  assert.equal(streakOf([stable], rides, "daimon", TODAY, daimonOff).current, 4, "Daimon's days off break nothing.");
+  assert.equal(streakOf([stable], rides, "luna", TODAY, daimonOff).current, 1, "Luna was not off: her missed Tuesday still counts.");
+}
+
+// Entries and rides without a horse count for no horse; a rider with no
+// horse at all reads them together, as before.
+{
+  const withHack: PlanVersion = { ...stable, days: [...stable.days, { weekday: 5, trainingType: "hack" }] };
+  const loose = on(undefined, ["2026-10-23"]);
+  assert.equal(planForHorse([withHack], "daimon")[0]?.days.length, 2, "The hack with no horse is not Daimon's.");
+  assert.equal(ridesForHorse([...daimonRides, ...loose], "daimon").length, 6, "A ride with no horse is not Daimon's.");
+  assert.equal(planForHorse([withHack], undefined)[0]?.days.length, 5, "With no horse to scope by, every entry.");
+  assert.equal(ridesForHorse([...bothRides, ...loose], undefined).length, 13, "And every ride.");
+  // Unscoped, any ride covers any planned day: the loose ride keeps Friday
+  // 23, and every ride since the missed Friday 16 counts.
+  assert.equal(streakOf([withHack], [...bothRides, ...loose], undefined).current, 6);
+  assert.equal(streakOf([withHack], bothRides, undefined).current, 1, "Without it, Friday 23 is missed.");
+}
+
+// The reminders: one a day, naming the horses still to ride. Monday has
+// Daimon and Luna, Thursday Nova, who is no longer the rider's.
+{
+  const reminded: PlanVersion = {
+    effectiveFrom: "2026-10-05",
+    days: [
+      { weekday: 1, trainingType: "dressage", horseId: "daimon" },
+      { weekday: 1, trainingType: "jumping", horseId: "luna" },
+      { weekday: 4, trainingType: "hack", horseId: "nova" }
+    ]
+  };
+  const rides = on("daimon", ["2026-10-26"]);
+  const active = new Set(["daimon", "luna"]);
+  const days = upcomingPlannedDays([reminded], rides, "2026-10-26", 4, [], active);
+  assert.deepEqual(days.map((entry) => entry.day), ["2026-10-26"], "No reminder for a horse that is no longer the rider's.");
+  assert.deepEqual(days[0]?.planned.map((entry) => entry.horseId), ["luna"], "Daimon is ridden already: only Luna is left.");
+  const allRidden = upcomingPlannedDays([reminded], [...rides, ...on("luna", ["2026-10-26"])], "2026-10-26", 4, [], active);
+  assert.deepEqual(allRidden, [], "Both ridden: no reminder that day.");
+  assert.deepEqual(
+    upcomingPlannedDays([reminded], rides, "2026-10-26", 4).map((entry) => entry.day),
+    ["2026-10-29"],
+    "With no horses (unscoped), any ride covers the day and every entry is reminded."
+  );
+}
+
+// Saving one horse's week keeps the other horses' days.
+{
+  const current = [
+    { weekday: 1, trainingType: "dressage", horseId: "daimon" },
+    { weekday: 2, trainingType: "flatwork", horseId: "luna" },
+    { weekday: 4, trainingType: "hack", horseId: "nova" },
+    { weekday: 6, trainingType: "hack" }
+  ];
+  const edited = [
+    { weekday: 3, trainingType: "jumping", horseId: "daimon" },
+    { weekday: 2, trainingType: "flatwork", horseId: "luna" }
+  ];
+  assert.deepEqual(
+    mergeHorseWeek(current, edited, "daimon").map((entry) => `${entry.weekday}:${entry.horseId ?? "-"}`),
+    ["2:luna", "4:nova", "6:-", "3:daimon"],
+    "Before the horse list is in, nothing but Daimon's days changes."
+  );
+  assert.deepEqual(
+    mergeHorseWeek(current, edited, "daimon", ["daimon", "luna"]).map((entry) => `${entry.weekday}:${entry.horseId ?? "-"}`),
+    ["2:luna", "6:-", "3:daimon"],
+    "Once it is in, a horse no longer the rider's drops out."
+  );
+  assert.deepEqual(mergeHorseWeek(current, edited, undefined), edited, "Without a horse, the editor's week is the plan.");
 }
 
 {

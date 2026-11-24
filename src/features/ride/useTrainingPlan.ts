@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
-import type { EquinaBackend, HorseTimeOff, HorseTimeOffInput, TrainingPlan, TrainingPlanDay } from "../../backend";
+import type { EquinaBackend, HorseTimeOff, HorseTimeOffInput, RideEnd, TrainingPlan, TrainingPlanDay } from "../../backend";
 import { localToday } from "../../domain/local-day";
-import { addDays, planOn, trainingStreak, upcomingPlannedDays } from "../../domain/training-streak";
+import { addDays, planForHorse, planOn, ridesForHorse, trainingStreak, upcomingPlannedDays } from "../../domain/training-streak";
 import { plannedRidesLabel } from "./planned-rides";
 import { cancelTrainingReminders, reminderWindowDays, syncTrainingReminders } from "./training-reminders";
 
@@ -15,9 +15,13 @@ const messageFor = (error: unknown, fallback: string) => {
 };
 
 /**
- * The rider's training week and the streak counted against it. The streak
- * reads when every ride ended across the whole history, reloaded whenever
- * the journal's total changes (a ride saved, logged or deleted).
+ * The rider's training week and the streak counted against it. Each horse
+ * has its own week and streak: `streak` is Home's horse's, from the plan's
+ * entries and the rides on that horse (training-streak.ts says how). The
+ * plan itself stays whole (`versions`, `currentPlan`): the Horse tab and the
+ * save need every horse. The streak reads when every ride ended across the
+ * whole history, reloaded whenever the journal's total changes (a ride
+ * saved, logged or deleted).
  *
  * `loaded` means the plan was actually read. A failed read is not "no plan":
  * Home does not offer to plan a week the rider already has, the reminders
@@ -28,18 +32,30 @@ export function useTrainingPlan({
   backend,
   enabled,
   journalTotal,
-  horseNames
+  horseNames,
+  horseId,
+  activeHorseIds,
+  horsesReady,
+  rideActive
 }: {
   backend: EquinaBackend | null;
   enabled: boolean;
   /** Rides in the journal: when it changes, the streak is read again. */
   journalTotal: number;
   horseNames: Record<string, string>;
+  /** Home's horse, whose streak this is. None for a rider with no horse: the week is read whole. */
+  horseId?: string;
+  /** The rider's own horses still in the stable: the ones the reminders are for. */
+  activeHorseIds: readonly string[];
+  /** The horse list has arrived. Until then an empty list means nothing. */
+  horsesReady: boolean;
+  /** A ride is under way: no permission prompt over it. */
+  rideActive: boolean;
 }) {
   const [versions, setVersions] = useState<TrainingPlan[]>([]);
   // Every horse's time off: a planned ride on a horse that is off is not due.
   const [timeOff, setTimeOff] = useState<HorseTimeOff[]>([]);
-  const [completions, setCompletions] = useState<string[]>([]);
+  const [completions, setCompletions] = useState<RideEnd[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -50,6 +66,13 @@ export function useTrainingPlan({
   // save rebuild the reminders even when the week itself did not change.
   const askForReminders = useRef(false);
   const [saveTick, setSaveTick] = useState(0);
+  // A week planned on the web, or before this phone was signed in, never
+  // asked this phone for permission: asked once per app session, the first
+  // time the reminders are built here.
+  const askedOnOpen = useRef(false);
+  // Back at the front the reminders are built again, so permission granted
+  // in Settings meanwhile takes effect at once.
+  const [frontTick, setFrontTick] = useState(0);
 
   const refresh = useCallback(async () => {
     const current = ++request.current;
@@ -89,7 +112,9 @@ export function useTrainingPlan({
   // a read that failed at the yard gets another go.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refresh();
+      if (state !== "active") return;
+      setFrontTick((tick) => tick + 1);
+      void refresh();
     });
     return () => subscription.remove();
   }, [refresh]);
@@ -109,36 +134,51 @@ export function useTrainingPlan({
 
   const today = localToday();
   const streak = useMemo(
-    () => trainingStreak(versions, completions, today, timeOff),
-    [versions, completions, today, timeOff]
+    () => trainingStreak(planForHorse(versions, horseId), ridesForHorse(completions, horseId), today, timeOff),
+    [versions, completions, today, timeOff, horseId]
   );
   const currentPlan = planOn(versions, today) as TrainingPlan | null;
 
   // The morning reminders follow the plan and the journal, from a plan that
-  // was actually read. Turned off in the plan, they are cancelled.
+  // was actually read, and from the horse list once it is in: an empty list
+  // before it arrives would cancel every reminder. Turned off in the plan,
+  // they are cancelled. One switch for the rider and one reminder a day,
+  // naming every horse still to ride that day.
   const reminderKey = JSON.stringify([
     currentPlan?.reminders ? currentPlan.days : null,
     timeOff.map((period) => [period.horseId, period.startsOn, period.endsOn]),
-    completions[0] ?? "",
+    completions[0]?.completedAt ?? "",
+    completions[0]?.horseId ?? "",
     today,
-    horseNames
+    horseNames,
+    activeHorseIds
   ]);
   useEffect(() => {
-    if (!enabled || !loaded) return;
-    const ask = askForReminders.current;
+    if (!enabled || !loaded || !horsesReady) return;
+    const asked = askForReminders.current;
     askForReminders.current = false;
     if (!currentPlan?.reminders) {
       void cancelTrainingReminders();
       return;
     }
-    const reminders = upcomingPlannedDays(versions, completions, today, reminderWindowDays, timeOff).map(({ day, planned }) => ({
+    const reminders = upcomingPlannedDays(
+      versions,
+      completions,
+      today,
+      reminderWindowDays,
+      timeOff,
+      new Set(activeHorseIds)
+    ).map(({ day, planned }) => ({
       day,
       planned,
       title: "Training day",
       body: `${plannedRidesLabel(planned, horseNames)} ${planned.length === 1 ? "is" : "are"} on your plan today.`
     }));
-    void syncTrainingReminders(reminders, ask);
-  }, [enabled, loaded, reminderKey, saveTick]);
+    // Never over a ride: the prompt waits for it to end.
+    const askOnOpen = !askedOnOpen.current && !rideActive && reminders.length > 0;
+    if (askOnOpen) askedOnOpen.current = true;
+    void syncTrainingReminders(reminders, asked || askOnOpen);
+  }, [enabled, loaded, horsesReady, reminderKey, saveTick, frontTick, rideActive]);
 
   // Signing out takes the reminders with it. Only a real sign-out: while a
   // session is still being restored, the ones scheduled stay.

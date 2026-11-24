@@ -10,6 +10,27 @@ import type { HorseRecord } from "../../backend";
 export const switchableHorses = (horses: readonly HorseRecord[], userId?: string) =>
   horses.filter((horse) => !horse.archivedAt && (!userId || horse.ownerId === userId));
 
+/**
+ * Whose training week Home reads. Each horse has its own week and streak,
+ * so it is Home's horse (`horseId`). `inPlan` is false for a horse that is
+ * not one of the rider's own in the stable (shared with them, or archived):
+ * it is not in their plan, so Home shows no plan or streak for it. A rider
+ * with no horse of their own has a week that was never per horse: no id,
+ * and the week is read whole.
+ */
+export const trainingScopeFor = (
+  horses: readonly HorseRecord[],
+  selectedHorseId: string,
+  userId?: string
+): { horseId?: string; inPlan: boolean } => {
+  const own = switchableHorses(horses, userId);
+  const selected = horses.find((horse) => horse.id === selectedHorseId);
+  const shared = Boolean(selected && userId && selected.ownerId !== userId);
+  if (selected && (shared || own.length)) return { horseId: selected.id, inPlan: own.includes(selected) };
+  // Only archived horses of their own left: as good as none.
+  return own.length ? { horseId: own[0]!.id, inPlan: true } : { inPlan: true };
+};
+
 /** After a fresh list: the horse already picked if it is still there, else the primary, else the first. */
 export const selectionAfterLoad = (horses: readonly HorseRecord[], current: string) =>
   horses.some((horse) => horse.id === current)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { ChevronDown, ChevronUp, Plus, X } from "lucide-react-native";
+import { ChevronDown, ChevronUp } from "lucide-react-native";
 import type { TrainingPlanDay } from "../../backend";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
@@ -11,28 +11,24 @@ import { reminderHour } from "../ride/training-reminders";
 
 const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
 
-export type PlanHorse = { id: string; name: string };
-
 /** The rides of one weekday, in the order they were added. */
 const entriesOf = (days: readonly TrainingPlanDay[], weekday: number) => days.filter((day) => day.weekday === weekday);
 
 /**
- * The rider's training week: for each day, rest or one ride or more, each with
- * its training and horse. Saved from today on; the weeks before keep the plan
- * they had.
+ * One horse's training week: for each day, rest or a ride, with its training.
+ * Saved from today on; the weeks before keep the plan they had.
  *
- * Opened from a horse (`scopeHorseId`), it shows and edits only that horse's
- * days -- the same plan, seen from the horse. The other horses' rides stay as
- * they are and are named under each day.
+ * Each horse has its own week, so the sheet is always opened for one horse
+ * (`scopeHorseId`) and shows and edits only that horse's days; the other
+ * horses' days stay as they are and are not shown. Only a rider with no horse
+ * at all opens it without one, on the week as it always was.
  */
 export function TrainingPlanSheet({
   visible,
   days: initialDays,
   reminders: initialReminders,
-  horses,
-  horseNames = {},
   scopeHorseId,
-  defaultHorseId,
+  scopeHorseName,
   defaultTrainingType,
   saving,
   error,
@@ -42,14 +38,9 @@ export function TrainingPlanSheet({
   visible: boolean;
   days: readonly TrainingPlanDay[];
   reminders: boolean;
-  /** The rider's own horses: the ones a day can be planned with. */
-  horses: readonly PlanHorse[];
-  /** Every horse the rider can see, for naming rides on a shared or archived horse. */
-  horseNames?: Record<string, string>;
   /** Edits only this horse's days. */
   scopeHorseId?: string;
-  /** Home's horse: a new riding day starts with it. */
-  defaultHorseId?: string;
+  scopeHorseName?: string;
   /** The rider's usual training: a new riding day starts with it. */
   defaultTrainingType: string;
   saving: boolean;
@@ -70,14 +61,10 @@ export function TrainingPlanSheet({
   }, [visible]);
 
   const scoped = Boolean(scopeHorseId);
-  const horseName = (id?: string) => (id ? horses.find((horse) => horse.id === id)?.name ?? horseNames[id] : undefined);
-  const scopeName = horseName(scopeHorseId);
-  const known = (id?: string) => (id && horses.some((horse) => horse.id === id) ? id : undefined);
-  // In the horse's view a day is that horse's ride; in the week, all of them.
+  const scopeName = scoped ? scopeHorseName : undefined;
+  // In the horse's view a day is that horse's ride; without a horse, all of them.
   const shownOf = (weekday: number) =>
     entriesOf(days, weekday).filter((entry) => !scoped || entry.horseId === scopeHorseId);
-  const othersOf = (weekday: number) =>
-    scoped ? entriesOf(days, weekday).filter((entry) => entry.horseId !== scopeHorseId) : [];
 
   const toggle = (weekday: number) => {
     selectionHaptic();
@@ -86,10 +73,7 @@ export function TrainingPlanSheet({
       if (open === weekday) setOpen(null);
       return;
     }
-    const used = new Set(entriesOf(days, weekday).map((entry) => entry.horseId));
-    const horseId = scopeHorseId
-      ?? [known(defaultHorseId), ...horses.map((horse) => horse.id)].find((id) => id && !used.has(id));
-    setDays((current) => [...current, { weekday, trainingType: defaultTrainingType, ...(horseId ? { horseId } : {}) }]);
+    setDays((current) => [...current, { weekday, trainingType: defaultTrainingType, ...(scopeHorseId ? { horseId: scopeHorseId } : {}) }]);
     setOpen(weekday);
   };
 
@@ -98,54 +82,41 @@ export function TrainingPlanSheet({
     entry.weekday === target.weekday && entry.horseId === target.horseId;
   const change = (target: TrainingPlanDay, patch: Partial<TrainingPlanDay>) =>
     setDays((current) => current.map((entry) => (same(entry, target) ? { ...entry, ...patch } : entry)));
-  const remove = (target: TrainingPlanDay) => setDays((current) => current.filter((entry) => !same(entry, target)));
   const remindersDetail = Platform.OS === "web"
     ? `At ${String(reminderHour).padStart(2, "0")}:00 on training days, on the Equina app on your phone.`
     : `At ${String(reminderHour).padStart(2, "0")}:00 on training days you have not logged yet.`;
 
-  const addHorse = (weekday: number) => {
-    const used = new Set(entriesOf(days, weekday).map((entry) => entry.horseId));
-    const horseId = horses.find((horse) => !used.has(horse.id))?.id;
-    if (!horseId) return;
-    selectionHaptic();
-    setDays((current) => [...current, { weekday, trainingType: defaultTrainingType, horseId }]);
-  };
+  // One switch for the rider: opened for one horse, it says it covers them all.
+  const remindersTitle = scoped ? "Morning reminders, for all your horses" : "Morning reminders";
 
   return (
     <EquinaSheet
       visible={visible}
-      title={scoped && scopeName ? `${scopeName}'s training` : "Training week"}
+      title={scopeName ? `${scopeName}'s training week` : "Training week"}
       onDismiss={saving ? () => undefined : onDismiss}
       closeTestID="training-plan-close"
     >
       <View style={styles.body} testID="training-plan">
         <Text style={styles.intro}>
           {scoped
-            ? "The days this horse is ridden in your week, and the training for each. Your streak counts them."
-            : "The days you plan to ride, with the horse and the training for each. Your streak counts them."}
+            ? `The days you ride ${scopeName ?? "this horse"}, and the training for each. ${scopeName ? `${scopeName}'s` : "Its"} streak counts them.`
+            : "The days you plan to ride, and the training for each. Your streak counts them."}
         </Text>
 
         <View style={styles.days}>
           {dayNames.map((name, index) => {
             const weekday = index + 1;
             const shown = shownOf(weekday);
-            const others = othersOf(weekday);
             const on = shown.length > 0;
             const expanded = open === weekday && on;
-            const summary = on
-              ? shown.map((entry) => [rideTrainingLabel(entry.trainingType), scoped ? undefined : horseName(entry.horseId)].filter(Boolean).join(" · ")).join(", ")
-              : "Rest";
-            const usedHorses = new Set(entriesOf(days, weekday).map((entry) => entry.horseId));
-            const othersText = others
-              .map((entry) => [rideTrainingLabel(entry.trainingType), horseName(entry.horseId)].filter(Boolean).join(" · "))
-              .join(", ");
+            const summary = on ? shown.map((entry) => rideTrainingLabel(entry.trainingType)).join(", ") : "Rest";
             return (
               <View key={name} style={[styles.day, on && styles.dayOn]}>
                 <View style={styles.dayTop}>
                   <MotionPressable
                     testID={`training-plan-day-${weekday}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`${name}: ${summary}${othersText ? `. Also ${othersText}` : ""}`}
+                    accessibilityLabel={`${name}: ${summary}`}
                     accessibilityHint={on ? "Shows the training for this day" : undefined}
                     disabled={!on}
                     onPress={() => {
@@ -156,7 +127,6 @@ export function TrainingPlanSheet({
                   >
                     <Text style={styles.dayName}>{name}</Text>
                     <Text numberOfLines={2} style={[styles.daySummary, !on && styles.dayRest]}>{summary}</Text>
-                    {othersText ? <Text numberOfLines={1} style={styles.dayOthers}>Also {othersText}</Text> : null}
                   </MotionPressable>
                   {on ? (
                     expanded
@@ -169,7 +139,7 @@ export function TrainingPlanSheet({
                   <Pressable
                     testID={`training-plan-toggle-${weekday}`}
                     accessibilityRole="switch"
-                    accessibilityLabel={scoped && scopeName ? `Ride ${scopeName} on ${name}` : `Ride on ${name}`}
+                    accessibilityLabel={scopeName ? `Ride ${scopeName} on ${name}` : `Ride on ${name}`}
                     accessibilityState={{ checked: on }}
                     hitSlop={8}
                     onPress={() => toggle(weekday)}
@@ -190,52 +160,6 @@ export function TrainingPlanSheet({
                   <View style={styles.dayEdit}>
                     {shown.map((entry, entryIndex) => (
                       <View key={`${entry.weekday}-${entry.horseId ?? "none"}`} style={[styles.entry, entryIndex > 0 && styles.entryNext]}>
-                        {!scoped && horses.length > 0 ? (
-                          <>
-                            <View style={styles.entryTop}>
-                              <Text style={styles.label}>Horse</Text>
-                              {shown.length > 1 ? (
-                                <MotionPressable
-                                  testID={`training-plan-${weekday}-remove-${entry.horseId ?? "none"}`}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`Remove ${horseName(entry.horseId) ?? "this ride"} from ${name}`}
-                                  hitSlop={6}
-                                  onPress={() => {
-                                    selectionHaptic();
-                                    remove(entry);
-                                  }}
-                                  style={styles.removeButton}
-                                >
-                                  <X size={16} color={equinaTheme.text.secondary} />
-                                </MotionPressable>
-                              ) : null}
-                            </View>
-                            <View accessibilityRole="radiogroup" style={styles.chips}>
-                              {horses.map((horse) => {
-                                const selected = horse.id === entry.horseId;
-                                const taken = !selected && usedHorses.has(horse.id);
-                                return (
-                                  <MotionPressable
-                                    key={horse.id}
-                                    testID={`training-plan-${weekday}-horse-${horse.id}`}
-                                    accessibilityRole="radio"
-                                    accessibilityLabel={horse.name}
-                                    accessibilityState={{ selected, disabled: taken }}
-                                    disabled={taken}
-                                    pressedScale={0.97}
-                                    onPress={() => {
-                                      if (!selected) selectionHaptic();
-                                      change(entry, { horseId: horse.id });
-                                    }}
-                                    style={[styles.chip, selected && styles.chipSelected, taken && styles.chipTaken]}
-                                  >
-                                    <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{horse.name}</Text>
-                                  </MotionPressable>
-                                );
-                              })}
-                            </View>
-                          </>
-                        ) : null}
                         <Text style={styles.label}>Training</Text>
                         <View accessibilityRole="radiogroup" style={styles.chips}>
                           {rideTrainingTypes.map((type) => {
@@ -261,18 +185,6 @@ export function TrainingPlanSheet({
                         </View>
                       </View>
                     ))}
-                    {!scoped && horses.some((horse) => !usedHorses.has(horse.id)) ? (
-                      <MotionPressable
-                        testID={`training-plan-${weekday}-add-horse`}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Ride another horse on ${name}`}
-                        onPress={() => addHorse(weekday)}
-                        style={styles.addHorse}
-                      >
-                        <Plus size={16} color={equinaTheme.colors.brass} />
-                        <Text style={styles.addHorseText}>Another horse</Text>
-                      </MotionPressable>
-                    ) : null}
                   </View>
                 ) : null}
               </View>
@@ -283,7 +195,7 @@ export function TrainingPlanSheet({
         <Pressable
           testID="training-plan-reminders"
           accessibilityRole="switch"
-          accessibilityLabel="Morning reminders"
+          accessibilityLabel={remindersTitle}
           accessibilityHint={remindersDetail}
           accessibilityState={{ checked: reminders }}
           onPress={() => {
@@ -293,7 +205,7 @@ export function TrainingPlanSheet({
           style={styles.reminders}
         >
           <View style={styles.remindersCopy}>
-            <Text style={styles.remindersTitle}>Morning reminders</Text>
+            <Text style={styles.remindersTitle}>{remindersTitle}</Text>
             <Text style={styles.remindersDetail}>{remindersDetail}</Text>
           </View>
           <View pointerEvents="none" accessible={false}>
@@ -348,22 +260,12 @@ const styles = StyleSheet.create({
   dayName: { ...equinaTheme.typography.body, color: equinaTheme.text.primary, fontWeight: "600" },
   daySummary: { ...equinaTheme.typography.meta, color: equinaTheme.colors.brass },
   dayRest: { color: equinaTheme.text.tertiary },
-  dayOthers: { ...equinaTheme.typography.meta, color: equinaTheme.text.tertiary },
   dayEdit: { gap: equinaTheme.spacing.sm, paddingBottom: equinaTheme.spacing.xs },
   entry: { gap: equinaTheme.spacing.sm },
   entryNext: {
     borderTopWidth: 1,
     borderTopColor: equinaTheme.material.separator,
     paddingTop: equinaTheme.spacing.compact
-  },
-  entryTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  removeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: equinaTheme.material.quietPressed
   },
   label: {
     ...equinaTheme.typography.label,
@@ -383,22 +285,8 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   chipSelected: { borderColor: equinaTheme.colors.brass, backgroundColor: equinaTheme.material.selected },
-  chipTaken: { opacity: 0.35 },
   chipText: { ...equinaTheme.typography.meta, color: equinaTheme.text.primary, fontWeight: "600" },
   chipTextSelected: { color: equinaTheme.colors.brass },
-  addHorse: {
-    minHeight: 40,
-    alignSelf: "flex-start",
-    paddingHorizontal: 14,
-    borderRadius: equinaTheme.radius.control,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderColor: "rgba(196,160,90,0.55)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: equinaTheme.spacing.sm
-  },
-  addHorseText: { ...equinaTheme.typography.meta, color: equinaTheme.colors.brass, fontWeight: "600" },
   reminders: {
     flexDirection: "row",
     alignItems: "center",

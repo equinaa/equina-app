@@ -167,15 +167,22 @@ import { TrainingWeekCard } from "./features/home/TrainingWeek";
 import { StreakScreen } from "./features/home/StreakScreen";
 import { TrainingPlanSheet } from "./features/home/TrainingPlanSheet";
 import { useTrainingPlan } from "./features/ride/useTrainingPlan";
-import { plannedRideFor } from "./features/ride/planned-rides";
 import { TrainingProgram } from "./features/records/TrainingProgram";
 import { HorseTimeOffSheet } from "./features/records/HorseTimeOffSheet";
 import type { HorseTimeOff, TrainingPlanDay } from "./backend";
-import type { StreakSummary } from "./domain/training-streak";
-import { switchableHorses } from "./features/records/horse-selection";
+import { mergeHorseWeek, ofHorse, type StreakSummary } from "./domain/training-streak";
+import { switchableHorses, trainingScopeFor } from "./features/records/horse-selection";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
-import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending, snapshotSetsHomeHorse } from "./features/home/home-hero";
+import {
+  disciplineFromHorse,
+  heroPhotoFor,
+  heroPhotoPending as isHeroPhotoPending,
+  homeTodayFor,
+  homeTodayLabel,
+  snapshotSetsHomeHorse,
+  type HomeToday
+} from "./features/home/home-hero";
 import {
   activityCompletion,
   defaultTrainingType,
@@ -1111,34 +1118,51 @@ function EquinaApp() {
     enabled: ridePersistence
   });
   const horseNames = Object.fromEntries(horseRecords.horses.map((record) => [record.id, record.name]));
-  // The rider's training week and the streak counted against it.
+  const ownHorses = switchableHorses(horseRecords.horses, equinaSession.account?.userId);
+  // Each horse has its own training week and streak: Home reads its horse's.
+  // A horse shared with the rider is not in their plan (inPlan false).
+  const trainingScope = trainingScopeFor(horseRecords.horses, horseRecords.selectedHorseId, equinaSession.account?.userId);
   const trainingPlan = useTrainingPlan({
     backend: equinaSession.backend,
     enabled: ridePersistence,
     journalTotal: rideJournal.total,
-    horseNames
+    horseNames,
+    horseId: trainingScope.horseId,
+    activeHorseIds: ownHorses.map((record) => record.id),
+    horsesReady: horseRecords.horsesListed,
+    rideActive
   });
+  // The plan and the horses are both in: before the horse list arrives the
+  // week would be read for no horse, and show another horse's day.
+  const planReady = ridePersistence && trainingPlan.loaded && horseRecords.horsesListed;
   const rememberedTraining =
     rideTrainingTypeById(rideSetupMemory.memory?.trainingTypeId) ?? defaultTrainingType(onboardingDiscipline);
-  // Today's day in the training plan, when it has one. Its horse only while
-  // the rider still has it.
-  // With more than one horse today, the one on Home first.
-  const ridableToday = trainingPlan.streak.todayPlanned.filter((entry) => !entry.horseId || horseNames[entry.horseId]);
-  const todayPlanned = plannedRideFor(ridableToday, horseRecords.selectedHorseId || undefined)
-    ?? trainingPlan.streak.todayPlanned[0];
+  // Today's planned ride for Home's horse, from its own week: never another
+  // horse's.
+  const todayPlanned = planReady ? trainingPlan.streak.todayPlanned[0] : undefined;
   const todayTraining = todayPlanned ? rideTrainingTypeById(todayPlanned.trainingType) : undefined;
-  const todayHorseId = todayPlanned?.horseId && horseNames[todayPlanned.horseId] ? todayPlanned.horseId : undefined;
   const nextTraining = todayTraining ?? rememberedTraining;
   // Editing is only offered before the clock starts, so an open plan is the one to edit.
   const rideSetupDraft = rideActive && ridePlan
     ? { horseId: ridePlan.horseId, trainingType: ridePlan.trainingType, phases: ridePlan.phases }
     : {
-        // The plan's horse for today, else Home's horse -- the last one
-        // picked -- and the remembered one only before the Stable has loaded.
-        horseId: todayHorseId ?? (horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId),
+        // Home's horse -- the last one picked -- and the remembered one only
+        // before the Stable has loaded.
+        horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
         trainingType: nextTraining,
         phases: phasesFor(rideSetupMemory.memory, nextTraining)
       };
+  // The word after TODAY on Home, from the same week as the plan card. In the
+  // demo there is no plan: the rider's discipline stays.
+  const homeToday: HomeToday = homeTodayFor({
+    streak: planReady ? trainingPlan.streak : undefined,
+    timeOff: trainingPlan.timeOff,
+    horseId: trainingScope.horseId,
+    today: localToday()
+  });
+  const homeTodayText = ridePersistence ? homeTodayLabel(homeToday, rideSetupDraft.trainingType.label) : undefined;
+  // Home's ride summary is its horse's rides; the journal itself lists every ride.
+  const homeHorseRides = ridePersistence ? ofHorse(rideJournal.entries, trainingScope.horseId) : [];
   // Add activity opens on Home's horse: the last one the rider picked.
   const activityDraft = {
     horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
@@ -1682,8 +1706,6 @@ function EquinaApp() {
       setDeletingRideId("");
     }
   };
-
-  const ownHorses = switchableHorses(horseRecords.horses, equinaSession.account?.userId);
 
   const pickHorse = async (horseId: string) => {
     setHorseSwitchError("");
@@ -2676,6 +2698,7 @@ function EquinaApp() {
               <HomeScreen
                 horse={horseState}
                 rideEntries={ridePersistence ? rideJournal.entries : []}
+                horseRideEntries={homeHorseRides}
                 riderName={riderDisplayName}
                 arrivingFromOnboarding={onboardingTransitioning}
                 sharedRide={sharedRide}
@@ -2694,14 +2717,18 @@ function EquinaApp() {
                   setHorseSwitchError("");
                   setHorseSwitcherOpen(true);
                 } : undefined}
-                trainingStreak={ridePersistence && trainingPlan.loaded ? trainingPlan.streak : undefined}
-                trainingPlanFailed={ridePersistence && !trainingPlan.loaded && trainingPlan.failed}
+                // A horse shared with the rider is not in their plan: no card for it.
+                trainingStreak={planReady && trainingScope.inPlan ? trainingPlan.streak : undefined}
+                trainingPlanFailed={ridePersistence && trainingScope.inPlan && !trainingPlan.loaded && trainingPlan.failed}
                 onRetryTrainingPlan={() => void trainingPlan.refresh()}
                 horseNames={horseNames}
+                planHorseName={trainingScope.horseId ? horseNames[trainingScope.horseId] : undefined}
+                today={homeToday}
+                todayLabel={homeTodayText}
                 onOpenStreak={() => setStreakOpen(true)}
                 onPlanWeek={() => {
                   trainingPlan.clearError();
-                  setPlanScopeHorseId(undefined);
+                  setPlanScopeHorseId(trainingScope.horseId);
                   setTrainingPlanOpen(true);
                 }}
                 onOpenJournal={ridePersistence ? () => {
@@ -2990,10 +3017,11 @@ function EquinaApp() {
         <StreakScreen
           visible={streakOpen}
           streak={trainingPlan.streak}
+          horseName={trainingScope.horseId ? horseNames[trainingScope.horseId] : undefined}
           onEditPlan={() => {
             setStreakOpen(false);
             trainingPlan.clearError();
-            setPlanScopeHorseId(undefined);
+            setPlanScopeHorseId(trainingScope.horseId);
             setTrainingPlanOpen(true);
           }}
           onClose={() => setStreakOpen(false)}
@@ -3003,23 +3031,22 @@ function EquinaApp() {
           visible={trainingPlanOpen}
           days={trainingPlan.currentPlan?.days ?? []}
           reminders={trainingPlan.currentPlan?.reminders ?? true}
-          horses={ownHorses.map((record) => ({ id: record.id, name: record.name }))}
           scopeHorseId={planScopeHorseId}
-          horseNames={horseNames}
-          defaultHorseId={horseRecords.selectedHorseId || undefined}
+          scopeHorseName={planScopeHorseId ? horseNames[planScopeHorseId] : undefined}
           defaultTrainingType={rememberedTraining.id}
           saving={trainingPlan.saving}
           error={trainingPlanOpen ? trainingPlan.error : undefined}
           onSave={async (days, reminders) => {
-            // Opened from a horse, only that horse's days come from the sheet;
-            // every other horse's are taken from the plan as it is now, in
-            // case it changed while the sheet was open.
-            const toSave = planScopeHorseId
-              ? [
-                  ...(trainingPlan.currentPlan?.days ?? []).filter((day) => day.horseId !== planScopeHorseId),
-                  ...days.filter((day) => day.horseId === planScopeHorseId)
-                ]
-              : days;
+            // Only the sheet's horse's days come from the sheet; every other
+            // horse's are taken from the plan as it is now, in case it
+            // changed while the sheet was open. Days of a horse no longer the
+            // rider's own are dropped, but only once the horse list is in.
+            const toSave = mergeHorseWeek(
+              trainingPlan.currentPlan?.days ?? [],
+              days,
+              planScopeHorseId,
+              horseRecords.horsesListed ? ownHorses.map((record) => record.id) : undefined
+            );
             await trainingPlan.save(toSave, reminders);
             setTrainingPlanOpen(false);
           }}
@@ -3501,6 +3528,7 @@ const shownHeroPhotos = new Set<string>();
 function HomeScreen({
   horse,
   rideEntries,
+  horseRideEntries,
   riderName,
   arrivingFromOnboarding,
   sharedRide,
@@ -3518,6 +3546,9 @@ function HomeScreen({
   trainingPlanFailed,
   onRetryTrainingPlan,
   horseNames,
+  planHorseName,
+  today,
+  todayLabel,
   onOpenStreak,
   onPlanWeek,
   rideMeta: plannedRideMeta,
@@ -3529,6 +3560,8 @@ function HomeScreen({
 }: {
   horse: HorseState;
   rideEntries: readonly RideEntry[];
+  /** Home's horse's rides, for the summary; every ride for a rider with no horse. */
+  horseRideEntries: readonly RideEntry[];
   riderName: string;
   arrivingFromOnboarding: boolean;
   sharedRide: boolean;
@@ -3550,6 +3583,12 @@ function HomeScreen({
   trainingPlanFailed: boolean;
   onRetryTrainingPlan: () => void;
   horseNames: Record<string, string>;
+  /** The horse whose week and streak the card shows; absent for a rider with no horse. */
+  planHorseName?: string;
+  /** What today is for Home's horse in its training week. */
+  today: HomeToday;
+  /** The word after TODAY. Absent in the demo, where the rider's discipline shows. */
+  todayLabel?: string;
   onOpenStreak: () => void;
   onPlanWeek: () => void;
   onToggleRide: () => void;
@@ -3688,14 +3727,26 @@ function HomeScreen({
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const riderFirstName = riderName.trim().split(/[\s-]+/)[0] || "Rider";
-  const heroTitle = horse.rideActive ? "Stay in the rhythm." : recapVisible ? "Nice work." : disciplinePlan.headline;
+  // A day with no ride planned says so. A training day keeps the discipline's
+  // words until there are some for each training.
+  const dayOff = today.kind === "rest"
+    ? {
+        title: "Rest day.",
+        body: horse.hasHorse
+          ? `Nothing is planned for ${horse.name} today. Rest is part of the plan.`
+          : "Nothing is planned for today. Rest is part of the plan."
+      }
+    : today.kind === "time-off"
+      ? { title: "Time off.", body: `${horse.hasHorse ? horse.name : "Your horse"} is off work. Your streak stays safe.` }
+      : null;
+  const heroTitle = horse.rideActive ? "Stay in the rhythm." : recapVisible ? "Nice work." : dayOff?.title ?? disciplinePlan.headline;
   const heroBody = horse.rideActive
     ? disciplinePlan.live
     : recapVisible
       ? horse.hasHorse
         ? `${horse.name} felt ${mood.toLowerCase()}. ${horse.sessionCount} rides are now in the journal.`
         : `That ride felt ${mood.toLowerCase()}. ${horse.sessionCount} rides are now in your journal.`
-      : `${disciplinePlan.plan} ${loadNote}`;
+      : dayOff?.body ?? `${disciplinePlan.plan} ${loadNote}`;
   const rideTitle = horse.rideActive ? "Finish ride" : recapVisible ? "Ride again" : "Start ride";
   const rideMeta = horse.rideActive ? `${discipline} · tap to save` : plannedRideMeta;
   const nextKicker = recapVisible ? "Coach recap" : horse.careLogged ? "Care complete" : "Next";
@@ -3715,8 +3766,8 @@ function HomeScreen({
   // Derived on every render from the entries themselves, so a deleted ride
   // leaves the summary the moment it is deleted and there is no total to drift.
   const [summaryPeriod, setSummaryPeriod] = useState<RidePeriod>("week");
-  const rideSummary = summarise(rideEntries, summaryPeriod, localToday());
-  const newestEntry = [...rideEntries].sort((left, right) => right.completedAt.localeCompare(left.completedAt))[0];
+  const rideSummary = summarise(horseRideEntries, summaryPeriod, localToday());
+  const newestEntry = [...horseRideEntries].sort((left, right) => right.completedAt.localeCompare(left.completedAt))[0];
   const lastRideDay = newestEntry ? localDayOf(newestEntry.completedAt) ?? undefined : undefined;
   const usesPresetHorsePhoto = horsePhotoOptionsByDiscipline[discipline].some(
     (option) => option.value === horsePhoto
@@ -3861,7 +3912,7 @@ function HomeScreen({
             <View style={styles.homeStageContext}>
               <Text style={styles.homeStageContextLabel}>TODAY</Text>
               <View style={styles.homeStageContextDot} />
-              <Text style={styles.homeStageContextValue}>{discipline}</Text>
+              <Text numberOfLines={1} style={styles.homeStageContextValue}>{todayLabel ?? discipline}</Text>
             </View>
             {(horse.rideActive || recapVisible) && (
               <View style={styles.homeStageState}>
@@ -3934,6 +3985,7 @@ function HomeScreen({
         {trainingStreak ? (
           <TrainingWeekCard
             streak={trainingStreak}
+            horseName={planHorseName}
             horseNames={horseNames}
             onOpen={onOpenStreak}
             onPlan={onPlanWeek}
@@ -8349,6 +8401,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   homeStageContext: {
+    flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 8
@@ -8366,6 +8419,7 @@ const styles = StyleSheet.create({
     backgroundColor: equinaTheme.colors.brass
   },
   homeStageContextValue: {
+    flexShrink: 1,
     color: equinaTheme.colors.ivory,
     fontSize: 12,
     lineHeight: 16,

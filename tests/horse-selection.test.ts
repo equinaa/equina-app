@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import type { HorseRecord } from "../src/backend/contracts";
-import { horseToPromote, ownPrimary, selectionAfterLoad, switchableHorses, withPrimary } from "../src/features/records/horse-selection";
+import {
+  horseToPromote,
+  ownPrimary,
+  selectionAfterLoad,
+  switchableHorses,
+  trainingScopeFor,
+  withPrimary
+} from "../src/features/records/horse-selection";
 
 // Which horse is the horse: Home shows the last one picked, and the pick is
 // kept as the primary horse.
@@ -75,6 +82,23 @@ const retired = horse("retired", { archivedAt: "2026-10-20T00:00:00Z" });
   assert.equal(ownPrimary([sharedPrimary, luna, daimon], "rider-a"), "daimon", "The rider's own primary, not a shared one.");
   assert.equal(ownPrimary([luna], "rider-a"), "", "No primary marked.");
   assert.equal(ownPrimary([{ ...daimon, archivedAt: "2026-10-20T00:00:00Z" }], "rider-a"), "", "An archived horse is nobody's primary.");
+}
+
+// Whose training week Home reads: Home's horse, each with its own.
+{
+  assert.deepEqual(trainingScopeFor([daimon, luna], "luna", "rider-a"), { horseId: "luna", inPlan: true }, "Home's horse, not the primary.");
+  assert.deepEqual(
+    trainingScopeFor([daimon, shared], "shared", "rider-a"),
+    { horseId: "shared", inPlan: false },
+    "A shared horse is not in the rider's plan: no card for it."
+  );
+  assert.deepEqual(
+    trainingScopeFor([shared], "shared", "rider-a"),
+    { horseId: "shared", inPlan: false },
+    "Even when it is the only horse Home shows."
+  );
+  assert.deepEqual(trainingScopeFor([], "", "rider-a"), { inPlan: true }, "No horse at all: the week is read whole.");
+  assert.deepEqual(trainingScopeFor([retired], "retired", "rider-a"), { inPlan: true }, "Only archived horses of their own: as good as none.");
 }
 
 console.log("Horse selection passed.");
