@@ -139,10 +139,19 @@ npx eas-cli@latest env:set --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value "
   The rehearsal also asks the project itself whether the address and the key are its own (one request for the auth service's public settings), because a wrong letter or a key cut short has the right shape and still makes a build nobody can sign in to. Add `--offline` to skip that question.
 
 - **Local builds.** `eas build --local` runs the same guard, and its `.ipa` or `.aab` can go to a store like any other. It is not the same build, though: it uses the Node installed on this computer, not the one pinned in `base`, and it cannot read an EAS variable of Secret visibility, one more reason the two above are plain text. It also takes whatever the terminal exports. The guard's first line lists every `EXPO_PUBLIC_` name the build sees: read it before you submit.
+- **Local builds and `CI`.** With `CI` set, Expo skips the cache reset the native build asks for, and Metro's cache, shared by every checkout on this machine, can hand the app the `EXPO_PUBLIC_` values of an earlier bundle. The guard stops a local build from a terminal that sets `CI`; run `unset CI` first. EAS's own machines start with an empty cache.
+- **Check the finished file before you submit it.** The guard reads the environment, not what was compiled. Count the project's address in the bundle; it must be 1 or more:
+
+  ```bash
+  unzip -p build.aab base/assets/index.android.bundle | LC_ALL=C grep -a -c "<project-ref>.supabase.co"
+  unzip -p build.ipa 'Payload/*.app/main.jsbundle' | LC_ALL=C grep -a -c "<project-ref>.supabase.co"
+  ```
+
+  Keep `grep -a` on the pipe: `strings` on macOS cuts long lines and can report 0 for a bundle that has the address.
 - **One place for each name.** When a name is in `eas.json` and also an EAS variable, EAS CLI says the `eas.json` value is used and prints a warning, but Expo does not document the order and the build machine joins the two itself. Do not depend on it: the guard stops a build whose switch differs from `eas.json`, and the rehearsal names anything set twice.
 - **Never run `eas env:push` without `--path`.** It uploads `.env.local` by default, with its development-only keys and tokens. `eas env:pull` without `--path` overwrites `.env.local`.
 - **Selling stays off.** The app opens its paywall only with a store key (`EXPO_PUBLIC_REVENUECAT_*`) and a privacy policy link (`EXPO_PUBLIC_PRIVACY_POLICY_URL`) built in, and the server's side of selling is already on. The first closed test sells nothing and plans are given from the Admin, so the guard stops a store build that carries any of the three. To start selling, take the names out of `notSoldYet` in `scripts/store-build-rules.mjs` in the commit that reviews the paywall, then set them as EAS variables.
-- **Icons and launch screen.** The icons in `assets/` are provisional, a plain E: replace the files and keep their names. `assets/splash.png` is transparent on purpose. Expo SDK 55 only colours the iOS launch screen when it has an image.
+- **Icons and launch screen.** The icons in `assets/` are provisional, a plain E: replace the files and keep their names. `assets/splash.png` is transparent on purpose. Expo SDK 55 only colours the iOS launch screen when it has an image. On Android 12 and later the system also draws the app icon in the middle of the launch screen.
 
 `tests/store-build-config.test.ts` holds the reviewed answer for every `EXPO_PUBLIC_` name the app reads. A new name fails the tests until it has one.
 

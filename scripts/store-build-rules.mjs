@@ -47,6 +47,23 @@ export const isEasBuild = (env) =>
   clean(env.EAS_BUILD_PROFILE) !== "";
 
 /**
+ * Whether the build runs on this computer (`eas build --local`) instead of on
+ * EAS's own machines: the local build plugin names itself as the runner, and
+ * says EAS_BUILD=1 where EAS's machines say true.
+ */
+export const isLocalEasBuild = (env) =>
+  clean(env.EAS_BUILD_RUNNER) === "local-build-plugin" || clean(env.EAS_BUILD) === "1";
+
+/**
+ * Whether Expo CLI takes this shell for CI. Expo reads CI as "true" or "1" and
+ * stops on any other value but "false" or "0", so everything else counts here.
+ */
+const ciIsSet = (env) => {
+  const value = clean(env.CI).toLowerCase();
+  return value !== "" && value !== "false" && value !== "0";
+};
+
+/**
  * Whether the checks apply. Only the development client is let through: it
  * loads its JavaScript from Metro, with the values of .env.local. Any other
  * profile, known or not, produces an app someone installs.
@@ -165,6 +182,17 @@ export const storeBuildProblems = ({ profile, env, switches = {} }) => {
         "is set, and this release sells nothing. With a store key and a privacy link built in, the paywall opens for every tester. Delete it from this environment."
       );
     }
+  }
+
+  // On this computer, a set CI makes Expo skip the cache reset that the native
+  // build asks for (@expo/cli, export/embed/exportEmbedAsync.js), and Metro's
+  // cache, shared by every checkout here, then hands the app the EXPO_PUBLIC_
+  // values of an earlier bundle. EAS's own machines start with an empty cache.
+  if (isLocalEasBuild(env) && ciIsSet(env)) {
+    report(
+      "CI",
+      "is set in this terminal. A build on this computer with CI set can carry the EXPO_PUBLIC_ values of an earlier build. Run it from a terminal without CI (unset CI)."
+    );
   }
 
   // The switches reviewed in git are the ones the build gets.

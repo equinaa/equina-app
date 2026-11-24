@@ -14,6 +14,8 @@ export type StoreBuild = {
 
 export declare const isEasBuild: (env: Env) => boolean;
 
+export declare const isLocalEasBuild: (env: Env) => boolean;
+
 export declare const isStoreBuild: (profile: string | undefined) => boolean;
 
 export declare const reviewedSwitches: (
