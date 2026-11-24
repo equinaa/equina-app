@@ -1,4 +1,5 @@
 import { z } from "npm:zod@3.24.1";
+import { coachContextFor } from "../_shared/coach-context.ts";
 import { handleOptions, HttpError, json, readJson, requireMethod, respondToError } from "../_shared/http.ts";
 import { scriptedCoachReply, scriptedReplyUserIds } from "../_shared/coach-scripted-replies.ts";
 import {
@@ -379,12 +380,15 @@ Deno.serve(async (request) => {
     const { data: preferences, error: preferencesError } = await admin.from("user_preferences")
       .select("*").eq("user_id", user.id).maybeSingle();
     if (preferencesError) throw preferencesError;
-    const reduced = Boolean(preferences?.reduced_personalization);
+    // Account > Privacy and Ralf promises that a switch turned off changes
+    // the next request. What the four switches allow is decided in
+    // coach-context.ts, and each read below happens only where it says so.
+    const allowed = coachContextFor(preferences, conversation.selected_horse_id);
     const basedOn: string[] = [];
     let profile: { display_name?: string; discipline?: string; skill_level?: string } | undefined;
     let horse: { name?: string; breed?: string; discipline?: string } | undefined;
 
-    if (!reduced && preferences?.use_rider_profile !== false) {
+    if (allowed.riderProfile) {
       const { data, error } = await admin.from("profiles").select("display_name,discipline,skill_level")
         .eq("id", user.id).maybeSingle();
       if (error) throw error;
@@ -394,12 +398,12 @@ Deno.serve(async (request) => {
       }
     }
 
-    if (!reduced && preferences?.use_selected_horse !== false && conversation.selected_horse_id) {
-      if (!(await canUseHorse(admin, user.id, conversation.selected_horse_id))) {
+    if (allowed.horseId) {
+      if (!(await canUseHorse(admin, user.id, allowed.horseId))) {
         throw new HttpError(403, "That horse is no longer available.", "horse_forbidden");
       }
       const { data, error } = await admin.from("horses").select("name,breed,discipline")
-        .eq("id", conversation.selected_horse_id).maybeSingle();
+        .eq("id", allowed.horseId).maybeSingle();
       if (error) throw error;
       if (data) {
         horse = data;
@@ -407,13 +411,17 @@ Deno.serve(async (request) => {
       }
     }
     // The plan asks the assistant to give feedback on logged sessions, so the
-    // journal has to reach it. Gated by the same global consent switch as the
-    // rider profile: a rider who reduced personalisation shares nothing.
+    // journal has to reach it, but only with "Ride history" on, and only the
+    // rider's own rides on the horse this conversation is about. With no
+    // horse, the rides logged with no horse: never every horse's.
     let recentRides: Array<Record<string, unknown>> | undefined;
-    if (!reduced) {
-      const { data, error } = await admin.from("ride_entries")
+    if (allowed.rides) {
+      const ownRides = admin.from("ride_entries")
         .select("discipline,focus,planned_duration,elapsed_seconds,completed_phases,total_phases,mood,rider_note,completed_at")
-        .eq("rider_id", user.id)
+        .eq("rider_id", user.id);
+      const { data, error } = await (allowed.rides.horseId
+        ? ownRides.eq("horse_id", allowed.rides.horseId)
+        : ownRides.is("horse_id", null))
         .order("completed_at", { ascending: false })
         .limit(5);
       if (error) throw error;
