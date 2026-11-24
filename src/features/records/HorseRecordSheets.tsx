@@ -388,7 +388,10 @@ export function RecordEditorSheet({
     const result = await DocumentPicker.getDocumentAsync({
       type: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"],
       copyToCacheDirectory: true,
-      multiple: false
+      multiple: false,
+      // The web picker reads the whole file into memory as base64 unless told
+      // not to, before the size check below can refuse it. Nothing uses base64.
+      base64: false
     });
     if (!result.canceled && result.assets[0]) {
       // Refused before it is read, and the file chosen before stays (record-file-limit.ts).
