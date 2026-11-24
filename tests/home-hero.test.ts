@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { forgetSignedUrls, signedUrlsFor } from "../src/backend/signed-urls";
 import { planForHorse, trainingStreak, trainingStreakFor, type PlanVersion, type TimeOffPeriod } from "../src/domain/training-streak";
 import {
+  careLoggedOn,
   disciplineFromHorse,
   heroDayOff,
   heroPhotoFor,
@@ -220,6 +221,20 @@ import { rideTrainingTypeById } from "../src/features/ride/ride-plan";
   );
   assert.equal(summaryHorseId({ horsesListed: true, homeHorseId: "luna", primaryHorseId: "daimon" }), "luna", "Then Home's horse.");
   assert.equal(summaryHorseId({ horsesListed: true, primaryHorseId: "daimon" }), undefined, "A rider with no horse: every ride.");
+}
+
+// --- Whose post-ride care Up next shows as done --------------------------------------------
+// Care logged after a ride on Daimon read "Care complete · Test is up to date"
+// once Home switched to Test, which was never ridden.
+
+{
+  assert.equal(careLoggedOn(null, "daimon"), false, "None logged since the ride.");
+  assert.equal(careLoggedOn({ horseId: "daimon" }, "daimon"), true, "Logged for Daimon: Daimon is up to date.");
+  assert.equal(careLoggedOn({ horseId: "daimon" }, "test"), false, "Home switched to Test: Daimon's care is not Test's.");
+  assert.equal(careLoggedOn({ horseId: "daimon" }, undefined), false, "Nor a Home with no horse.");
+  assert.equal(careLoggedOn({}, undefined), true, "A rider with no horse logs it for no horse, as before.");
+  assert.equal(careLoggedOn({}, "daimon"), false);
+  assert.equal(careLoggedOn(null, undefined), false);
 }
 
 // --- One signed URL per stored file --------------------------------------------------------

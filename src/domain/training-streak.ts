@@ -96,22 +96,26 @@ export const ridesForHorse = (rides: readonly RideEnd[], horseId: string | undef
   ofHorse(rides, horseId).map((ride) => ride.completedAt);
 
 /**
- * One horse's latest ride, for its profile and Home's Up next: the newer of
+ * One horse's latest ride, for its profile and Home's Up next: the newest of
  * its newest ride in the journal (`entries`, newest first, as the journal
- * keeps them) and the ride just finished on it, which the journal may not
- * hold yet. By the same rule as the rest, a ride with no horse is no
- * horse's, and a rider with no horse reads every ride, as the rider's last
- * ride always did. `rideFrom` is the journal's own conversion of a row into
- * the ride the app shows, passed in: the hook it lives in loads only in the
- * app, and this is tested without one.
+ * keeps them), its newest ride read on its own (`older`, for a horse last
+ * ridden before the journal's page) and the ride just finished on it, which
+ * the journal may not hold yet. By the same rule as the rest, a ride with no
+ * horse is no horse's, and a rider with no horse reads every ride, as the
+ * rider's last ride always did. `rideFrom` is the journal's own conversion
+ * of a row into the ride the app shows, passed in: the hook it lives in
+ * loads only in the app, and this is tested without one.
  */
 export const latestRideOf = <Ride extends { completedAt: string }>(
   entries: readonly RideEntry[],
   finished: (Ride & { horseId?: string }) | null,
   horseId: string | undefined,
-  rideFrom: (entry: RideEntry) => Ride
+  rideFrom: (entry: RideEntry) => Ride,
+  older: RideEntry | null = null
 ): Ride | null => {
-  const entry = entries.find((candidate) => belongsTo(candidate, horseId));
+  const inJournal = entries.find((candidate) => belongsTo(candidate, horseId));
+  const readAlone = older && belongsTo(older, horseId) ? older : null;
+  const entry = readAlone && (!inJournal || Date.parse(readAlone.completedAt) > Date.parse(inJournal.completedAt)) ? readAlone : inJournal;
   const saved = entry ? rideFrom(entry) : null;
   const local = finished && belongsTo(finished, horseId) ? finished : null;
   // As instants: the database writes "+00:00" where the app wrote "Z". Once

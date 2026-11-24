@@ -107,10 +107,15 @@ export class RideRepository {
     return count ?? 0;
   }
 
-  /** The single most recent ride, for the home recap. Null when none exists yet. */
-  async latest(): Promise<RideEntry | null> {
-    const { data, error } = await this.client.from("ride_entries")
-      .select("*").order("completed_at", { ascending: false }).limit(1).maybeSingle();
+  /**
+   * The single most recent ride; with a horse, that horse's. Null when none
+   * exists yet. A horse last ridden before the journal's page (listSince),
+   * one back from time off, gets its latest ride from here.
+   */
+  async latest(horseId?: string): Promise<RideEntry | null> {
+    const rides = this.client.from("ride_entries").select("*");
+    const { data, error } = await (horseId ? rides.eq("horse_id", horseId) : rides)
+      .order("completed_at", { ascending: false }).limit(1).maybeSingle();
     if (error) throw backendError(error, "The last ride could not be loaded.");
     return data ? mapRideEntry(data as Record<string, unknown>) : null;
   }

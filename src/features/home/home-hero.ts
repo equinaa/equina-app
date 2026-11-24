@@ -155,3 +155,12 @@ export const homePlanCard = (input: {
  */
 export const summaryHorseId = (input: { horsesListed: boolean; homeHorseId?: string; primaryHorseId?: string }) =>
   input.horsesListed ? input.homeHorseId : input.primaryHorseId;
+
+/**
+ * Whether Up next shows post-ride care as done for Home's horse (the
+ * summary's): only for the horse it was logged for. Care logged on one horse
+ * is not another's when Home switches to it. A rider with no horse logs it
+ * for no horse, as before. Null: none logged since the last ride.
+ */
+export const careLoggedOn = (logged: { horseId?: string } | null, horseId: string | undefined) =>
+  logged !== null && logged.horseId === horseId;

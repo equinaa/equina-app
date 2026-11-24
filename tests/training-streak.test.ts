@@ -364,6 +364,17 @@ const streakOf = (versions: PlanVersion[], rides: RideEnd[], horseId: string | u
   const loose = { id: "ride-2", completedAt: "2026-11-05T15:00:00.000Z" };
   assert.equal(latestRideOf(journal, loose, "daimon", card)?.id, "daimon-3-nov");
   assert.equal(latestRideOf(journal, loose, undefined, card), loose);
+
+  // Test last ridden on 14 September, before the journal's page (the rides
+  // since the start of last month): its newest ride, read on its own.
+  const older = row("test-14-sep", "2026-09-14T16:00:00+00:00", "test");
+  assert.equal(latestRideOf(journal, null, "test", card, older)?.id, "test-14-sep", "Back from time off, Test still has its latest ride.");
+  assert.equal(latestRideOf(journal, null, "daimon", card, older)?.id, "daimon-3-nov", "Never on Daimon.");
+  assert.equal(latestRideOf(journal, null, "luna", card, older), null, "Nor on a horse it was not read for.");
+  assert.equal(latestRideOf(journal, finished, "test", card, older), finished, "The ride just finished on Test is newer.");
+  assert.equal(latestRideOf(loggedLater, null, "test", card, older)?.id, "test-evening", "So is one logged since.");
+  const pastActivity = [...journal, row("test-10-sep", "2026-09-10T16:00:00+00:00", "test")];
+  assert.equal(latestRideOf(pastActivity, null, "test", card, older)?.id, "test-14-sep", "An older activity logged since does not hide it.");
 }
 
 // A week of rest days. A rider with no horse who turned every day to rest

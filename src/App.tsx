@@ -175,6 +175,7 @@ import { ownHorseIdsNow, reminderHorsesFor, switchableHorses, trainingScopeFor }
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import {
+  careLoggedOn,
   disciplineFromHorse,
   heroDayOff,
   heroPhotoFor,
@@ -934,7 +935,9 @@ function EquinaApp() {
   const [ridePlan, setRidePlan] = useState<RidePlan | null>(null);
   // Seeded for demo mode only. A connected account counts its real journal.
   const [localSessionCount, setLocalSessionCount] = useState(4);
-  const [careLogged, setCareLogged] = useState(false);
+  // Post-ride care, and the horse it was logged for: Home's horse then
+  // (none for a rider with no horse). Null until it is, after each ride.
+  const [careLoggedFor, setCareLoggedFor] = useState<{ horseId?: string } | null>(null);
   // Starts at zero. Engagement is the one number a social product must never
   // invent — it is the whole signal a rider reads the feed for.
   const [communityLikes, setCommunityLikes] = useState(0);
@@ -1214,8 +1217,20 @@ function EquinaApp() {
   // profile of the horse the Stable has open. Both used to show the rider's
   // latest ride, another horse's included.
   const journalEntries = ridePersistence ? rideJournal.entries : [];
-  const homeHorseLastRide = latestRideOf(journalEntries, localLastRide, summaryHorse, rideSessionFrom);
-  const profileLastRide = latestRideOf(journalEntries, localLastRide, horseRecords.selectedHorse?.id, rideSessionFrom);
+  const profileHorseId = horseRecords.selectedHorse?.id;
+  // The journal holds the rides since the start of last month (at least the
+  // newest 30). A horse last ridden before that, one back from time off,
+  // still has a latest ride: its newest, read on its own.
+  const horseLatestRead = (horseId: string | undefined) =>
+    ridePersistence && horseId ? rideJournal.horseLatest[horseId] ?? null : null;
+  useEffect(() => {
+    if (!ridePersistence || !rideJournal.loaded) return;
+    for (const horseId of [summaryHorse, profileHorseId]) {
+      if (horseId && !rideJournal.entries.some((entry) => entry.horseId === horseId)) rideJournal.readHorseLatest(horseId);
+    }
+  }, [ridePersistence, rideJournal.loaded, rideJournal.entries, rideJournal.readHorseLatest, summaryHorse, profileHorseId]);
+  const homeHorseLastRide = latestRideOf(journalEntries, localLastRide, summaryHorse, rideSessionFrom, horseLatestRead(summaryHorse));
+  const profileLastRide = latestRideOf(journalEntries, localLastRide, profileHorseId, rideSessionFrom, horseLatestRead(profileHorseId));
   // The app states this number back to the rider as fact ("N rides are now in
   // your journal"), so it has to come from the journal, never from a seed.
   const sessionCount = ridePersistence ? rideJournal.total : localSessionCount;
@@ -1362,7 +1377,8 @@ function EquinaApp() {
     hasHorse: onboardingHasHorse,
     name: rideHorseName,
     sessionCount,
-    careLogged,
+    // Up next says "<horse> is up to date" only for the horse it was logged for.
+    careLogged: careLoggedOn(careLoggedFor, summaryHorse),
     rideActive,
     lastRide
   };
@@ -1671,7 +1687,7 @@ function EquinaApp() {
   const finishRide = (session: RideCompletion) => {
     setRideActive(false);
     setLocalLastRide({ ...session, mood: dailyMood, ...(ridePlan?.horseId ? { horseId: ridePlan.horseId } : {}) });
-    setCareLogged(false);
+    setCareLoggedFor(null);
     setSharedRide(false);
     setLocalSessionCount((count) => count + 1);
     setFocusProgress((progress) => Math.min(100, progress + 10));
@@ -1764,7 +1780,7 @@ function EquinaApp() {
   };
 
   const logCare = () => {
-    setCareLogged(true);
+    setCareLoggedFor({ horseId: summaryHorse });
     refresh(
       onboardingHasHorse
         ? `Care checked for this preview. ${primaryHorseName} is up to date for this session.`
@@ -2093,7 +2109,7 @@ function EquinaApp() {
     setTab("home");
     setLocalLastRide(null);
     setSharedRide(false);
-    setCareLogged(false);
+    setCareLoggedFor(null);
     setCoachDiscipline(onboardingDiscipline);
     setCoachGoal(starterFocus);
     setCoachLoad(defaultCoachLoad);
@@ -2502,7 +2518,7 @@ function EquinaApp() {
     ]);
     setLocalLastRide(null);
     setSharedRide(false);
-    setCareLogged(false);
+    setCareLoggedFor(null);
     setLastRideRecapVisible(false);
     setAccountCreated(true);
     setTab("home");
