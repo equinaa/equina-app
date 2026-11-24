@@ -48,11 +48,12 @@ export const isEasBuild = (env) =>
 
 /**
  * Whether the build runs on this computer (`eas build --local`) instead of on
- * EAS's own machines: the local build plugin names itself as the runner, and
- * says EAS_BUILD=1 where EAS's machines say true.
+ * EAS's own machines: the local build plugin names itself as the runner, after
+ * the terminal's own variables, so the runner alone decides. Expo's build
+ * tools tell the two apart the same way. EAS's machines set CI, so a looser
+ * test here could stop every build there.
  */
-export const isLocalEasBuild = (env) =>
-  clean(env.EAS_BUILD_RUNNER) === "local-build-plugin" || clean(env.EAS_BUILD) === "1";
+export const isLocalEasBuild = (env) => clean(env.EAS_BUILD_RUNNER) === "local-build-plugin";
 
 /**
  * Whether Expo CLI takes this shell for CI. Expo reads CI as "true" or "1" and

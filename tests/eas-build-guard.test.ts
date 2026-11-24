@@ -65,7 +65,8 @@ const about = (problems: string[], name: string) => problems.filter((problem) =>
 // A build on this computer is told apart from one on EAS's machines.
 {
   assert.equal(isLocalEasBuild({ EAS_BUILD_RUNNER: "local-build-plugin" }), true);
-  assert.equal(isLocalEasBuild({ EAS_BUILD: "1" }), true, "A local build says 1.");
+  assert.equal(isLocalEasBuild({ EAS_BUILD: "1", EAS_BUILD_RUNNER: "eas-build" }), false, "EAS's machines, whatever EAS_BUILD says.");
+  assert.equal(isLocalEasBuild({ EAS_BUILD: "1" }), false, "Without the runner's name nothing says the build is local.");
   assert.equal(isLocalEasBuild({ EAS_BUILD: "true", EAS_BUILD_RUNNER: "eas-build" }), false, "EAS's own machines.");
   assert.equal(isLocalEasBuild({}), false);
 }
@@ -274,11 +275,13 @@ for (const profile of ["preview", "production"]) {
   for (const ci of [undefined, "", "0", "false", "False"]) {
     assert.deepEqual(problemsWith({ ...local, CI: ci }), [], "Without CI a local build goes through.");
   }
-  assert.deepEqual(
-    problemsWith({ EAS_BUILD: "true", EAS_BUILD_RUNNER: "eas-build", CI: "1" }),
-    [],
-    "EAS's own machines set CI and start with an empty cache: nothing to stop there."
-  );
+  for (const easBuild of ["true", "1"]) {
+    assert.deepEqual(
+      problemsWith({ EAS_BUILD: easBuild, EAS_BUILD_RUNNER: "eas-build", CI: "1" }),
+      [],
+      "EAS's own machines set CI and start with an empty cache: nothing to stop there, however EAS_BUILD is spelled."
+    );
+  }
   assert.deepEqual(problemsWith({ CI: "1" }), [], "Outside a build, CI means nothing to the rules.");
   // The Expo CLI that expo itself loads: its own copy first, else the shared one.
   const expoCli = [join(root, "node_modules", "expo", "node_modules", "@expo", "cli"), join(root, "node_modules", "@expo", "cli")].find(
