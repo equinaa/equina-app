@@ -243,16 +243,56 @@ assert.doesNotMatch(coachEdgeSource, /console\.(log|error)\([^)]*(message|email|
 // its own status and code, which the app turns into the plans rather than an
 // error.
 assert.match(coachEdgeSource, /PT402[\s\S]{0,200}402[\s\S]{0,200}coach_credits_exhausted/);
-// The fixed reply for a listed account is answered before any context is read
-// or any credit is spent, and the model is never asked.
+// Where a step of coach-chat sits. The step is named by a statement the
+// function holds exactly once, so comparing two positions compares the order
+// the handler runs them in. A looser anchor proves nothing: `role: "user"`
+// also matches the MessageRow type at the top of the file.
+const coachStep = (statement: string) => {
+  const at = coachEdgeSource.indexOf(statement);
+  assert.ok(at > 0 && at === coachEdgeSource.lastIndexOf(statement), `coach-chat must hold "${statement}" exactly once.`);
+  return at;
+};
+// The text of a block of coach-chat, from the statement that opens it to the
+// brace that closes it.
+const coachBlock = (opener: string) => {
+  const start = coachStep(opener);
+  let depth = 0;
+  for (let at = start + opener.lastIndexOf("{"); at < coachEdgeSource.length; at += 1) {
+    if (coachEdgeSource[at] === "{") depth += 1;
+    else if (coachEdgeSource[at] === "}" && --depth === 0) return coachEdgeSource.slice(start, at + 1);
+  }
+  throw new Error(`"${opener}" is never closed.`);
+};
+const coachRequestCounted = coachStep('admin.rpc("record_coach_request"');
+const coachRiderMessageSaved = coachStep("body: input.message,");
+const coachPreferencesRead = coachStep('admin.from("user_preferences")');
+const coachCreditSpent = coachStep('admin.rpc("spend_coach_credits"');
+const coachModelAsked = coachStep("await providerReply(");
+// The fixed reply for a listed account is answered once the rider's message is
+// saved, and before any context is read or any credit is spent; the model is
+// never asked.
 assert.match(coachEdgeSource, /from "\.\.\/_shared\/coach-scripted-replies\.ts"/);
 assert.match(coachEdgeSource, /Deno\.env\.get\("EQUINA_SCRIPTED_REPLY_USER_IDS"\)/);
-assert.ok(
-  coachEdgeSource.indexOf("if (scriptedText)") > coachEdgeSource.indexOf('role: "user"') &&
-    coachEdgeSource.indexOf("if (scriptedText)") < coachEdgeSource.indexOf('from("user_preferences")') &&
-    coachEdgeSource.indexOf("if (scriptedText)") < coachEdgeSource.indexOf('rpc("spend_coach_credits"'),
-  "The fixed reply must come after the rider's message is saved and before context, credits and the model."
-);
+{
+  const scriptedReply = coachBlock("if (scriptedText) {");
+  const scriptedStart = coachStep("if (scriptedText) {");
+  const scriptedEnd = scriptedStart + scriptedReply.length;
+  assert.ok(
+    coachStep("Deno.serve(") < coachRequestCounted &&
+      coachRequestCounted < coachRiderMessageSaved &&
+      coachRiderMessageSaved < scriptedStart,
+    "The fixed reply must come after the request is counted and the rider's message is saved."
+  );
+  assert.ok(
+    scriptedEnd < coachPreferencesRead && coachPreferencesRead < coachCreditSpent && coachCreditSpent < coachModelAsked,
+    "The fixed reply must come before context, credits and the model."
+  );
+  // The branch saves the fixed text and ends by answering: nothing below it
+  // runs for a fixed reply, and nothing in it reads context or spends.
+  assert.match(scriptedReply, /body: scriptedText,/);
+  assert.match(scriptedReply, /return json\(\{[^;]*\}\);\s*\}$/, "The fixed-reply branch must end by returning its answer.");
+  assert.doesNotMatch(scriptedReply, /providerReply|spend_coach_credits|user_preferences|ride_entries|from\("profiles"\)|from\("horses"\)/);
+}
 // The model is told to write plain text; these rules were live before they
 // were in the repository, and a deploy must not drop them.
 assert.match(coachEdgeSource, /Never use markdown or other formatting symbols/);
