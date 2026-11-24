@@ -26,7 +26,12 @@
       ],
       "expo-video",
       "expo-asset",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Equina does not use Face ID."
+        }
+      ],
       [
         "expo-notifications",
         {

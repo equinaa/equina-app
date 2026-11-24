@@ -190,6 +190,10 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     picker.microphonePermission,
     "Both plugins write the microphone string and the order of the plugins decides which one stays, so they say the same."
   );
+  // expo-secure-store links the Face ID API, which the app never calls (no
+  // requireAuthentication), and would otherwise write Expo's generic request.
+  const secureStore = options("expo-secure-store");
+  assert.equal(secureStore.faceIDPermission, "Equina does not use Face ID.", "Face ID gets the same plain sentence as the camera.");
   assert.match(String(picker.photosPermission), /profile.*horses.*Club posts/, "The photo library is opened for all three; a record's file comes from the document picker.");
 
   // With the strings in place the image picker plugin no longer removes these itself.
