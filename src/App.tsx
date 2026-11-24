@@ -175,7 +175,7 @@ import type { StreakSummary } from "./domain/training-streak";
 import { switchableHorses } from "./features/records/horse-selection";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { clearActiveRide, useActiveRide } from "./features/ride/useActiveRide";
-import { restoreRun, type ActiveRide } from "./features/ride/active-ride";
+import { restoreRun, rideAlertsOrphanedIn, type ActiveRide } from "./features/ride/active-ride";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending, snapshotSetsHomeHorse } from "./features/home/home-hero";
 import {
@@ -1095,33 +1095,36 @@ function EquinaApp() {
     photoUrl: onboardingHorsePhoto,
     horsesLoaded: horseRecords.horsesLoaded
   });
-  // Phase alerts left by a ride the app was closed on would otherwise keep
-  // calling out phases nobody is riding. A ride brought back below schedules
-  // its own again, after these are gone, so none is doubled.
-  const staleAlertsCleared = useRef<Promise<void>>(Promise.resolve());
+  // Phase alerts left by an earlier launch belong to the ride kept on the
+  // phone, which may still be running by the clock. They stay until the
+  // session says whether that ride comes back: offline or still restoring,
+  // nothing is known yet, and they are what a locked phone hears. A ride
+  // brought back replaces them with its own -- the ride screen cancels these
+  // first, so none is doubled. With no account a ride can come back to, or
+  // none to bring back, they go.
   useEffect(() => {
-    staleAlertsCleared.current = cancelStaleRideAlerts();
-  }, []);
+    if (rideAlertsOrphanedIn(equinaSession.phase)) void cancelStaleRideAlerts();
+  }, [equinaSession.phase]);
   const rideActiveRef = useRef(rideActive);
   rideActiveRef.current = rideActive;
   // A ride in progress when the app or the page was closed opens again
   // straight on the ride screen, at the phase and the time the clock says.
   const restoreRide = (stored: ActiveRide) => {
-    void staleAlertsCleared.current.then(() => {
-      if (rideActiveRef.current) return;
-      setRidePlan(stored.plan);
-      setRideRun(restoreRun(stored.run, stored.plan.phases, Date.now()));
-      setRideActive(true);
-      setRideSetupOpen(false);
-      setLastRideRecapVisible(false);
-      setTab("home");
-    });
+    if (rideActiveRef.current) return;
+    setRidePlan(stored.plan);
+    setRideRun(restoreRun(stored.run, stored.plan.phases, Date.now(), stored.savedAt));
+    setRideActive(true);
+    setRideSetupOpen(false);
+    setLastRideRecapVisible(false);
+    setTab("home");
   };
   const activeRide = useActiveRide(
     equinaSession.session?.user.id,
     accountCreated && (equinaSession.phase === "authenticated" || equinaSession.phase === "demo"),
     (stored) => {
       if (stored) restoreRide(stored);
+      // Nothing to bring back, or one too old or unreadable, now removed.
+      else if (!rideActiveRef.current) void cancelStaleRideAlerts();
     }
   );
   // Every horse the rider has, not only the one selected in the Stable: a
@@ -1303,6 +1306,10 @@ function EquinaApp() {
       setPendingShopConversationId(conversationId);
       setShopMode("browse");
       setShopBuyerView("conversation");
+      // Mid-ride the ride stays in front: the ride screen lives on Home, and
+      // leaving it would stop the phase alerts while the clock runs on. The
+      // conversation waits in the Shop for when the rider opens it.
+      if (rideActiveRef.current) return;
       setTab("gear");
     }
   });

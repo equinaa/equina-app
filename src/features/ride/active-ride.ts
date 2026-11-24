@@ -1,3 +1,4 @@
+import type { SessionPhase } from "../account/useEquinaSession";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
 import {
   isPhase,
@@ -66,7 +67,7 @@ const parsePlan = (value: unknown): RidePlan | null => {
 const parseRun = (value: unknown, phaseCount: number): RideRun | null => {
   if (!value || typeof value !== "object") return null;
   const run = value as Record<string, unknown>;
-  const { startedAt, bankedMs, runningSince, phaseIndex, phaseStarts, phasesDone } = run;
+  const { startedAt, bankedMs, runningSince, phaseIndex, phaseStarts, phasesDone, endedAt } = run;
   // A ride that never started has nothing to come back to.
   if (!finite(startedAt) || !finite(bankedMs) || bankedMs < 0) return null;
   if (runningSince !== null && !finite(runningSince)) return null;
@@ -74,7 +75,16 @@ const parseRun = (value: unknown, phaseCount: number): RideRun | null => {
   if (!Array.isArray(phaseStarts) || phaseStarts.length <= phaseIndex || phaseStarts.length > phaseCount) return null;
   if (!phaseStarts.every((start) => finite(start) && start >= 0)) return null;
   if (typeof phasesDone !== "boolean") return null;
-  return { startedAt, bankedMs, runningSince, phaseIndex, phaseStarts: [...phaseStarts], phasesDone };
+  if (endedAt !== undefined && (!finite(endedAt) || endedAt < startedAt)) return null;
+  return {
+    startedAt,
+    bankedMs,
+    runningSince,
+    phaseIndex,
+    phaseStarts: [...phaseStarts],
+    phasesDone,
+    ...(endedAt === undefined ? {} : { endedAt })
+  };
 };
 
 /** What was stored, or null: unreadable, from another version, not started, or too old. */
@@ -99,11 +109,34 @@ export const parseActiveRide = (raw: string | null | undefined, now: number): Ac
  * The phases that ran out meanwhile are passed silently -- their notifications
  * already said so. Past the planned end, the clock stops at the planned total:
  * a ride the rider forgot to finish is saved as the ride it was, not as the
- * hours the phone spent in a pocket afterwards.
+ * hours the phone spent in a pocket afterwards -- and as finished when that
+ * time ran out (`endedAt`), not on the morning it was found. A paused ride's
+ * clock last stopped at its pause, the last write (`savedAt`).
  */
-export const restoreRun = (run: RideRun, phases: RidePhasePlan[], now: number): RideRun => {
+export const restoreRun = (run: RideRun, phases: RidePhasePlan[], now: number, savedAt = now): RideRun => {
   const synced = syncRun(run, phases, now).run;
   const totalMs = plannedMinutes(phases) * 60_000;
   if (rideElapsedMs(synced, now) <= totalMs) return synced;
-  return { ...synced, bankedMs: totalMs, runningSince: null, phasesDone: true };
+  // The clock reached the total that far into its last stretch, or, paused,
+  // that long before the pause.
+  const endedAt = synced.runningSince === null
+    ? Math.min(savedAt, now) - (synced.bankedMs - totalMs)
+    : synced.runningSince + Math.max(0, totalMs - synced.bankedMs);
+  return {
+    ...synced,
+    bankedMs: totalMs,
+    runningSince: null,
+    phasesDone: true,
+    // Never before the start, whatever the phone's clock said at the write.
+    endedAt: Math.max(synced.startedAt ?? 0, endedAt)
+  };
 };
+
+/**
+ * Whether the session settled where no stored ride can come back, so phase
+ * alerts still scheduled from an earlier launch call out phases nobody is
+ * riding. Restoring, or offline, it has not: the stored ride is still running
+ * by the clock, and its alerts are what reach the locked phone. Signed in, the
+ * stored ride decides once it is read.
+ */
+export const rideAlertsOrphanedIn = (phase: SessionPhase) => phase === "signedOut" || phase === "onboarding";

@@ -206,7 +206,7 @@ export function RideSetupSheet({
     if (problem || !onContinue || starting.current) return;
     if (Platform.OS === "web") {
       // Inside the tap itself, or the browser keeps every chime of the ride silent.
-      cuePhaseChange("phase");
+      cuePhaseChange("phase", true);
       onContinue(plan);
       return;
     }

@@ -150,6 +150,12 @@ export type RideRun = {
   phaseStarts: number[];
   /** Every phase has had its time. The clock still runs until the rider finishes. */
   phasesDone: boolean;
+  /**
+   * Wall-clock ms the ride's planned time ran out, set only on a ride brought
+   * back after its end (`restoreRun`): it is saved as finished then, not when
+   * the rider finally taps Finish.
+   */
+  endedAt?: number;
 };
 
 const minuteMs = 60_000;
@@ -306,6 +312,14 @@ export const ridePhaseEntries = (run: RideRun, phases: RidePhasePlan[], finished
 
 /** Phases the rider reached, the way the journal has always counted them. */
 export const reachedPhases = (run: RideRun) => (run.startedAt === null ? 0 : run.phaseIndex + 1);
+
+/**
+ * When the ride is saved as finished: the tap on Finish, or, for a forgotten
+ * ride brought back after its planned end, the moment that time ran out. Rides
+ * are counted on the day they finished, so one closed the next morning still
+ * belongs to the evening it was ridden.
+ */
+export const rideCompletedAt = (run: RideRun, now: number) => run.endedAt ?? now;
 
 // Remembering ---------------------------------------------------------------
 

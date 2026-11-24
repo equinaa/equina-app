@@ -21,6 +21,7 @@ import {
   Play,
   SendHorizontal,
   Sparkles,
+  VolumeX,
   X
 } from "lucide-react-native";
 import type { RidePhaseEntry } from "../../backend";
@@ -35,7 +36,9 @@ import {
   holdScreenAwake,
   prepareRideCues,
   releaseRideCues,
-  scheduleRideAlerts
+  rideCuesUnlocked,
+  scheduleRideAlerts,
+  unlockRideCues
 } from "./ride-cues";
 import {
   isRunning,
@@ -45,6 +48,7 @@ import {
   plannedMinutes,
   reachedPhases,
   resumeRun,
+  rideCompletedAt,
   rideElapsedMs,
   ridePhaseEntries,
   rideScheduleKey,
@@ -153,6 +157,11 @@ export function RideModeScreen({
   // A chime owed by a phase that changed while the page was hidden. Browsers
   // send no notification, so it plays when the rider looks again.
   const owedCue = useRef<"phase" | "done" | null>(null);
+  // A browser plays a page's sound only after the rider's own tap has played
+  // it. Start training does that; a page reloaded mid-ride (Safari drops one
+  // left behind the lock screen) has had no tap, so its chime is off until
+  // the rider turns it on. Never on a phone.
+  const [chimeOff, setChimeOff] = useState(() => !rideCuesUnlocked());
   const runChange = useRef(onRunChange);
   runChange.current = onRunChange;
   const entryMotion = useRef(new Animated.Value(0)).current;
@@ -303,9 +312,13 @@ export function RideModeScreen({
     runRef.current = next;
     setRun(next);
     setNow(tick);
-    cuePhaseChange("phase");
+    cuePhaseChange("phase", true);
+    setChimeOff(!rideCuesUnlocked());
     pulsePhase();
   };
+
+  // Played inside the tap, which is what turns it on for the phases ahead.
+  const turnChimeOn = () => setChimeOff(!unlockRideCues());
 
   const finishRide = () => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
@@ -314,7 +327,7 @@ export function RideModeScreen({
     onFinish({
       id: `ride-${tick}`,
       startedAt: new Date(run.startedAt ?? tick).toISOString(),
-      completedAt: new Date(tick).toISOString(),
+      completedAt: new Date(rideCompletedAt(run, tick)).toISOString(),
       discipline: plan.trainingType.discipline ?? discipline,
       trainingType: plan.trainingType.id,
       focus: trainingLabel,
@@ -384,6 +397,18 @@ export function RideModeScreen({
         </View>
 
         <View style={styles.rideBottom}>
+          {chimeOff && !done ? (
+            <MotionPressable
+              testID="ride-sound-on"
+              accessibilityRole="button"
+              accessibilityLabel="Turn the chime on"
+              onPress={turnChimeOn}
+              style={[styles.rideQuietButton, styles.rideSoundButton]}
+            >
+              <VolumeX size={17} color={equinaTheme.text.primary} />
+              <Text style={styles.rideSoundText}>Turn the chime on</Text>
+            </MotionPressable>
+          ) : null}
           <View style={styles.ridePhaseTrack}>
             {phases.map((phase, index) => (
               <View
@@ -880,6 +905,16 @@ const styles = StyleSheet.create({
     color: equinaTheme.text.primary,
     fontSize: 16,
     lineHeight: 21,
+    fontWeight: "600"
+  },
+  rideSoundButton: {
+    minHeight: 44,
+    alignSelf: "flex-start"
+  },
+  rideSoundText: {
+    color: equinaTheme.text.primary,
+    fontSize: 14,
+    lineHeight: 19,
     fontWeight: "600"
   },
   ridePrimaryButton: {

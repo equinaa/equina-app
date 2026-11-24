@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
-import { activeRideMaxAgeMs, parseActiveRide, restoreRun, serializeActiveRide } from "../src/features/ride/active-ride";
+import { localDayOf } from "../src/domain/local-day";
+import {
+  activeRideMaxAgeMs,
+  parseActiveRide,
+  restoreRun,
+  rideAlertsOrphanedIn,
+  serializeActiveRide
+} from "../src/features/ride/active-ride";
 import {
   defaultRidePhases,
   pauseRun,
+  rideCompletedAt,
   rideElapsedMs,
   ridePhaseEntries,
   rideTrainingTypeById,
@@ -63,6 +71,8 @@ const started = startRun(readyRun(), t0);
   broken({ run: { ...run, phaseStarts: [] } }, "The phase the ride is in has a start.");
   broken({ run: { ...run, phaseStarts: [0, "x"] } }, "Phase starts are numbers.");
   broken({ run: { ...run, phasesDone: "no" } }, "Done or not.");
+  broken({ run: { ...run, endedAt: "last night" } }, "The end of a forgotten ride is a time.");
+  broken({ run: { ...run, endedAt: t0 - minute } }, "A ride never ends before it started.");
   broken({ plan: { ...storedPlan, phases: [] } }, "A plan has phases.");
   broken({ plan: { ...storedPlan, phases: [{ id: "a", title: "Walk" }] } }, "Each phase is whole.");
   broken({ plan: { ...storedPlan, trainingType: { label: "Dressage" } } }, "The training has its id.");
@@ -118,6 +128,56 @@ const started = startRun(readyRun(), t0);
   // Skipped ahead, then forgotten: still no more than the plan.
   const skipped = skipPhase(skipPhase(started, phases, t0 + 2 * minute), phases, t0 + 4 * minute);
   assert.equal(rideElapsedMs(restoreRun(skipped, phases, t0 + 4 * hour), t0 + 4 * hour), 52 * minute);
+}
+
+{
+  // Forgotten overnight: started at 19:30, the app closed with it, opened at
+  // 07:00 the next morning -- still inside the 12 hours. It is saved as the
+  // evening ride it was: finished at 20:22, when its 52 minutes ran out, and
+  // counted on that day, not on the morning the rider tapped Finish.
+  const evening = new Date(2026, 10, 23, 19, 30).getTime();
+  const morning = new Date(2026, 10, 24, 7, 0).getTime();
+  const ranOut = new Date(2026, 10, 23, 20, 22).getTime();
+  const stored = parseActiveRide(serializeActiveRide(plan, startRun(readyRun(), evening), evening), morning);
+  assert.ok(stored, "Eleven and a half hours on, it still comes back.");
+  const back = restoreRun(stored.run, phases, morning, stored.savedAt);
+  assert.equal(back.endedAt, ranOut);
+  const tapped = morning + 2 * minute;
+  assert.equal(rideCompletedAt(back, tapped), ranOut, "Finished when its time ran out.");
+  assert.equal(localDayOf(rideCompletedAt(back, tapped)), localDayOf(evening), "On the day it was ridden.");
+  assert.equal(rideElapsedMs(back, tapped), 52 * minute);
+
+  // Kept again as it now stands and brought back once more, its end stays put.
+  const again = parseActiveRide(serializeActiveRide(plan, back, tapped), tapped + 10 * minute);
+  assert.ok(again);
+  assert.deepEqual(restoreRun(again.run, phases, tapped + 10 * minute, again.savedAt), back);
+
+  // A ride finished on time ends at the tap; one still inside its plan has no end yet.
+  assert.equal(rideCompletedAt(started, t0 + 40 * minute), t0 + 40 * minute);
+  assert.equal(restoreRun(started, phases, t0 + 30 * minute).endedAt, undefined);
+
+  // Paused in the last phase a moment after its time ran out, before the
+  // clock's next tick noticed, then forgotten: the pause was its last write,
+  // and the time ran out just before it.
+  const coolingDown = syncRun(started, phases, t0 + 51 * minute).run;
+  const pausedAt = t0 + 52 * minute + 200;
+  const pausedBack = restoreRun(pauseRun(coolingDown, pausedAt), phases, t0 + 5 * hour, pausedAt);
+  assert.equal(pausedBack.endedAt, t0 + 52 * minute);
+  assert.equal(pausedBack.phasesDone, true);
+  assert.equal(rideElapsedMs(pausedBack, t0 + 5 * hour), 52 * minute);
+}
+
+{
+  // The phase alerts of a ride kept on the phone stay until the session says
+  // whether it comes back. Offline or still restoring, nothing is known, and
+  // they are what the locked phone hears for the rest of the ride.
+  assert.equal(rideAlertsOrphanedIn("restoring"), false);
+  assert.equal(rideAlertsOrphanedIn("recoverableError"), false, "Offline at launch, the ride still runs by the clock.");
+  assert.equal(rideAlertsOrphanedIn("authenticated"), false, "Signed in, the stored ride decides once it is read.");
+  assert.equal(rideAlertsOrphanedIn("demo"), false);
+  // No account a ride can come back to: nobody is riding those phases.
+  assert.equal(rideAlertsOrphanedIn("signedOut"), true);
+  assert.equal(rideAlertsOrphanedIn("onboarding"), true);
 }
 
 console.log("Active ride passed.");
