@@ -284,6 +284,14 @@ assert.match(coachEdgeSource, /Deno\.env\.get\("EQUINA_SCRIPTED_REPLY_USER_IDS"\
   const scriptedReply = coachBlock("if (scriptedText) {");
   const scriptedStart = coachStep("if (scriptedText) {");
   const scriptedEnd = scriptedStart + scriptedReply.length;
+  // The fixed text is asked for in one place only (the import has no
+  // parenthesis): a second call, placed earlier and answering by itself, would
+  // skip the request count or the saved message without moving this block.
+  const scriptedAsked = coachStep("scriptedCoachReply(");
+  assert.ok(
+    coachRiderMessageSaved < scriptedAsked && scriptedAsked < scriptedStart,
+    "The fixed reply is looked up once, after the rider's message is saved and right before its branch."
+  );
   assert.ok(
     coachStep("Deno.serve(") < coachRequestCounted &&
       coachRequestCounted < coachRiderMessageSaved &&
