@@ -34,6 +34,7 @@ import { equinaTheme } from "../../ui/theme/theme";
 import { cadenceOf, isCareType, nextDueOn, recordTypeLabels } from "../../domain/care-schedule";
 import { disciplineLabel, horseSexOptionLabels } from "../../domain/labels";
 import { localToday } from "../../domain/local-day";
+import { photoTypeProblem } from "../../backend/photo-types";
 import { recordFileTooLarge, recordFileTooLargeMessage } from "./record-file-limit";
 import type { HorseInput, TimelineRecordInput } from "./useHorseRecords";
 
@@ -163,6 +164,11 @@ export function HorseEditorSheet({
       quality: 0.88
     });
     if (!result.canceled && result.assets[0]) {
+      const typeProblem = photoTypeProblem(result.assets[0].mimeType);
+      if (typeProblem) {
+        setLocalError(typeProblem);
+        return;
+      }
       try {
         setPhoto(await imageUploadAsset(result.assets[0]));
       } catch (assetError) {

@@ -12,6 +12,8 @@ import type {
 } from "../../backend";
 import type { Discipline } from "../../domain/types";
 import type { AccountMode } from "./account-types";
+import { EquinaBackendError } from "../../backend/errors";
+import { photoTypeMessage, photoTypeProblem } from "../../backend/photo-types";
 
 const demoStorageKey = "@equina/demo-account-v1";
 
@@ -177,10 +179,15 @@ export function useAccount({
         return;
       }
       if (!backend) throw new Error("Account backend is unavailable.");
+      if (photoTypeProblem(asset.mimeType)) throw new EquinaBackendError(photoTypeMessage, "unsupported_file_type");
       const profile = await backend.account.uploadAvatar(asset);
       onConnectedSnapshot({ ...snapshot, profile });
-    } catch {
-      setError("Profile photo could not be uploaded.");
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof EquinaBackendError && uploadError.code === "unsupported_file_type"
+          ? photoTypeMessage
+          : "Profile photo could not be uploaded."
+      );
       throw new Error("avatar_upload_failed");
     } finally {
       setBusy("");

@@ -47,6 +47,7 @@ import { disciplineLabel } from "../../domain/labels";
 import { newPasswordReady, signInPasswordReady } from "../account/password-rules";
 import { visibleProviders } from "../account/provider-visibility";
 import { emailStepCopy, signInCopy } from "../account/sign-in-copy";
+import { photoTypeProblem } from "../../backend/photo-types";
 
 export type OnboardingStep = "you" | "horse" | "preview";
 export type OnboardingDiscipline = "Dressage" | "Jumping" | "Eventing" | "Trail";
@@ -1204,6 +1205,11 @@ function HorseProfileEditor({
       });
 
       const picked = result.canceled ? undefined : result.assets[0];
+      const typeProblem = picked?.uri ? photoTypeProblem(picked.mimeType) : null;
+      if (typeProblem) {
+        setPhotoIssue(typeProblem);
+        return;
+      }
       if (picked?.uri) {
         selectionHaptic();
         onPhotoChange(picked.uri, {

@@ -27,6 +27,7 @@ import "./client-secret-scan.test";
 import "./support-contact.test";
 import "./root-error.test";
 import "./ralf-notice.test";
+import "./photo-types.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./horse-selection.test");
 await import("./home-hero.test");
