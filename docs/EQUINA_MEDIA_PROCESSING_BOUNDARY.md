@@ -57,6 +57,11 @@ new file) and the original file on the web. `complete-upload` runs the cleaner o
 them as well, and `create-upload-ticket` issues a profile photo ticket for JPEG and
 PNG only.
 
+**Horse portraits** come from the same picker and are cleaned the same way. Only
+the owner sees one today, because no screen shares a horse yet, but the database
+already lets an owner share a horse with another rider (`set_horse_collaborator`),
+and a portrait is usually taken where the horse lives.
+
 Which uploads are cleaned is one list, `cleanedUploadKinds`, decided by who can
 open the file:
 
@@ -64,7 +69,7 @@ open the file:
 | --- | --- | --- |
 | Profile photo (`avatar`) | every rider let into the app, and staff | cleaned |
 | Club photo (`club_post`) | the Club's readers | cleaned |
-| Horse portrait (`horse_photo`) | its owner, the riders the owner shares the horse with, and staff | as sent |
+| Horse portrait (`horse_photo`) | its owner, the riders the owner shares the horse with, and staff | cleaned |
 | Listing photo (`listing_photo`) | anyone, once the listing is visible | as sent |
 | Record file (`horse_record`) | the horse's owner, the riders it is shared with, and staff | as sent, with its SHA-256 |
 | Dispute evidence (`dispute_evidence`) | the buyer, the seller and staff | as sent, with its SHA-256 |

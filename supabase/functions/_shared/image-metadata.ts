@@ -25,10 +25,11 @@ export const cleanablePhotoTypes: readonly string[] = ["image/jpeg", "image/png"
 
 /**
  * The uploads that are cleaned: pictures someone other than the rider who sent
- * them can open. A profile photo is shown to every rider let into the app, and
- * a Club photo to the Club's readers.
+ * them can open. A profile photo is shown to every rider let into the app, a
+ * horse's portrait to the riders its owner shares the horse with, and a Club
+ * photo to the Club's readers.
  */
-export const cleanedUploadKinds: readonly string[] = ["avatar", "club_post"];
+export const cleanedUploadKinds: readonly string[] = ["avatar", "horse_photo", "club_post"];
 
 const ascii = (data: Uint8Array, length: number) => String.fromCharCode(...data.subarray(0, length));
 

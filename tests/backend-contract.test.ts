@@ -395,7 +395,7 @@ assert.doesNotMatch(mediaSafetySource, /console\.(log|error)/);
 // out is in image-metadata.test.ts; here, that complete-upload runs it on every
 // such upload before a row can point at the file, and never keeps a picture it
 // could not clean.
-assert.deepEqual([...cleanedUploadKinds], ["avatar", "club_post"]);
+assert.deepEqual([...cleanedUploadKinds], ["avatar", "horse_photo", "club_post"]);
 {
   const cleaningStart = uploadStep("if (cleanedUploadKinds.includes(ticket.kind)) {");
   const cleaning = uploadBlock("if (cleanedUploadKinds.includes(ticket.kind)) {");
@@ -457,6 +457,7 @@ assert.deepEqual([...cleanedUploadKinds], ["avatar", "club_post"]);
     );
   }
   assert.match(ticketSource, /\n  avatar: \{ bucket: "avatars", max: 10 \* 1024 \* 1024, mime: cleanablePhotoTypes \},/);
+  assert.match(ticketSource, /\n  horse_photo: \{ bucket: "horse-media", max: 15 \* 1024 \* 1024, mime: cleanablePhotoTypes \},/);
 }
 
 const oldUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
