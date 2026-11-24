@@ -324,6 +324,11 @@ export type UploadAsset = {
   uri: string;
   fileName: string;
   mimeType: string;
+  /**
+   * What the picker reported, 0 when it said nothing. Good for showing a size
+   * and for an early limit; the upload declares the bytes it reads instead,
+   * because a picker can report another file's size (upload-flow.ts).
+   */
   byteSize: number;
 };
 
@@ -446,6 +451,9 @@ export type RideEntry = {
 };
 
 export type RideEntryInput = Omit<RideEntry, "id" | "riderId" | "createdAt" | "updatedAt">;
+
+/** When a ride ended and on which horse: all the streak needs of it. */
+export type RideEnd = { completedAt: string; horseId?: string };
 
 /**
  * A horse off work for a stretch of days: resting, on a break, on stall rest,

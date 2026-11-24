@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from "react";
 import {
   Animated,
   KeyboardAvoidingView,
@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewProps,
   type StyleProp,
   type TextInputProps,
   type ViewStyle
@@ -149,9 +150,30 @@ type EquinaSheetProps = {
   children: ReactNode;
   onDismiss: () => void;
   closeTestID?: string;
+  /**
+   * For a sheet that swaps what it shows (a list, then one item of it). A new
+   * key starts the content at the top; without it the item would open at the
+   * scroll position the list was left in.
+   */
+  contentKey?: string;
+  /**
+   * With onScroll, lets such a sheet put the list back where the rider left
+   * it when the item closes, rather than at its top.
+   */
+  scrollRef?: Ref<ScrollView>;
+  onScroll?: ScrollViewProps["onScroll"];
 };
 
-export function EquinaSheet({ visible, title, children, onDismiss, closeTestID }: EquinaSheetProps) {
+export function EquinaSheet({
+  visible,
+  title,
+  children,
+  onDismiss,
+  closeTestID,
+  contentKey,
+  scrollRef,
+  onScroll
+}: EquinaSheetProps) {
   const sheetMotion = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
 
@@ -220,6 +242,10 @@ export function EquinaSheet({ visible, title, children, onDismiss, closeTestID }
             </MotionPressable>
           </View>
           <ScrollView
+            key={contentKey}
+            ref={scrollRef}
+            onScroll={onScroll}
+            scrollEventThrottle={onScroll ? 16 : undefined}
             style={primitiveStyles.sheetScroll}
             contentContainerStyle={primitiveStyles.sheetContent}
             keyboardDismissMode="interactive"
@@ -275,6 +301,11 @@ type EquinaSelectorProps<T extends string> = {
   value: T;
   onChange: (value: T) => void;
   testPrefix: string;
+  /**
+   * What the rider reads, for options whose stored value is not the word to
+   * show ("trail" reads "Leisure"). The testID keeps using the value.
+   */
+  labels?: Partial<Record<T, string>>;
 };
 
 export function EquinaSelector<T extends string>({
@@ -282,7 +313,8 @@ export function EquinaSelector<T extends string>({
   options,
   value,
   onChange,
-  testPrefix
+  testPrefix,
+  labels
 }: EquinaSelectorProps<T>) {
   return (
     <View style={primitiveStyles.selectorBlock}>
@@ -290,12 +322,13 @@ export function EquinaSelector<T extends string>({
       <View accessibilityRole="radiogroup" style={primitiveStyles.selector}>
         {options.map((option) => {
           const selected = option === value;
+          const text = labels?.[option] ?? option;
           return (
             <MotionPressable
               key={option}
               testID={`${testPrefix}-${option.toLowerCase().replaceAll(" ", "-")}`}
               accessibilityRole="radio"
-              accessibilityLabel={option}
+              accessibilityLabel={text}
               accessibilityState={{ selected }}
               pressedScale={0.97}
               onPress={() => {
@@ -304,8 +337,8 @@ export function EquinaSelector<T extends string>({
               }}
               style={[
                 primitiveStyles.selectorItem,
-                option.length >= 10 && primitiveStyles.selectorItemWide,
-                option.length <= 3 && primitiveStyles.selectorItemCompact,
+                text.length >= 10 && primitiveStyles.selectorItemWide,
+                text.length <= 3 && primitiveStyles.selectorItemCompact,
                 selected && primitiveStyles.selectorItemSelected
               ]}
             >
@@ -315,7 +348,7 @@ export function EquinaSelector<T extends string>({
                 minimumFontScale={0.86}
                 style={[primitiveStyles.selectorText, selected && primitiveStyles.selectorTextSelected]}
               >
-                {option}
+                {text}
               </Text>
             </MotionPressable>
           );

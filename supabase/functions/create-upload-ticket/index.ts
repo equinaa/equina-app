@@ -1,17 +1,21 @@
 import { HttpError, handleOptions, json, readJson, requestIdFor, requireMethod, respondToError } from "../_shared/http.ts";
+import { cleanablePhotoTypes } from "../_shared/image-metadata.ts";
 import { createAdminClient, createUserClient, requireActiveUser, requireFeature, requireUser } from "../_shared/supabase.ts";
 
 type UploadKind = "avatar" | "horse_photo" | "horse_record" | "club_post" | "listing_photo" | "dispute_evidence";
 type UploadRequest = { kind: UploadKind; entityId: string; fileName: string; mimeType: string; byteSize: number };
 
-const uploadRules: Record<UploadKind, { bucket: string; max: number; mime: string[] }> = {
-  avatar: { bucket: "avatars", max: 10 * 1024 * 1024, mime: ["image/jpeg", "image/png", "image/heic", "image/heif"] },
-  horse_photo: { bucket: "horse-media", max: 15 * 1024 * 1024, mime: ["image/jpeg", "image/png", "image/heic", "image/heif"] },
+const uploadRules: Record<UploadKind, { bucket: string; max: number; mime: readonly string[] }> = {
+  // A picture other riders can open has its metadata taken out by
+  // complete-upload, and only the types it can clean are taken: a rider with
+  // a HEIC photo is told here, before uploading it.
+  avatar: { bucket: "avatars", max: 10 * 1024 * 1024, mime: cleanablePhotoTypes },
+  horse_photo: { bucket: "horse-media", max: 15 * 1024 * 1024, mime: cleanablePhotoTypes },
   horse_record: { bucket: "horse-records", max: 20 * 1024 * 1024, mime: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"] },
   // Photos only, as JPEG: the app re-encodes every Club photo before upload, and
   // complete-upload takes its metadata out. Video waits for transcoding.
   club_post: { bucket: "club-media", max: 15 * 1024 * 1024, mime: ["image/jpeg"] },
-  listing_photo: { bucket: "listing-media", max: 15 * 1024 * 1024, mime: ["image/jpeg", "image/png", "image/heic", "image/heif"] },
+  listing_photo: { bucket: "listing-media", max: 15 * 1024 * 1024, mime: cleanablePhotoTypes },
   dispute_evidence: { bucket: "dispute-evidence", max: 20 * 1024 * 1024, mime: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"] },
 };
 

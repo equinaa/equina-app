@@ -63,6 +63,8 @@ const phases = defaultRidePhases(dressage);
   assert.equal(new Set(rideTrainingTypes.map((type) => type.id)).size, rideTrainingTypes.length);
   assert.equal(rideTrainingLabel("pole-work"), "Pole work");
   assert.equal(rideTrainingLabel("show-jumping"), "Show jumping", "A type a later app added still reads as words.");
+  assert.equal(rideTrainingTypeById("groundwork"), undefined, "Groundwork is no longer offered in the pickers.");
+  assert.equal(rideTrainingLabel("groundwork"), "Groundwork", "A training the pickers no longer offer still reads as words on old rides.");
   assert.equal(rideTrainingLabel(undefined), undefined);
 
   // Minutes stay whole and inside the limits.
@@ -99,7 +101,7 @@ const phases = defaultRidePhases(dressage);
 // --- The clock ------------------------------------------------------------------------
 
 {
-  // Nothing runs until the rider starts the first phase.
+  // Start training starts the run in the same tap; a run not yet started counts nothing.
   const ready = readyRun();
   assert.equal(rideElapsedMs(ready, t0 + 5 * minute), 0);
   assert.equal(phaseRemainingMs(ready, phases, t0), 10 * minute, "Before the start, the first phase's full time.");
@@ -113,6 +115,14 @@ const phases = defaultRidePhases(dressage);
   assert.equal(startRun(run, t0 + minute), run, "Starting twice changes nothing.");
   assert.equal(reachedPhases(run), 1);
   assert.equal(phaseRemainingMs(run, phases, t0 + 4 * minute), 6 * minute);
+
+  // One tap and the phone goes in the pocket: every phase change is already
+  // there to be scheduled for the locked screen, the first one included.
+  assert.deepEqual(
+    upcomingRideAlerts(run, phases, t0).map((alert) => [alert.phaseIndex, alert.inSeconds]),
+    [[1, 10 * 60], [2, 17 * 60], [3, 37 * 60], [null, 52 * 60]]
+  );
+  assert.notEqual(rideScheduleKey(run, phases), "stopped", "The alerts are scheduled as the ride opens.");
 
   // Inside a phase, nothing to announce.
   assert.equal(syncRun(run, phases, t0 + 9 * minute).entered, null);

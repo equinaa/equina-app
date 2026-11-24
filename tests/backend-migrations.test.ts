@@ -2051,6 +2051,15 @@ const pickLesson = (lesson: string) =>
   db.query<{ plan: PlanState }>("select public.pick_academy_lesson($1) as plan", [lesson]);
 const watchLesson = (lesson: string) =>
   db.query<{ status: string }>("select status from public.academy_playback_source($1)", [lesson]);
+// The signed-in rider's picks as the plan counts them: by when each was made,
+// and by lesson when two were made in the same instant. This database's clock
+// ticks once a millisecond, so two picks in a row can share one, and lesson ids
+// are random: which of those two comes first is not for a test to assume.
+const picksAsCounted = async () =>
+  (await db.query<{ lesson_id: string }>(
+    "select lesson_id from public.academy_lesson_picks order by picked_at, lesson_id"
+  )).rows.map((row) => row.lesson_id);
+const inAnyOrder = (lessons: readonly string[]) => [...lessons].sort();
 const readsPost = async (post: string) =>
   (await db.query("select id from public.club_posts where id = $1", [post])).rows.length === 1;
 // PT402 is what PostgREST turns into HTTP 402: the app shows the plans, not an error.
@@ -2207,11 +2216,14 @@ await asStaff("aal2");
 await db.query("select public.staff_set_plan('rider-d@equina.test', 'free', null, 'Beta over')");
 await asRider(riderD);
 const downgraded = await myPlan();
+// Which picks stay open, whatever order the first two were counted in: they
+// were made one statement apart, the third on Plus long after.
 assert.deepEqual(
-  { tier: downgraded.tier, academy: downgraded.academy },
-  { tier: "free", academy: { picksLimit: 2, picksUsed: 3, openPicks: [seatLesson, canterLesson] } },
+  { tier: downgraded.tier, academy: { ...downgraded.academy, openPicks: inAnyOrder(downgraded.academy.openPicks) } },
+  { tier: "free", academy: { picksLimit: 2, picksUsed: 3, openPicks: inAnyOrder([seatLesson, canterLesson]) } },
   "After a downgrade the earliest picks stay open."
 );
+assert.deepEqual(downgraded.academy.openPicks, (await picksAsCounted()).slice(0, 2), "Open picks are listed as the plan counts them.");
 await assert.rejects(watchLesson(gridLesson), paywall(/not part of your plan/), "A pick beyond the allowance closes again.");
 await assert.rejects(pickLesson(gridLesson), paywall(/No lesson picks left/), "Picking it again does not reopen it.");
 assert.equal(await readsPost(plansPost), false, "Back on Free, the Club closes.");
@@ -2263,10 +2275,12 @@ await db.query("select public.staff_update_plan_tier('free', 'Free', 3, 'read', 
 await asRider(riderD);
 const widened = await myPlan();
 assert.deepEqual(
-  { clubAccess: widened.clubAccess, openPicks: widened.academy.openPicks },
-  { clubAccess: "read", openPicks: [seatLesson, canterLesson, gridLesson] },
+  { clubAccess: widened.clubAccess, openPicks: inAnyOrder(widened.academy.openPicks) },
+  { clubAccess: "read", openPicks: inAnyOrder([seatLesson, canterLesson, gridLesson]) },
   "Free reading the Club and picking three is a row, not a migration."
 );
+assert.deepEqual(widened.academy.openPicks, await picksAsCounted(), "Open picks are listed as the plan counts them.");
+assert.equal(widened.academy.openPicks[2], gridLesson, "The pick made last is counted last.");
 assert.ok(await readsPost(plansPost), "'read' opens the feed.");
 await assert.rejects(
   db.query("insert into public.club_comments(post_id, author_id, body) values ($1, $2, 'Me too!')", [plansPost, riderD]),

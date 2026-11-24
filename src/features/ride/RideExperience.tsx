@@ -18,13 +18,14 @@ import {
   CheckCircle2,
   ChevronRight,
   Pause,
-  Pencil,
   Play,
   SendHorizontal,
   Sparkles,
+  VolumeX,
   X
 } from "lucide-react-native";
-import type { RidePhaseEntry } from "../../backend";
+import type { RidePhaseEntry, RideSource } from "../../backend";
+import { disciplineLabel } from "../../domain/labels";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
@@ -36,7 +37,9 @@ import {
   holdScreenAwake,
   prepareRideCues,
   releaseRideCues,
-  scheduleRideAlerts
+  rideCuesUnlocked,
+  scheduleRideAlerts,
+  unlockRideCues
 } from "./ride-cues";
 import {
   isRunning,
@@ -45,19 +48,19 @@ import {
   phaseRemainingMs,
   plannedMinutes,
   reachedPhases,
-  readyRun,
   resumeRun,
+  rideCompletedAt,
   rideElapsedMs,
   ridePhaseEntries,
   rideScheduleKey,
   rideTrainingLabel,
   skipPhase,
-  startRun,
   syncRun,
   upcomingRideAlerts,
   type RidePlan,
   type RideRun
 } from "./ride-plan";
+import { rideRecapMessage } from "./ride-recap-message";
 
 export type RideMood = "Fresh" | "Focused" | "Tender";
 
@@ -76,9 +79,13 @@ export type RideSession = {
   phases?: RidePhaseEntry[];
   /** Absent when no feeling was recorded: a logged activity can leave it out. */
   mood?: RideMood;
+  /** Only on a ride read back from the journal. Absent means the clock timed it. */
+  source?: RideSource;
 };
 
-export type RideCompletion = Omit<RideSession, "mood">;
+// What the ride screen hands over at Finish. The feeling is picked on the
+// recap and the source is stated by whoever saves it, so neither is in here.
+export type RideCompletion = Omit<RideSession, "mood" | "source">;
 
 export type RideRecommendation = {
   title: string;
@@ -90,7 +97,7 @@ export type RideRecommendation = {
 
 /** What a ride was, in the words the rider chose: "Pole work", or the discipline for older rides. */
 export const rideSessionLabel = (session: Pick<RideSession, "trainingType" | "discipline">) =>
-  rideTrainingLabel(session.trainingType) ?? session.discipline;
+  rideTrainingLabel(session.trainingType) ?? disciplineLabel(session.discipline);
 
 const formatElapsed = (seconds: number) => {
   const hours = Math.floor(seconds / 3600);
@@ -114,42 +121,61 @@ export const rideDurationLabel = (seconds: number) => {
 };
 
 const tickMs = 250;
-// A gap this long between ticks means the phone slept. A phase that began
-// meanwhile was already announced by its notification, so it is not said again.
+// A gap this long between ticks means the phone slept. On a phone, a phase that
+// began meanwhile was already announced by its notification, so it is not said
+// again. A browser sends none: there the chime waits for the page to be seen.
 const sleptMs = 2_500;
 const maxRideMs = 86_400_000;
 
 export function RideModeScreen({
   plan,
+  initialRun,
   discipline,
   image,
+  onRunChange,
   onFinish,
-  onExit,
-  onEdit
+  onExit
 }: {
   plan: RidePlan;
+  /**
+   * Already started: Start training on the setup sheet starts the clock. Also
+   * the saved run when the screen comes back -- after another tab, or after
+   * the app was closed mid-ride.
+   */
+  initialRun: RideRun;
   /** The horse's or the rider's, for a training that has none of its own. */
   discipline: OnboardingDiscipline;
   image: string;
+  /** Every change of the run's state, so the ride in progress can be kept. */
+  onRunChange?: (run: RideRun) => void;
   onFinish: (session: RideCompletion) => void;
   onExit: () => void;
-  /** Back to the setup sheet. Only before the clock starts. */
-  onEdit: () => void;
 }) {
   const phases = plan.phases;
-  const [run, setRun] = useState<RideRun>(readyRun);
+  // Phases that ran out while the screen was away are passed silently: the
+  // notifications said them, or nobody was there to hear.
+  const [run, setRun] = useState<RideRun>(() => syncRun(initialRun, phases, Date.now()).run);
   const [now, setNow] = useState(() => Date.now());
   const runRef = useRef(run);
   const lastTick = useRef(Date.now());
   const alertIds = useRef<string[]>([]);
   const alertQueue = useRef<Promise<void>>(Promise.resolve());
+  // A chime owed by a phase that changed while the page was hidden. Browsers
+  // send no notification, so it plays when the rider looks again.
+  const owedCue = useRef<"phase" | "done" | null>(null);
+  // A browser plays a page's sound only after the rider's own tap has played
+  // it. Start training does that; a page reloaded mid-ride (Safari drops one
+  // left behind the lock screen) has had no tap, so its chime is off until
+  // the rider turns it on. Never on a phone.
+  const [chimeOff, setChimeOff] = useState(() => !rideCuesUnlocked());
+  const runChange = useRef(onRunChange);
+  runChange.current = onRunChange;
   const entryMotion = useRef(new Animated.Value(0)).current;
   const phaseMotion = useRef(new Animated.Value(1)).current;
   const reducedMotion = useReducedMotion();
   const useNativeDriver = Platform.OS !== "web";
   runRef.current = run;
 
-  const started = run.startedAt !== null;
   const running = isRunning(run);
   const done = run.phasesDone;
   const currentPhase = phases[run.phaseIndex] ?? phases[0];
@@ -163,7 +189,9 @@ export function RideModeScreen({
 
   useEffect(() => {
     void prepareRideCues();
-    void cancelStaleRideAlerts();
+    // Queued ahead of the first scheduling below, which now runs at once: the
+    // clock is already going when this screen opens.
+    alertQueue.current = alertQueue.current.then(cancelStaleRideAlerts);
     const releaseScreen = holdScreenAwake();
     return () => {
       releaseScreen();
@@ -203,30 +231,64 @@ export function RideModeScreen({
     }).start();
   };
 
+  // Saved at every change of state. The run is timestamps, so a clock that
+  // simply runs writes nothing.
+  useEffect(() => {
+    runChange.current?.(run);
+  }, [run]);
+
+  const advance = (tick: number) => {
+    const slept = tick - lastTick.current > sleptMs;
+    lastTick.current = tick;
+    setNow(tick);
+    const step = syncRun(runRef.current, phases, tick);
+    if (step.run !== runRef.current) {
+      runRef.current = step.run;
+      setRun(step.run);
+    }
+    const cue = step.finished ? "done" : step.entered !== null && phases[step.entered] ? "phase" : null;
+    const hidden = AppState.currentState === "background";
+    if (Platform.OS === "web") {
+      // A hidden tab or a locked phone hears nothing from a browser; the cue
+      // is kept for the moment the page is seen again.
+      if (hidden) {
+        if (cue) owedCue.current = cue;
+        return;
+      }
+      const owed = cue ?? owedCue.current;
+      owedCue.current = null;
+      if (!owed) return;
+      cuePhaseChange(owed);
+      pulsePhase();
+      return;
+    }
+    // Out of sight -- locked, or another app in front -- the notification
+    // already told the rider; a second chime from the background would not.
+    // "inactive" (Control Center pulled down) still runs and still chimes.
+    if (!cue || slept || hidden) return;
+    cuePhaseChange(cue);
+    pulsePhase();
+  };
+  const advanceRef = useRef(advance);
+  advanceRef.current = advance;
+
   // The clock. Time comes from timestamps; the interval only wakes the screen
   // to show it and to notice when a phase's minutes are up.
   useEffect(() => {
     if (!running) return;
     lastTick.current = Date.now();
-    const interval = setInterval(() => {
-      const tick = Date.now();
-      const slept = tick - lastTick.current > sleptMs;
-      lastTick.current = tick;
-      setNow(tick);
-      const step = syncRun(runRef.current, phases, tick);
-      if (step.run === runRef.current) return;
-      runRef.current = step.run;
-      setRun(step.run);
-      // Out of sight -- locked, or another app in front -- the notification
-      // already told the rider; a second chime from the background would not.
-      // "inactive" (Control Center pulled down) still runs and still chimes.
-      if (slept || AppState.currentState === "background") return;
-      if (step.finished) cuePhaseChange("done");
-      else if (step.entered !== null && phases[step.entered]) cuePhaseChange("phase");
-      pulsePhase();
-    }, tickMs);
+    const interval = setInterval(() => advanceRef.current(Date.now()), tickMs);
     return () => clearInterval(interval);
-  }, [running, phases]);
+  }, [running]);
+
+  // Back in front: the screen is right at once rather than on the next tick,
+  // and in a browser the chime a hidden phase change owed plays now.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") advanceRef.current(Date.now());
+    });
+    return () => subscription.remove();
+  }, []);
 
   // What a locked phone is told, kept in step with the ride: every change of
   // phase still ahead, cleared on pause and rebuilt when the times ahead move.
@@ -239,18 +301,6 @@ export function RideModeScreen({
       alertIds.current = await scheduleRideAlerts(upcomingRideAlerts(runRef.current, phases, Date.now()));
     });
   }, [alertKey, phases]);
-
-  const startRide = () => {
-    const first = phases[0];
-    if (!first) return;
-    const tick = Date.now();
-    const next = startRun(run, tick);
-    runRef.current = next;
-    setRun(next);
-    setNow(tick);
-    cuePhaseChange("phase");
-    pulsePhase();
-  };
 
   const togglePause = () => {
     void Haptics.selectionAsync().catch(() => undefined);
@@ -268,9 +318,13 @@ export function RideModeScreen({
     runRef.current = next;
     setRun(next);
     setNow(tick);
-    cuePhaseChange("phase");
+    cuePhaseChange("phase", true);
+    setChimeOff(!rideCuesUnlocked());
     pulsePhase();
   };
+
+  // Played inside the tap, which is what turns it on for the phases ahead.
+  const turnChimeOn = () => setChimeOff(!unlockRideCues());
 
   const finishRide = () => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
@@ -279,7 +333,7 @@ export function RideModeScreen({
     onFinish({
       id: `ride-${tick}`,
       startedAt: new Date(run.startedAt ?? tick).toISOString(),
-      completedAt: new Date(tick).toISOString(),
+      completedAt: new Date(rideCompletedAt(run, tick)).toISOString(),
       discipline: plan.trainingType.discipline ?? discipline,
       trainingType: plan.trainingType.id,
       focus: trainingLabel,
@@ -310,17 +364,13 @@ export function RideModeScreen({
       : [{ translateY: phaseMotion.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }]
   };
 
-  // Before the start the screen shows the first phase and its full time, so
-  // the rider can get on, settle the phone and the horse, then tap Start.
   const phaseLabel = done ? "ALL PHASES DONE" : (currentPhase?.title ?? "").toUpperCase();
   const timerValue = done ? formatElapsed(elapsedSeconds) : formatElapsed(remainingSeconds);
-  const timerNote = !started
-    ? `Phase 1 of ${phases.length} · the clock waits for you`
-    : done
-      ? "Total ride time"
-      : !running
-        ? `Paused · phase ${run.phaseIndex + 1} of ${phases.length}`
-        : `remaining · phase ${run.phaseIndex + 1} of ${phases.length}`;
+  const timerNote = done
+    ? "Total ride time"
+    : !running
+      ? `Paused · phase ${run.phaseIndex + 1} of ${phases.length}`
+      : `remaining · phase ${run.phaseIndex + 1} of ${phases.length}`;
 
   return (
     <View testID="ride-mode" style={styles.rideRoot}>
@@ -349,23 +399,22 @@ export function RideModeScreen({
             <Text numberOfLines={1} style={styles.rideIdentityMeta}>{trainingLabel} · {totalMinutes} min</Text>
           </View>
 
-          <View style={styles.rideTopActions}>
-            {!started ? (
-              <MotionPressable
-                testID="ride-edit"
-                accessibilityRole="button"
-                accessibilityLabel="Change the training"
-                hitSlop={6}
-                onPress={onEdit}
-                style={styles.rideIconButton}
-              >
-                <Pencil size={18} color={equinaTheme.text.primary} />
-              </MotionPressable>
-            ) : null}
-          </View>
+          <View style={styles.rideTopActions} />
         </View>
 
         <View style={styles.rideBottom}>
+          {chimeOff && !done ? (
+            <MotionPressable
+              testID="ride-sound-on"
+              accessibilityRole="button"
+              accessibilityLabel="Turn the chime on"
+              onPress={turnChimeOn}
+              style={[styles.rideQuietButton, styles.rideSoundButton]}
+            >
+              <VolumeX size={17} color={equinaTheme.text.primary} />
+              <Text style={styles.rideSoundText}>Turn the chime on</Text>
+            </MotionPressable>
+          ) : null}
           <View style={styles.ridePhaseTrack}>
             {phases.map((phase, index) => (
               <View
@@ -403,23 +452,12 @@ export function RideModeScreen({
               <Text numberOfLines={1} style={styles.rideNext}>
                 Next · {nextPhase.title}{nextPhase.detail ? ` · ${nextPhase.detail}` : ""} · {nextPhase.minutes} min
               </Text>
-            ) : started ? (
+            ) : (
               <Text style={styles.rideNext}>Last phase</Text>
-            ) : null}
+            )}
           </Animated.View>
 
-          {!started ? (
-            <MotionPressable
-              testID="ride-start"
-              accessibilityRole="button"
-              accessibilityLabel={`Start ${currentPhase?.title ?? "the first phase"} and the clock`}
-              onPress={startRide}
-              style={styles.ridePrimaryButton}
-            >
-              <Play size={19} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} />
-              <Text style={styles.ridePrimaryText}>Start phase</Text>
-            </MotionPressable>
-          ) : done ? (
+          {done ? (
             <MotionPressable
               testID="ride-toggle"
               accessibilityRole="button"
@@ -505,6 +543,7 @@ export function RideRecapScreen({
   sharingEnabled,
   onMoodChange,
   onOpenAcademy,
+  onAskRalf,
   onShare,
   onHome
 }: {
@@ -513,13 +552,15 @@ export function RideRecapScreen({
   session: RideSession;
   /** Written to the journal, or kept for this session only. */
   saved: boolean;
-  /** Absent while the Academy has no lesson to suggest; the ride goes to Ralf. */
+  /** Absent while the Academy has no lesson to suggest. */
   recommendation?: RideRecommendation;
+  /** Ralf is offered after every ride he can be asked about, lesson or not. */
   ralfAvailable: boolean;
   shared: boolean;
   sharingEnabled: boolean;
   onMoodChange: (mood: RideMood) => void;
   onOpenAcademy: () => void;
+  onAskRalf: () => void;
   onShare: () => void;
   onHome: () => void;
 }) {
@@ -536,6 +577,13 @@ export function RideRecapScreen({
           ? `${horseName} felt quieter. Recovery and a light next session matter more than volume.`
           : `${horseName} stayed with the work. Build the next ride from the same simple rhythm.`,
     [horseName, mood]
+  );
+  // A very short or a very long ride is told so, in place of the usual lines.
+  // The session on screen becomes the journal's newest row once the save
+  // lands, and that row can be an activity logged by hand: it gets no message.
+  const durationMessage = useMemo(
+    () => rideRecapMessage({ elapsedSeconds: session.elapsedSeconds, source: session.source }),
+    [session.elapsedSeconds, session.source]
   );
 
   useEffect(() => {
@@ -604,8 +652,15 @@ export function RideRecapScreen({
           </View>
 
           <View style={styles.recapIntro}>
-            <Text accessibilityRole="header" style={styles.recapTitle}>A useful ride.</Text>
-            <Text style={styles.recapBody}>{completionBody}</Text>
+            <Text accessibilityRole="header" style={styles.recapTitle}>
+              {durationMessage ? durationMessage.title : "A useful ride."}
+            </Text>
+            <Text
+              testID={durationMessage ? `ride-recap-message-${durationMessage.kind}` : undefined}
+              style={[styles.recapBody, durationMessage && styles.recapBodyMessage]}
+            >
+              {durationMessage ? durationMessage.body : completionBody}
+            </Text>
           </View>
 
           <View style={styles.recapMetrics}>
@@ -651,35 +706,48 @@ export function RideRecapScreen({
                 <Sparkles size={18} color={equinaTheme.colors.brass} />
               </View>
 
-              <MotionPressable
-                testID={recommendation ? "ride-recap-recommendation" : "ride-recap-ralf"}
-                accessibilityRole="button"
-                accessibilityLabel={recommendation ? `Open ${recommendation.title} in Academy` : "Review this ride with Ralf"}
-                onPress={onOpenAcademy}
-                style={styles.recapLessonRow}
-              >
-                {recommendation ? (
+              {recommendation ? (
+                <MotionPressable
+                  testID="ride-recap-recommendation"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${recommendation.title} in Academy`}
+                  onPress={onOpenAcademy}
+                  style={styles.recapLessonRow}
+                >
                   <Image source={{ uri: recommendation.image }} resizeMode="cover" style={styles.recapLessonImage} />
-                ) : (
-                  <View style={styles.recapRalfMark}>
-                    <Sparkles size={22} color={equinaTheme.colors.brass} />
-                  </View>
-                )}
-                <View style={styles.recapLessonCopy}>
-                  <Text numberOfLines={2} style={styles.recapLessonTitle}>
-                    {recommendation ? recommendation.title : "Review this ride with Ralf"}
-                  </Text>
-                  {recommendation ? (
+                  <View style={styles.recapLessonCopy}>
+                    <Text numberOfLines={2} style={styles.recapLessonTitle}>{recommendation.title}</Text>
                     <Text numberOfLines={1} style={styles.recapLessonMeta}>
                       {[recommendation.coach, recommendation.duration].filter(Boolean).join(" · ")}
                     </Text>
-                  ) : null}
-                  <Text numberOfLines={2} style={styles.recapLessonBody}>
-                    {recommendation ? recommendation.summary : "What went well, and the one thing to work on next time."}
-                  </Text>
-                </View>
-                <ChevronRight size={18} color={equinaTheme.text.tertiary} />
-              </MotionPressable>
+                    <Text numberOfLines={2} style={styles.recapLessonBody}>{recommendation.summary}</Text>
+                  </View>
+                  <ChevronRight size={18} color={equinaTheme.text.tertiary} />
+                </MotionPressable>
+              ) : null}
+
+              {/* Its own row, not a stand-in for a missing lesson: with a
+                  lesson to suggest the ride used to have no way to Ralf. */}
+              {ralfAvailable ? (
+                <MotionPressable
+                  testID="ride-recap-ralf"
+                  accessibilityRole="button"
+                  accessibilityLabel="Review this ride with Ralf"
+                  onPress={onAskRalf}
+                  style={styles.recapLessonRow}
+                >
+                  <View style={styles.recapRalfMark}>
+                    <Sparkles size={22} color={equinaTheme.colors.brass} />
+                  </View>
+                  <View style={styles.recapLessonCopy}>
+                    <Text numberOfLines={2} style={styles.recapLessonTitle}>Review this ride with Ralf</Text>
+                    <Text numberOfLines={2} style={styles.recapLessonBody}>
+                      What went well, and the one thing to work on next time.
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={equinaTheme.text.tertiary} />
+                </MotionPressable>
+              ) : null}
             </View>
           ) : null}
         </ScrollView>
@@ -875,6 +943,16 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: "600"
   },
+  rideSoundButton: {
+    minHeight: 44,
+    alignSelf: "flex-start"
+  },
+  rideSoundText: {
+    color: equinaTheme.text.primary,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: "600"
+  },
   ridePrimaryButton: {
     minHeight: 56,
     borderRadius: 14,
@@ -993,6 +1071,13 @@ const styles = StyleSheet.create({
     color: equinaTheme.text.secondary,
     fontSize: 14,
     lineHeight: 20
+  },
+  // Advice about the ride's length is the thing to read on this screen, so it
+  // is set a step up from the usual caption: full ivory, one size larger.
+  recapBodyMessage: {
+    color: equinaTheme.text.primary,
+    fontSize: 15,
+    lineHeight: 22
   },
   recapMetrics: {
     minHeight: 58,

@@ -37,6 +37,7 @@ import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { AccountMode } from "../account/account-types";
+import { ralfAiNotice } from "./coach-copy";
 import type { CoachConversationContext, CoachDisplayMessage } from "./coach-types";
 import { useCoachConversation, type CoachConversationController } from "./useCoachConversation";
 
@@ -301,6 +302,8 @@ export function CoachScreen({
                 ))}
               </View>
             ) : null}
+            {/* The demo answers on the device: nothing is sent anywhere, so it does not say so. */}
+            {controller.demo ? null : <Text testID="ralf-ai-notice" style={styles.aiNotice}>{ralfAiNotice}</Text>}
           </View>
         ) : (
           controller.messages.map((message) => (
@@ -773,6 +776,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     fontWeight: "400"
+  },
+  aiNotice: {
+    ...equinaTheme.typography.meta,
+    // The one line that says the question leaves Equina: quiet in size, not in
+    // contrast. Tertiary text is under 4.5:1 on this background.
+    color: equinaTheme.text.secondary,
+    marginTop: 12
   },
   messageBlock: {
     gap: 6

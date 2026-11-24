@@ -31,8 +31,11 @@ import {
   EquinaSheet
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
-import { cadenceOf, isCareType, nextDueOn } from "../../domain/care-schedule";
+import { cadenceOf, isCareType, nextDueOn, recordTypeLabels } from "../../domain/care-schedule";
+import { disciplineLabel, horseSexOptionLabels } from "../../domain/labels";
 import { localToday } from "../../domain/local-day";
+import { photoTypeProblem } from "../../backend/photo-types";
+import { recordFileTooLarge, recordFileTooLargeMessage } from "./record-file-limit";
 import type { HorseInput, TimelineRecordInput } from "./useHorseRecords";
 
 /**
@@ -58,6 +61,10 @@ const omitCadence = (details: Record<string, unknown>): Record<string, unknown> 
 };
 
 const disciplines = ["dressage", "jumping", "eventing", "trail"] as const;
+// The stored values stay; the rider reads "Leisure" for trail.
+const disciplineOptionLabels = Object.fromEntries(
+  disciplines.map((value) => [value, disciplineLabel(value)])
+) as Record<(typeof disciplines)[number], string>;
 const sexOptions = ["mare", "gelding", "stallion", "unknown"] as const;
 const recordStatuses = ["current", "due", "expired"] as const;
 const recordTypes: Array<{
@@ -65,15 +72,17 @@ const recordTypes: Array<{
   label: string;
   Icon: typeof FileText;
 }> = [
-  { type: "passport", label: "Passport", Icon: FileText },
-  { type: "vet", label: "Vet", Icon: Stethoscope },
-  { type: "lab", label: "Lab", Icon: Activity },
-  { type: "vaccination", label: "Vaccine", Icon: ShieldCheck },
-  { type: "dental", label: "Dental", Icon: HeartPulse },
-  { type: "farrier", label: "Farrier", Icon: CalendarCheck },
-  { type: "nutrition", label: "Nutrition", Icon: Wheat },
-  { type: "care", label: "Care", Icon: Plus },
-  { type: "note", label: "Note", Icon: NotebookPen }
+  // The labels live in the domain so the Recent records rows know these words
+  // too, and drop a provider that only repeats one of them.
+  { type: "passport", label: recordTypeLabels.passport, Icon: FileText },
+  { type: "vet", label: recordTypeLabels.vet, Icon: Stethoscope },
+  { type: "lab", label: recordTypeLabels.lab, Icon: Activity },
+  { type: "vaccination", label: recordTypeLabels.vaccination, Icon: ShieldCheck },
+  { type: "dental", label: recordTypeLabels.dental, Icon: HeartPulse },
+  { type: "farrier", label: recordTypeLabels.farrier, Icon: CalendarCheck },
+  { type: "nutrition", label: recordTypeLabels.nutrition, Icon: Wheat },
+  { type: "care", label: recordTypeLabels.care, Icon: Plus },
+  { type: "note", label: recordTypeLabels.note, Icon: NotebookPen }
 ];
 
 const today = () => localToday();
@@ -155,6 +164,11 @@ export function HorseEditorSheet({
       quality: 0.88
     });
     if (!result.canceled && result.assets[0]) {
+      const typeProblem = photoTypeProblem(result.assets[0].mimeType);
+      if (typeProblem) {
+        setLocalError(typeProblem);
+        return;
+      }
       try {
         setPhoto(await imageUploadAsset(result.assets[0]));
       } catch (assetError) {
@@ -237,6 +251,7 @@ export function HorseEditorSheet({
           options={disciplines}
           value={discipline}
           testPrefix="horse-editor-discipline"
+          labels={disciplineOptionLabels}
           onChange={setDiscipline}
         />
         <EquinaSelector
@@ -244,6 +259,7 @@ export function HorseEditorSheet({
           options={sexOptions}
           value={sex}
           testPrefix="horse-editor-sex"
+          labels={horseSexOptionLabels}
           onChange={setSex}
         />
         <View style={styles.fieldPair}>
@@ -378,11 +394,25 @@ export function RecordEditorSheet({
     const result = await DocumentPicker.getDocumentAsync({
       type: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"],
       copyToCacheDirectory: true,
-      multiple: false
+      multiple: false,
+      // The web picker reads the whole file into memory as base64 unless told
+      // not to, before the size check below can refuse it. Nothing uses base64.
+      base64: false
     });
     if (!result.canceled && result.assets[0]) {
+      // Refused before it is read, and the file chosen before stays (record-file-limit.ts).
+      if (recordFileTooLarge(result.assets[0].size)) {
+        setLocalError(recordFileTooLargeMessage);
+        return;
+      }
       try {
-        setAsset(await documentUploadAsset(result.assets[0]));
+        const chosen = await documentUploadAsset(result.assets[0]);
+        // A picker that reported no size was measured just now.
+        if (recordFileTooLarge(chosen.byteSize)) {
+          setLocalError(recordFileTooLargeMessage);
+          return;
+        }
+        setAsset(chosen);
       } catch (assetError) {
         setLocalError(assetError instanceof Error ? assetError.message : "File could not be prepared.");
       }
@@ -501,6 +531,9 @@ export function RecordEditorSheet({
           testID="record-editor-provider"
           label="Provider"
           optional
+          // Without a hint the field read as "what kind of provider" and
+          // riders typed the profession, which the record's type already says.
+          placeholder="Name of the person or clinic"
           value={providerName}
           maxLength={120}
           onChangeText={setProviderName}

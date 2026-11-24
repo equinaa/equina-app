@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "scheme": "equina",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "extra": {
       "eas": {
         "projectId": "e42e13a7-0029-41ca-9d7e-3bb6af63a8a1"
@@ -18,22 +19,32 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Choose a photo for your horse profile in Equina.",
-          "cameraPermission": false,
-          "microphonePermission": false
+          "photosPermission": "Equina uses the photos you choose for your profile, your horses and Club posts.",
+          "cameraPermission": "Equina does not use the camera.",
+          "microphonePermission": "Equina does not use the microphone."
         }
       ],
       "expo-video",
       "expo-asset",
-      "expo-secure-store",
-      "expo-notifications",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Equina does not use Face ID."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png"
+        }
+      ],
       "expo-web-browser",
       "expo-apple-authentication",
       "./plugins/with-storekit-configuration.cjs",
       [
         "expo-audio",
         {
-          "microphonePermission": false,
+          "microphonePermission": "Equina does not use the microphone.",
           "recordAudioAndroid": false,
           "enableBackgroundPlayback": false
         }
@@ -43,17 +54,32 @@
       "supportsTablet": false,
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.equina.mobile",
-      "buildNumber": "1"
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "splash": {
+        "backgroundColor": "#161512",
+        "image": "./assets/splash.png"
+      }
     },
     "android": {
       "package": "com.equina.mobile",
-      "versionCode": 1,
       "softwareKeyboardLayoutMode": "resize",
+      "backgroundColor": "#161512",
+      "splash": {
+        "backgroundColor": "#161512"
+      },
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#161512"
       },
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM"
+      ],
+      "blockedPermissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {

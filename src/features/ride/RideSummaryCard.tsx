@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { ChevronRight } from "lucide-react-native";
 import type { RidePeriod, RideSummary } from "../../domain/ride-stats";
-import { describeLogged, describeMood, describeTracked, describeTrend } from "../../domain/ride-stats";
+import { describeLastRide, describeLogged, describeMood, describeTracked, describeTrend } from "../../domain/ride-stats";
 import { equinaTheme } from "../../ui/theme/theme";
 import { rideTrainingLabel } from "./ride-plan";
 
@@ -37,7 +37,10 @@ export type RideSummaryCardProps = {
   onPeriodChange: (period: RidePeriod) => void;
   /** Rides in the journal overall, used only to word the empty state. */
   lifetimeRides: number;
+  /** The newest ride's local calendar day, YYYY-MM-DD. Shown as "3 Nov", never as stored. */
   lastRideOn?: string;
+  /** The horse whose rides these are; absent for a rider with no horse, whose rides are all theirs. */
+  horseName?: string;
   /** Opens every ride, one line each. */
   onOpenJournal?: () => void;
 };
@@ -48,6 +51,7 @@ export function RideSummaryCard({
   onPeriodChange,
   lifetimeRides,
   lastRideOn,
+  horseName,
   onOpenJournal
 }: RideSummaryCardProps) {
   const label = period === "week" ? "this week" : "this month";
@@ -69,11 +73,12 @@ export function RideSummaryCard({
   const rideWord = summary?.rides === 1 ? "ride" : "rides";
   const daysText = summary?.daysRidden === 1 ? "on 1 day" : `across ${summary?.daysRidden ?? 0} days`;
   const hasFacts = Boolean(summary && (summary.trainings.length > 0 || mood || tracked || logged));
+  const lastRide = lifetimeRides > 0 ? describeLastRide(lastRideOn, horseName) : null;
 
   return (
     <View style={styles.card}>
       <View style={[styles.topline, stacked && styles.toplineStacked]}>
-        <Text style={[styles.title, stacked && styles.titleStacked]}>Ride journal</Text>
+        <Text style={[styles.title, stacked && styles.titleStacked]}>{horseName ? `Ride journal · ${horseName}` : "Ride journal"}</Text>
         <View accessibilityRole="radiogroup" style={styles.toggle}>
           <View pointerEvents="none" style={styles.toggleTrack} />
           {periods.map((entry) => {
@@ -98,11 +103,9 @@ export function RideSummaryCard({
 
       {!summary || summary.rides === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>No rides {label}</Text>
+          <Text style={styles.emptyTitle}>{horseName ? `No rides with ${horseName} ${label}` : `No rides ${label}`}</Text>
           <Text style={styles.emptyBody}>
-            {lifetimeRides > 0 && lastRideOn
-              ? `Your last ride was ${lastRideOn}. Log one and it appears here.`
-              : "Log a ride and this fills in on its own."}
+            {lastRide ? `${lastRide} Log one and it appears here.` : "Log a ride and this fills in on its own."}
           </Text>
         </View>
       ) : (
@@ -112,7 +115,7 @@ export function RideSummaryCard({
           <View style={[styles.split, stacked && styles.splitStacked]}>
             <View
               accessible
-              accessibilityLabel={[`${summary.rides} ${rideWord} ${label}`, daysText, trend].filter(Boolean).join(", ")}
+              accessibilityLabel={[`${summary.rides} ${rideWord}${horseName ? ` with ${horseName}` : ""} ${label}`, daysText, trend].filter(Boolean).join(", ")}
               style={stacked ? undefined : hasFacts ? styles.headline : styles.headlineAlone}
             >
               <Text style={styles.count}>{summary.rides}</Text>

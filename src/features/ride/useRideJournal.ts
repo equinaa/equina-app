@@ -57,7 +57,9 @@ export const rideSessionFrom = (entry: RideEntry): RideSession => ({
   totalPhases: entry.totalPhases,
   ...(entry.phases ? { phases: entry.phases } : {}),
   // A logged activity can be saved without a feeling. None is invented.
-  ...(entry.mood ? { mood: moodFromRecord[entry.mood] } : {})
+  ...(entry.mood ? { mood: moodFromRecord[entry.mood] } : {}),
+  // Kept so the recap can tell a ride the clock timed from one typed in.
+  ...(entry.source ? { source: entry.source } : {})
 });
 
 const messageFor = (error: unknown, fallback: string) => {
@@ -90,9 +92,18 @@ export function useRideJournal({
   const [error, setError] = useState("");
   const [offline, setOffline] = useState(false);
   const entriesRequest = useRef(0);
+  // A horse's newest ride read on its own (null: it has none), for a horse
+  // none of whose rides is in `entries`: one last ridden before them, such
+  // as a horse back from time off. Read once per horse, for this journal.
+  const [horseLatest, setHorseLatest] = useState<Record<string, RideEntry | null>>({});
+  const horseLatestAsked = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
+    // A read still on its way belongs to the journal before this one.
+    horseLatestAsked.current = new Set();
+    setHorseLatest({});
     if (!backend || !enabled) {
+      entriesRequest.current += 1;
       setEntries([]);
       setTotal(0);
       setLoading(false);
@@ -140,6 +151,22 @@ export function useRideJournal({
 
   useEffect(() => {
     void refresh();
+  }, [backend, enabled]);
+
+  /** Reads one horse's newest ride, once: for a horse with none in `entries`. */
+  const readHorseLatest = useCallback((horseId: string) => {
+    if (!backend || !enabled || horseLatestAsked.current.has(horseId)) return;
+    horseLatestAsked.current.add(horseId);
+    const request = entriesRequest.current;
+    void backend.rides.latest(horseId).then(
+      (entry) => {
+        if (request === entriesRequest.current) setHorseLatest((current) => ({ ...current, [horseId]: entry }));
+      },
+      () => {
+        // A failed read is not "no ride": the horse is asked again next time.
+        if (request === entriesRequest.current) horseLatestAsked.current.delete(horseId);
+      }
+    );
   }, [backend, enabled]);
 
   const runMutation = useCallback(async <T,>(
@@ -221,6 +248,8 @@ export function useRideJournal({
     latestEntry,
     /** The most recent ride in the shape the home recap already renders. */
     lastRide: latestEntry ? rideSessionFrom(latestEntry) : null,
+    horseLatest,
+    readHorseLatest,
     loading,
     loaded,
     refreshing,

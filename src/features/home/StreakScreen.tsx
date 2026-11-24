@@ -30,15 +30,19 @@ export const weekProgress = (week: readonly WeekDay[]) => {
  * The streak up close, a screen of its own: the flame and the count, when
  * it started, this week, the best run, and how far the next milestone is.
  * Milestones count training days; the (i) says how the streak is kept.
+ * Each horse has its own streak: this is Home's horse's (`horseName`), or the
+ * rider's whole week for a rider with no horse.
  */
 export function StreakScreen({
   visible,
   streak,
+  horseName,
   onEditPlan,
   onClose
 }: {
   visible: boolean;
   streak: StreakSummary;
+  horseName?: string;
   onEditPlan: () => void;
   onClose: () => void;
 }) {
@@ -87,15 +91,18 @@ export function StreakScreen({
           {explained ? (
             <View style={styles.explain}>
               <Text style={styles.explainText}>
-                Your streak counts training days in a row, against your training week. A planned day needs a ride or a logged activity. Rest days never break it, and a ride on a day off adds one. A planned day missed starts it over; today counts until it ends.
+                {horseName
+                  ? `Each horse has its own streak. It counts the days in a row you trained ${horseName}, against ${horseName}'s training week. A planned day needs a ride or a logged activity on ${horseName}. Rest days and time off never break it, and a ride on a day off adds one. A planned day missed starts it over; today counts until it ends.`
+                  : "Your streak counts training days in a row, against your training week. A planned day needs a ride or a logged activity. Rest days never break it, and a ride on a day off adds one. A planned day missed starts it over; today counts until it ends."}
               </Text>
             </View>
           ) : null}
 
           <View style={styles.hero}>
             <StreakFlame size={190} glow muted={streak.current === 0} />
-            <Text style={styles.count} accessibilityLabel={`${streak.current} day streak`}>{streak.current}</Text>
+            <Text style={styles.count} accessibilityLabel={`${streak.current} day streak${horseName ? ` with ${horseName}` : ""}`}>{streak.current}</Text>
             <Text style={styles.countLabel}>DAY STREAK</Text>
+            {horseName ? <Text numberOfLines={1} style={styles.horseName}>{horseName}</Text> : null}
           </View>
 
           <View style={styles.stats}>
@@ -241,6 +248,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: equinaTheme.text.primary,
     letterSpacing: 1.2
+  },
+  horseName: {
+    ...equinaTheme.typography.meta,
+    marginTop: 2,
+    color: equinaTheme.text.secondary
   },
   stats: {
     flexDirection: "row",

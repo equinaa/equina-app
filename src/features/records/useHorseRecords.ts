@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import type {
   EquinaBackend,
@@ -147,7 +148,7 @@ export function useHorseRecords({
       setHorses(nextHorses);
       primaryRef.current = ownPrimary(nextHorses, userId);
       const wanted = pick && nextHorses.some((horse) => horse.id === pick) ? pick : selectedRef.current;
-      const nextSelected = selectionAfterLoad(nextHorses, wanted);
+      const nextSelected = selectionAfterLoad(nextHorses, wanted, userId);
       setSelectedHorseId(nextSelected);
       setHorsesListed(true);
       setHorsesLoaded(true);
@@ -177,6 +178,18 @@ export function useHorseRecords({
   useEffect(() => {
     void refresh();
   }, [backend, enabled]);
+
+  // Back at the front the horses are read again, as the training plan is: a
+  // horse added or archived on another device is known here (whose week Home
+  // reads, which horses the reminders are for), and a list that failed at
+  // the yard gets another go.
+  useEffect(() => {
+    if (!backend || !enabled) return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refresh();
+    });
+    return () => subscription.remove();
+  }, [backend, enabled, refresh]);
 
   const selectHorse = useCallback((horseId: string) => {
     if (horseId === selectedRef.current) return;

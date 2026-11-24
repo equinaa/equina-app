@@ -35,24 +35,57 @@ enable_anonymous_sign_ins = false
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
-# Off for the TestFlight cohort (2026-10-03): signing up with a password signs
-# the rider in at once. With confirmations on, the built-in mailer only reaches
-# members of the Supabase organization, so no tester could finish signing up,
-# and a link opened on another device left the app waiting.
+# On, as in the hosted project (checked 2026-11-09: mailer_autoconfirm false).
+# A password sign-up waits for a six-digit code sent to the email, which is also
+# what keeps automatic identity linking safe once Apple or Google sign-in is
+# enabled: every email on an account is verified.
 #
-# Turn it back on -- as a 6-digit code typed in the app, once custom SMTP
-# (Resend) sends the templates -- before the App Store launch, and before
-# Apple or Google sign-in is enabled: automatic identity linking is only safe
-# against pre-account takeover when every email on an account is verified.
-# The hosted project is configured in the Dashboard; keep the two in step.
-enable_confirmations = false
+# The codes only reach riders through custom SMTP (Resend, from auth.equina.ai):
+# Supabase's built-in mailer delivers to members of the Supabase organization
+# only, and does not let the hosted templates change. The hosted project is
+# configured in the Dashboard -- see docs/EQUINA_AUTH_DELIVERY.md -- so keep the
+# two in step by hand.
+enable_confirmations = true
 secure_password_change = true
 max_frequency = "1m"
 otp_length = 6
 otp_expiry = 3600
 
-# Supabase's default free-tier mailer does not permit hosted template changes.
-# Connect custom SMTP before enabling supabase/templates/magic_link.html here.
+# Once these are the hosted templates, every email carries the six-digit code
+# (the email-change template still carries a link; no app flow uses it). The app
+# asks for the code when EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE=otp; switch it only
+# once these are the hosted templates.
+[auth.email.template.confirmation]
+subject = "Confirm your Equina email: {{ .Token }}"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.magic_link]
+subject = "Your Equina sign-in code: {{ .Token }}"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.recovery]
+subject = "Your Equina password reset code: {{ .Token }}"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.reauthentication]
+subject = "Your Equina verification code: {{ .Token }}"
+content_path = "./supabase/templates/reauthentication.html"
+
+[auth.email.template.email_change]
+subject = "Confirm your new Equina email"
+content_path = "./supabase/templates/email_change.html"
+
+# Hosted values, set in Dashboard -> Authentication -> Emails -> SMTP Settings.
+# Kept as a comment: the API key never goes in this file, and this project does
+# not push its config to the hosted project.
+# [auth.email.smtp]
+# enabled = true
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(RESEND_API_KEY)"
+# admin_email = "no-reply@auth.equina.ai"
+# sender_name = "Equina"
 
 [auth.mfa.totp]
 enroll_enabled = true

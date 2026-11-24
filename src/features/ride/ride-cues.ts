@@ -21,6 +21,10 @@ type AudioModule = typeof import("expo-audio");
 
 let audio: AudioModule | null = null;
 let chime: AudioPlayer | null = null;
+// A browser plays a page's sound only once the rider's own tap has played it:
+// this is the chime that was, if any. A page reloaded mid-ride makes a new
+// one, silent until a tap plays it (`unlockRideCues`).
+let tappedChime: AudioPlayer | null = null;
 // Just past the 0.62 s chime: the music the chime turned down comes back here.
 const chimeOnlyMs = 800;
 let unduckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -51,6 +55,7 @@ export function releaseRideCues() {
   unduckTimer = null;
   chime?.remove();
   chime = null;
+  tappedChime = null;
   if (audio && Platform.OS !== "web") {
     // Back to what iOS gives an app that has not asked for anything.
     if (Platform.OS === "ios") void audio.setIsAudioActiveAsync(false).catch(() => undefined);
@@ -78,11 +83,12 @@ const buzz = (kind: "phase" | "done") => {
   }, 420);
 };
 
-const ring = () => {
+const ring = (tapped: boolean) => {
   if (!chime) return;
   try {
     chime.seekTo(0).catch(() => undefined);
     chime.play();
+    if (tapped) tappedChime = chime;
   } catch {
     // A chime that cannot play leaves the buzz.
   }
@@ -96,12 +102,13 @@ function unduck() {
 }
 
 /**
- * A phase begins, or the last one ends. The first one comes from the rider's
- * own tap on Start, which is what lets a browser play the chime at all.
+ * A phase begins, or the last one ends. `tapped` when the rider's own tap plays
+ * it -- Start training, Skip phase -- which is what lets a browser play the
+ * chime at all, then and at every phase change after it.
  */
-export function cuePhaseChange(kind: "phase" | "done") {
+export function cuePhaseChange(kind: "phase" | "done", tapped = false) {
   buzz(kind);
-  ring();
+  ring(tapped);
   // Only the latest chime gives the music back: closing the session pauses
   // every player, so an earlier cue's timer would cut a newer chime short.
   if (unduckTimer) clearTimeout(unduckTimer);
@@ -109,6 +116,21 @@ export function cuePhaseChange(kind: "phase" | "done") {
     unduckTimer = null;
     unduck();
   }, chimeOnlyMs);
+}
+
+/** Whether the phase changes ahead will be heard without a tap first. Always, on a phone. */
+export const rideCuesUnlocked = () => Platform.OS !== "web" || (chime !== null && chime === tappedChime);
+
+/**
+ * The rider's tap on "Turn the chime on", for a ride whose page was reloaded
+ * (or whose sound had not loaded at Start training): the chime alone, which
+ * lets the browser play it at the phase changes ahead. False while the sound
+ * has not loaded yet.
+ */
+export function unlockRideCues() {
+  if (Platform.OS !== "web") return true;
+  ring(true);
+  return rideCuesUnlocked();
 }
 
 // Locked phone ---------------------------------------------------------------

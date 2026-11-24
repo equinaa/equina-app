@@ -75,6 +75,11 @@ state, or guaranteed delivery.
   authenticated insert/update grants are revoked.
 - Ralf accepts a conversation ID, bounded text, UUID nonce, and context intent. It
   derives identity and allowed context server-side.
+- What Ralf may read follows the rider's four Privacy and Ralf switches, decided in
+  one place (`_shared/coach-context.ts`, `tests/coach-context.test.ts`): the rider
+  profile, the conversation's horse, and the rider's own rides on that horse (with
+  no horse, the rides logged with none), each only while its switch is on, and none
+  of them with Minimal context. A source that is not allowed is not queried.
 - Ralf has 6,000-character input/output bounds, a 15-second provider timeout,
   8-request/minute and 60-request/day database limits, typed failures, and a unique
   `(conversation_id, client_nonce, role)` contract.

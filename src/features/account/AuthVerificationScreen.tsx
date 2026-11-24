@@ -13,6 +13,8 @@ import { MailCheck } from "lucide-react-native";
 import { EquinaBackButton, EquinaButton } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { EmailAuthMode } from "./social-auth";
+import { supportEmail } from "../../config/support-contact";
+import { cleanCode, codeReady } from "./verification-code";
 
 // Matches the auth service's one-email-per-minute limit (max_frequency).
 const resendCooldownSeconds = 60;
@@ -30,9 +32,11 @@ export function AuthVerificationScreen({
 }: {
   email: string;
   mode: EmailAuthMode;
-  /** "create" sends to an address that was just registered. The others answer
-   *  neutrally, because no account may exist for the address at all. */
-  purpose: "create" | "signin" | "recovery";
+  /** "create" sends to an address that was just registered, and "confirm" to
+   *  an account whose password was right but whose email was never confirmed.
+   *  The others answer neutrally, because no account may exist for the address
+   *  at all. */
+  purpose: "create" | "confirm" | "signin" | "recovery";
   error: string;
   verifying: boolean;
   onVerify: (code: string) => void;
@@ -62,8 +66,13 @@ export function AuthVerificationScreen({
       // onResend already put the reason on screen; the button stays usable.
     }
   };
-  const neutral = purpose !== "create";
+  const neutral = purpose === "signin" || purpose === "recovery";
   const sentTo = neutral ? `If an Equina account uses ${email}, we sent` : "We sent";
+  const eyebrow =
+    purpose === "recovery" ? "Password reset" : purpose === "confirm" ? "Confirm your email" : "Secure sign-in";
+  // Signing in reached an account that never confirmed its email. Say why the
+  // code is needed, or it reads like a second password.
+  const waitingNote = purpose === "confirm" ? "This account has not confirmed its email yet. " : "";
 
   return (
     <KeyboardAvoidingView
@@ -77,7 +86,7 @@ export function AuthVerificationScreen({
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.eyebrowText}>{purpose === "recovery" ? "Password reset" : "Secure sign-in"}</Text>
+        <Text style={styles.eyebrowText}>{eyebrow}</Text>
         <Text accessibilityRole="header" style={styles.title}>
           {waitingForLink ? "Open your email." : "Check your inbox."}
         </Text>
@@ -85,10 +94,10 @@ export function AuthVerificationScreen({
           {waitingForLink
             ? neutral
               ? `${sentTo} a link to it. Open it on this device and Equina will finish here.`
-              : `Tap the secure link sent to ${email}. Equina will finish here automatically.`
+              : `${waitingNote}Tap the secure link sent to ${email}. Equina will finish here automatically.`
             : neutral
-              ? `${sentTo} a six-digit code to it. Enter it below.`
-              : `Enter the six-digit code sent to ${email}.`}
+              ? `${sentTo} a code to it. Enter it below.`
+              : `${waitingNote}Enter the code sent to ${email}.`}
         </Text>
 
         {waitingForLink ? (
@@ -115,21 +124,22 @@ export function AuthVerificationScreen({
           >
             <TextInput
               testID="auth-otp-input"
-              accessibilityLabel="Six-digit verification code"
+              accessibilityLabel="Verification code"
               value={code}
-              onChangeText={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}
+              // No maxLength: the platform would cut a pasted "123 456" or a
+              // whole subject line before the digits are picked out of it.
+              onChangeText={(value) => setCode(cleanCode(value))}
               keyboardType="number-pad"
               textContentType="oneTimeCode"
               autoComplete="one-time-code"
-              maxLength={6}
               autoFocus
-              placeholder="000000"
+              placeholder="Code"
               placeholderTextColor={equinaTheme.text.tertiary}
               selectionColor={equinaTheme.colors.brass}
               returnKeyType="done"
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              onSubmitEditing={() => code.length === 6 && onVerify(code)}
+              onSubmitEditing={() => codeReady(code) && onVerify(code)}
               style={styles.codeInput}
             />
           </View>
@@ -141,6 +151,15 @@ export function AuthVerificationScreen({
             ? "The link expires shortly and can only be exchanged by this device."
             : "The code expires shortly and is never stored by Equina."}
         </Text>
+        {/* A build cannot be patched, and what the hosted emails carry can
+            change under it: a way out that holds whatever arrives, or nothing. */}
+        {!waitingForLink ? (
+          <Text testID="auth-otp-no-code" style={styles.securityNote}>
+            {purpose === "signin"
+              ? "No code after a few minutes? Go back and sign in with your password."
+              : `No code after a few minutes? Write to ${supportEmail}.`}
+          </Text>
+        ) : null}
         <Pressable
           testID="auth-otp-resend"
           accessibilityRole="button"
@@ -184,7 +203,7 @@ export function AuthVerificationScreen({
           <EquinaButton
             testID="auth-otp-verify"
             label={verifying ? "Verifying..." : "Verify and continue"}
-            disabled={code.length !== 6 || verifying}
+            disabled={!codeReady(code) || verifying}
             onPress={() => onVerify(code)}
           />
         </View>

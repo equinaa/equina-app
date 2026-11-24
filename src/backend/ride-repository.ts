@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Discipline } from "../domain/types";
-import type { RideEntry, RideEntryInput, RidePhaseEntry } from "./contracts";
+import type { RideEnd, RideEntry, RideEntryInput, RidePhaseEntry } from "./contracts";
 import { backendError, requireData } from "./errors";
 
 // Phases are stored as the database speaks: snake_case keys in a jsonb array,
@@ -78,19 +78,23 @@ export class RideRepository {
   }
 
   /**
-   * When every ride ended, newest first, for the streak: it counts back
-   * through the rider's whole history, not the page the journal shows.
-   * One small column, read a thousand at a time.
+   * When every ride ended and on which horse, newest first, for the streak:
+   * it counts back through the rider's whole history, not the page the
+   * journal shows, and each horse has its own. Two small columns, read a
+   * thousand at a time.
    */
-  async completions(limit = 5000): Promise<string[]> {
+  async completions(limit = 5000): Promise<RideEnd[]> {
     const page = 1000;
-    const ends: string[] = [];
+    const ends: RideEnd[] = [];
     for (let from = 0; from < limit; from += page) {
       const { data, error } = await this.client.from("ride_entries")
-        .select("completed_at").order("completed_at", { ascending: false }).range(from, Math.min(from + page, limit) - 1);
+        .select("completed_at, horse_id").order("completed_at", { ascending: false }).range(from, Math.min(from + page, limit) - 1);
       if (error) throw backendError(error, "Your rides could not be counted.");
-      const rows = (data ?? []) as Array<{ completed_at: unknown }>;
-      ends.push(...rows.map((row) => String(row.completed_at)));
+      const rows = (data ?? []) as Array<{ completed_at: unknown; horse_id: unknown }>;
+      ends.push(...rows.map((row) => ({
+        completedAt: String(row.completed_at),
+        ...(typeof row.horse_id === "string" && row.horse_id ? { horseId: row.horse_id } : {})
+      })));
       if (rows.length < page) break;
     }
     return ends;
@@ -103,10 +107,15 @@ export class RideRepository {
     return count ?? 0;
   }
 
-  /** The single most recent ride, for the home recap. Null when none exists yet. */
-  async latest(): Promise<RideEntry | null> {
-    const { data, error } = await this.client.from("ride_entries")
-      .select("*").order("completed_at", { ascending: false }).limit(1).maybeSingle();
+  /**
+   * The single most recent ride; with a horse, that horse's. Null when none
+   * exists yet. A horse last ridden before the journal's page (listSince),
+   * one back from time off, gets its latest ride from here.
+   */
+  async latest(horseId?: string): Promise<RideEntry | null> {
+    const rides = this.client.from("ride_entries").select("*");
+    const { data, error } = await (horseId ? rides.eq("horse_id", horseId) : rides)
+      .order("completed_at", { ascending: false }).limit(1).maybeSingle();
     if (error) throw backendError(error, "The last ride could not be loaded.");
     return data ? mapRideEntry(data as Record<string, unknown>) : null;
   }

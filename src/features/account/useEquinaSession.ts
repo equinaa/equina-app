@@ -232,6 +232,13 @@ export function useEquinaSession() {
     return { verificationRequired: false as const, snapshot };
   }, [backend, loadAuthenticatedState]);
 
+  // For an account that exists but never confirmed its email: after a
+  // password sign-up, or a sign-in that Auth refused for that reason.
+  const resendSignupConfirmation = useCallback(async (email: string) => {
+    if (!backend) throw new Error("Backend is not configured.");
+    await backend.auth.resendSignupConfirmation(email, emailAuthRedirectUri());
+  }, [backend]);
+
   const signInWithPassword = useCallback(async (email: string, password: string) => {
     if (!backend) throw new Error("Backend is not configured.");
     const authenticatedSession = await backend.auth.signInWithPassword(email, password);
@@ -421,6 +428,7 @@ export function useEquinaSession() {
     verifyCode,
     verifyRecoveryCode,
     createPasswordAccount,
+    resendSignupConfirmation,
     signInWithPassword,
     requestPasswordRecovery,
     completePasswordRecovery,

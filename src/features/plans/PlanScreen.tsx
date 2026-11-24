@@ -4,23 +4,19 @@ import { equinaTheme } from "../../ui/theme/theme";
 import { Paywall } from "./Paywall";
 import { PlanCard } from "./PlanCard";
 import { picksLeft, planStatusLine, tierOf } from "./plan-rules";
+import { closedPlansCopy, closedTrialLine, closedTrialPill, creditsNote } from "./plan-screen-copy";
 import type { PurchasesController } from "./usePurchases";
-
-const creditsNote =
-  "One Ralf credit is one message; a message with a photo is three. The Equina team arranges coach sessions and " +
-  "event tickets with you.";
 
 /**
  * The rider's plan and the three plans side by side. While purchases are
  * unavailable -- no RevenueCat key, no privacy policy, plans not enforced, or
- * the web -- nothing here sells, and the footer says subscriptions open with
- * the App Store release.
+ * the web -- nothing here sells, and the footer says so in words that hold on
+ * every platform: the Equina team sets the plan.
  */
 export function PlanScreen({ plan, purchases }: { plan: PlanState; purchases?: PurchasesController }) {
   const current = tierOf(plan);
   const left = picksLeft(plan);
-  const trialDays = [...new Set(plan.tiers.filter((tier) => tier.trialDays > 0).map((tier) => tier.trialDays))];
-  const paidNames = plan.tiers.filter((tier) => tier.key !== "free").map((tier) => tier.name).join(" and ");
+  const trialLine = closedTrialLine(plan.tiers);
   const selling = Boolean(purchases?.available);
 
   return (
@@ -43,25 +39,16 @@ export function PlanScreen({ plan, purchases }: { plan: PlanState; purchases?: P
         </>
       ) : (
         <>
-          {!plan.enforced ? (
-            <Text style={styles.lead}>These are the plans for when subscriptions open.</Text>
-          ) : null}
+          {!plan.enforced ? <Text style={styles.lead}>{closedPlansCopy.lead}</Text> : null}
 
           {plan.tiers.map((tier) => (
-            <PlanCard
-              key={tier.key}
-              tier={tier}
-              mine={tier.key === plan.tier}
-              pill={tier.trialDays > 0 ? `${tier.trialDays}-day free trial` : null}
-            />
+            <PlanCard key={tier.key} tier={tier} mine={tier.key === plan.tier} pill={closedTrialPill(tier)} />
           ))}
 
-          <View style={styles.footer}>
-            <Text style={styles.footerTitle}>Subscriptions open with the App Store release</Text>
-            <Text style={styles.footerText}>
-              {paidNames && trialDays.length === 1 ? `${paidNames} start with a ${trialDays[0]}-day free trial. ` : ""}
-              {creditsNote}
-            </Text>
+          <View testID="plan-closed-note" style={styles.footer}>
+            <Text style={styles.footerTitle}>{closedPlansCopy.title}</Text>
+            <Text style={styles.footerText}>{closedPlansCopy.body}</Text>
+            <Text style={styles.footerText}>{trialLine ? `${trialLine} ${creditsNote}` : creditsNote}</Text>
           </View>
         </>
       )}

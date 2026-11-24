@@ -41,8 +41,7 @@ export const rideTrainingTypes: readonly RideTrainingType[] = [
   { id: "cross-country", label: "Cross-country", discipline: "Eventing" },
   { id: "hack", label: "Hack", discipline: "Trail" },
   { id: "hunting", label: "Hunting", discipline: "Trail" },
-  { id: "lunging", label: "Lunging" },
-  { id: "groundwork", label: "Groundwork" }
+  { id: "lunging", label: "Lunging" }
 ];
 
 export const ridePhaseLimits = {
@@ -139,7 +138,7 @@ export const cleanPhases = (phases: RidePhasePlan[]): RidePhasePlan[] =>
  * On waking, `syncRun` moves the ride on to wherever the clock now is.
  */
 export type RideRun = {
-  /** Wall-clock ms of the rider's first start. Null while the ride waits for them. */
+  /** Wall-clock ms of the rider's first start. Null only before `startRun`. */
   startedAt: number | null;
   /** Ride time banked before the current stretch, in ms. */
   bankedMs: number;
@@ -150,6 +149,12 @@ export type RideRun = {
   phaseStarts: number[];
   /** Every phase has had its time. The clock still runs until the rider finishes. */
   phasesDone: boolean;
+  /**
+   * Wall-clock ms the ride's planned time ran out, set only on a ride brought
+   * back after its end (`restoreRun`): it is saved as finished then, not when
+   * the rider finally taps Finish.
+   */
+  endedAt?: number;
 };
 
 const minuteMs = 60_000;
@@ -307,6 +312,14 @@ export const ridePhaseEntries = (run: RideRun, phases: RidePhasePlan[], finished
 /** Phases the rider reached, the way the journal has always counted them. */
 export const reachedPhases = (run: RideRun) => (run.startedAt === null ? 0 : run.phaseIndex + 1);
 
+/**
+ * When the ride is saved as finished: the tap on Finish, or, for a forgotten
+ * ride brought back after its planned end, the moment that time ran out. Rides
+ * are counted on the day they finished, so one closed the next morning still
+ * belongs to the evening it was ridden.
+ */
+export const rideCompletedAt = (run: RideRun, now: number) => run.endedAt ?? now;
+
 // Remembering ---------------------------------------------------------------
 
 /** The last setup, kept on the phone so the next ride starts from it. */
@@ -316,7 +329,7 @@ export type RideSetupMemory = {
   phasesByType: Record<string, RidePhasePlan[]>;
 };
 
-const isPhase = (value: unknown): value is RidePhasePlan => {
+export const isPhase = (value: unknown): value is RidePhasePlan => {
   if (!value || typeof value !== "object") return false;
   const phase = value as Record<string, unknown>;
   return typeof phase.id === "string"

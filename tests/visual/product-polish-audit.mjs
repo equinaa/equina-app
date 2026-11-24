@@ -156,9 +156,9 @@ const screens = [await inspect("home")];
 await page.getByTestId("ride-toggle").click();
 await page.getByTestId("ride-setup").waitFor();
 screens.push(await inspect("ride-setup"));
+// One tap: Start training opens the ride with the clock already running.
 await page.getByTestId("ride-setup-continue").click();
-screens.push(await inspect("ride-mode"));
-await page.getByTestId("ride-start").click();
+await page.getByTestId("ride-mode").waitFor();
 screens.push(await inspect("ride-running"));
 // Four phases by default: skip to the last, where Finish replaces Skip.
 await page.getByTestId("ride-next-phase").click();

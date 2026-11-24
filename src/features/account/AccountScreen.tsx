@@ -41,11 +41,14 @@ import type {
   UploadAsset,
   UserPreferencesRecord
 } from "../../backend";
+import { supportEmail, supportMailto } from "../../config/support-contact";
 import type { Discipline } from "../../domain/types";
+import { disciplineLabel } from "../../domain/labels";
 import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { SettingsGroup } from "../../ui/settings/SettingsGroup";
 import { SettingsRow } from "../../ui/settings/SettingsRow";
+import { installedVersionLine } from "../../ui/states/installed-version";
 import { equinaTheme } from "../../ui/theme/theme";
 import { trainingFocusByDiscipline } from "../coach/coach-types";
 import { PlanScreen } from "../plans/PlanScreen";
@@ -55,12 +58,10 @@ import { renewingStoreOf } from "../plans/purchase-catalog";
 import type { PurchasesController } from "../plans/usePurchases";
 import type { AccountMode, AccountRoute } from "./account-types";
 
-const disciplines: Array<{ value: Discipline; label: string }> = [
-  { value: "dressage", label: "Dressage" },
-  { value: "jumping", label: "Jumping" },
-  { value: "eventing", label: "Eventing" },
-  { value: "trail", label: "Trail" }
-];
+// The stored value stays 'trail'; the rider reads "Leisure".
+const disciplines: Array<{ value: Discipline; label: string }> = (
+  ["dressage", "jumping", "eventing", "trail"] as const
+).map((value) => ({ value, label: disciplineLabel(value) }));
 const levels: Array<{ value: NonNullable<ProfileRecord["skillLevel"]>; label: string }> = [
   { value: "beginner", label: "Beginner" },
   { value: "intermediate", label: "Intermediate" },
@@ -370,7 +371,7 @@ function AccountRoot({
         <SettingsRow
           Icon={SlidersHorizontal}
           title="Training profile"
-          value={`${labelFor(snapshot.profile.discipline)} · ${labelFor(snapshot.profile.skillLevel)}`}
+          value={`${disciplineLabel(snapshot.profile.discipline) ?? labelFor(undefined)} · ${labelFor(snapshot.profile.skillLevel)}`}
           testID="account-open-personalization"
           onPress={() => onNavigate("personalization")}
         />
@@ -455,13 +456,12 @@ function ProfileEditor({
     });
     if (result.canceled || !result.assets[0]) return;
     const selected = result.assets[0];
-    const response = await fetch(selected.uri);
-    const byteSize = selected.fileSize ?? (await response.arrayBuffer()).byteLength;
     await onUploadAvatar({
       uri: selected.uri,
       fileName: selected.fileName ?? `equina-avatar-${Date.now()}.jpg`,
       mimeType: selected.mimeType ?? "image/jpeg",
-      byteSize
+      // Only what the picker said. The upload measures the file itself.
+      byteSize: selected.fileSize ?? 0
     });
   };
 
@@ -893,8 +893,11 @@ function HelpAndLegal({ marketplaceOpen }: { marketplaceOpen: boolean }) {
         <SettingsRow
           Icon={MessageCircle}
           title="Contact support"
+          // The address is printed as well: a device with no mail app set up
+          // opens nothing, and the rider can still read where to write.
+          detail={supportEmail}
           value="Email"
-          onPress={() => void Linking.openURL("mailto:support@equina.app?subject=Equina%20support")}
+          onPress={() => void Linking.openURL(supportMailto).catch(() => undefined)}
         />
       </SettingsGroup>
       <SettingsGroup title="Legal">
@@ -917,6 +920,11 @@ function HelpAndLegal({ marketplaceOpen }: { marketplaceOpen: boolean }) {
           detail="Guidance only; health concerns escalate to a professional"
         />
       </SettingsGroup>
+      {installedVersionLine ? (
+        <Text testID="account-app-version" selectable style={[styles.footnote, styles.versionLine]}>
+          {installedVersionLine}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -1234,6 +1242,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontWeight: "400"
+  },
+  versionLine: {
+    textAlign: "center"
   },
   deletionNotice: {
     gap: 8,

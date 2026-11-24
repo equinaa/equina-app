@@ -1,5 +1,5 @@
 import type { RideEntry } from "../backend/contracts";
-import { localDayOf } from "./local-day";
+import { localDayOf, localToday, shortDayLabel } from "./local-day";
 
 /**
  * Summarising the ride journal by week and by month.
@@ -9,11 +9,11 @@ import { localDayOf } from "./local-day";
  * moment it is deleted.
  *
  * One honesty constraint shapes the whole shape of this: `elapsedSeconds` is
- * only as good as the timer, and the timer runs while the app is open. A rider
- * who starts a session and pockets the phone records a fraction of the real
- * hour. So time is reported as "tracked", never as "time in the saddle", and
- * it is never the headline. The headline is the ride count, which is the one
- * number the journal actually knows.
+ * the ride clock. It counts on with the phone locked, but it runs from the
+ * rider's tap on Start training to their tap on Finish, not from mounting to
+ * dismounting. So time is reported as "tracked", never as "time in the
+ * saddle", and it is never the headline. The headline is the ride count,
+ * which is the one number the journal actually knows.
  */
 
 export type RidePeriod = "week" | "month";
@@ -191,6 +191,27 @@ const describeTime = (seconds: number, how: "tracked" | "logged"): string | null
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest === 0 ? `${hours} h ${how}` : `${hours} h ${rest} min ${how}`;
+};
+
+/**
+ * When the last ride was, for a period that has none: "Your last ride was on
+ * 3 Nov." The day is a local calendar day (YYYY-MM-DD) and is read as text,
+ * the way the journal's own lines are, so no time zone can move it to the day
+ * before. Null when there is no such day to name; never the stored value.
+ *
+ * The journal keeps a rider's newest rides however old they are, so a ride
+ * from another year says which: "3 Nov" alone would read as this month.
+ */
+export const describeLastRide = (
+  lastRideOn: string | undefined,
+  horseName?: string,
+  today: string = localToday()
+): string | null => {
+  const day = lastRideOn ? shortDayLabel(lastRideOn) : null;
+  if (!lastRideOn || !day) return null;
+  const year = lastRideOn.slice(0, 4);
+  const when = year === today.slice(0, 4) ? day : `${day} ${year}`;
+  return `${horseName ? `${horseName}'s` : "Your"} last ride was on ${when}.`;
 };
 
 /** Tracked time, rounded the way a person would say it. */

@@ -43,8 +43,11 @@ import {
   EquinaSheet
 } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
+import { disciplineLabel } from "../../domain/labels";
+import { newPasswordReady, signInPasswordReady } from "../account/password-rules";
 import { visibleProviders } from "../account/provider-visibility";
-import { signInCopy } from "../account/sign-in-copy";
+import { emailStepCopy, signInCopy } from "../account/sign-in-copy";
+import { photoTypeProblem } from "../../backend/photo-types";
 
 export type OnboardingStep = "you" | "horse" | "preview";
 export type OnboardingDiscipline = "Dressage" | "Jumping" | "Eventing" | "Trail";
@@ -321,7 +324,7 @@ export function OnboardingScreen({
   };
 
   const continueWithPassword = async () => {
-    if (!emailReady || password.length < 10 || password.length > 128 || completing || busy) return;
+    if (!emailReady || !newPasswordReady(password) || completing || busy) return;
     setCompleting(true);
     try {
       await onPasswordContinue(password);
@@ -331,7 +334,7 @@ export function OnboardingScreen({
   };
 
   const signInWithPassword = async () => {
-    if (!emailReady || password.length < 10 || password.length > 128 || completing || busy) return;
+    if (!emailReady || !signInPasswordReady(password) || completing || busy) return;
     setCompleting(true);
     try {
       await onPasswordSignIn(password);
@@ -468,7 +471,7 @@ export function OnboardingScreen({
                     style={styles.absoluteImage}
                   />
                   <View style={styles.disciplineCopy}>
-                    <Text style={styles.disciplineName}>{discipline}</Text>
+                    <Text style={styles.disciplineName}>{disciplineLabel(discipline)}</Text>
                     <Text style={styles.disciplineMeta}>{disciplineNotes[discipline]}</Text>
                   </View>
                 </View>
@@ -476,9 +479,10 @@ export function OnboardingScreen({
                   {disciplines.map((option) => (
                     <MotionPressable
                       key={option}
+                      // The key stays in the testID; the rider reads its label.
                       testID={`onboarding-discipline-${option.toLowerCase()}`}
                       accessibilityRole="radio"
-                      accessibilityLabel={option}
+                      accessibilityLabel={disciplineLabel(option)}
                       accessibilityState={{ selected: discipline === option }}
                       onPress={() => {
                         if (discipline !== option) selectionHaptic();
@@ -498,7 +502,7 @@ export function OnboardingScreen({
                           discipline === option && styles.disciplineOptionTextSelected
                         ]}
                       >
-                        {option}
+                        {disciplineLabel(option)}
                       </Text>
                     </MotionPressable>
                   ))}
@@ -605,7 +609,7 @@ export function OnboardingScreen({
                   <View style={styles.previewContext}>
                     <Text style={styles.previewContextLabel}>YOUR EQUINA</Text>
                     <View style={styles.previewContextDot} />
-                    <Text style={styles.previewContextValue}>{discipline}</Text>
+                    <Text style={styles.previewContextValue}>{disciplineLabel(discipline)}</Text>
                   </View>
                   <Text numberOfLines={1} style={styles.previewDiscipline}>{level}</Text>
                 </View>
@@ -622,7 +626,7 @@ export function OnboardingScreen({
                     <Text style={styles.previewHorse}>
                       {hasHorse
                         ? `${horseName.trim() || "Your horse"} · ${ridePreview.meta}`
-                        : `Your ${discipline.toLowerCase()} plan · ${ridePreview.meta}`}
+                        : `Your ${disciplineLabel(discipline).toLowerCase()} plan · ${ridePreview.meta}`}
                     </Text>
                     <Text numberOfLines={2} style={styles.previewTitle}>{ridePreview.title}</Text>
                     <Text style={styles.previewPlan}>{ridePreview.plan}</Text>
@@ -743,7 +747,8 @@ export function AccountMethodSheet({
   onEmailLinkSignIn?: () => void;
 }) {
   const emailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const passwordReady = password.length >= 10 && password.length <= 128;
+  // Choosing a password has a minimum length; signing in with one does not.
+  const passwordReady = method === "signin" ? signInPasswordReady(password) : newPasswordReady(password);
   const providers = visibleProviders(Platform.OS, socialAuthAvailability);
   const hasSocialAuth = providers.apple || providers.google;
   const signingIn = intent === "signin";
@@ -863,7 +868,7 @@ export function AccountMethodSheet({
               ? signingIn
                 ? emailAuthMode === "magic-link"
                   ? "We will email you a link that signs you in. No password needed."
-                  : "We will email you a six-digit code that signs you in. No password needed."
+                  : "We will email you a code that signs you in. No password needed."
                 : emailAuthMode === "magic-link"
                   ? "We will email a secure sign-in link. No password to remember."
                   : "We will send a short verification code. No password to remember."
@@ -898,7 +903,7 @@ export function AccountMethodSheet({
               label="Password"
               value={password}
               onChangeText={onPasswordChange}
-              placeholder="10+ characters"
+              placeholder={method === "signin" ? "Your password" : "10+ characters"}
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete={method === "password" ? "new-password" : "current-password"}
@@ -967,7 +972,7 @@ export function AccountMethodSheet({
               onPress={() => onMethodChange("email")}
               style={styles.authAlternative}
             >
-              <Text style={styles.authAlternativeText}>Use a secure email link instead</Text>
+              <Text style={styles.authAlternativeText}>{emailStepCopy(emailAuthMode).usePasswordless}</Text>
             </MotionPressable>
           ) : null}
           {method === "signin" ? (
@@ -1200,6 +1205,11 @@ function HorseProfileEditor({
       });
 
       const picked = result.canceled ? undefined : result.assets[0];
+      const typeProblem = picked?.uri ? photoTypeProblem(picked.mimeType) : null;
+      if (typeProblem) {
+        setPhotoIssue(typeProblem);
+        return;
+      }
       if (picked?.uri) {
         selectionHaptic();
         onPhotoChange(picked.uri, {
@@ -1251,7 +1261,7 @@ function HorseProfileEditor({
             {horseName.trim() || "Name your horse"}
           </Text>
           <Text numberOfLines={1} style={styles.horseProfileMeta}>
-            {horseBreed.trim() ? `${horseBreed.trim()} · ${discipline}` : discipline}
+            {horseBreed.trim() ? `${horseBreed.trim()} · ${disciplineLabel(discipline)}` : disciplineLabel(discipline)}
           </Text>
         </View>
       </View>
@@ -1355,7 +1365,7 @@ function RiderFirstSetup({
       />
       <View style={styles.riderFirstTopline}>
         <Text style={styles.riderFirstEyebrow}>RIDER-FIRST PROFILE</Text>
-        <Text style={styles.riderFirstMeta}>{level} · {discipline}</Text>
+        <Text style={styles.riderFirstMeta}>{level} · {disciplineLabel(discipline)}</Text>
       </View>
       <View style={styles.riderFirstCopy}>
         <Text style={styles.riderFirstTitle}>Every ride still counts.</Text>
