@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { RideEntry } from "../src/backend/contracts";
 import {
+  describeLastRide,
   describeMood,
   describeTracked,
   describeTrend,
@@ -279,6 +282,48 @@ withTimeZone("Europe/Bucharest", () => {
   assert.equal(moodOf(["fresh", "fresh"]), "Felt fresh every time");
   assert.equal(moodOf(["fresh", "fresh", "tender"]), "Felt fresh in 2 of 3 logged");
   assert.equal(moodOf([undefined, undefined]), null);
+}
+
+// A period with no rides says when the last one was, the way the journal
+// writes a day. It used to print the stored value: "Your last ride was
+// 2026-11-03."
+{
+  const on = "2026-11-24";
+  assert.equal(describeLastRide("2026-11-03", undefined, on), "Your last ride was on 3 Nov.");
+  assert.equal(describeLastRide("2026-11-03", "Ralfy", on), "Ralfy's last ride was on 3 Nov.");
+  assert.equal(describeLastRide("2026-01-31", undefined, on), "Your last ride was on 31 Jan.");
+  assert.equal(describeLastRide(undefined, undefined, on), null);
+  assert.equal(describeLastRide("", undefined, on), null);
+  assert.equal(describeLastRide("2026-11-03T09:30:00Z", undefined, on), null, "Only a calendar day is named, and never as stored.");
+
+  // The journal holds a rider's newest rides however old. "3 Nov" a year later
+  // would read as three weeks ago.
+  assert.equal(describeLastRide("2025-11-03", undefined, on), "Your last ride was on 3 Nov 2025.");
+  assert.equal(describeLastRide("2026-12-28", "Ralfy", "2027-01-03"), "Ralfy's last ride was on 28 Dec 2026.");
+  // Left out, "today" is this device's own day.
+  assert.equal(describeLastRide(`${localToday().slice(0, 4)}-01-15`), "Your last ride was on 15 Jan.");
+
+  // The stored value is a calendar day, not an instant. Read through a Date it
+  // is UTC midnight, which is still the evening of the 2nd west of Greenwich.
+  for (const zone of ["Pacific/Honolulu", "America/Sao_Paulo", "UTC", "Europe/Bucharest", "Asia/Tokyo", "Pacific/Kiritimati"]) {
+    withTimeZone(zone, () => {
+      assert.equal(describeLastRide("2026-11-03", undefined, on), "Your last ride was on 3 Nov.", zone);
+      // From the ride itself: finished just after midnight, and just before
+      // the next one, on the rider's own 3 November.
+      for (const [hour, minute] of [[0, 20], [23, 40]] as const) {
+        const finishedAt = new Date(2026, 10, 3, hour, minute).toISOString();
+        assert.equal(
+          describeLastRide(localDayOf(finishedAt) ?? undefined, undefined, on),
+          "Your last ride was on 3 Nov.",
+          `${zone}, finished at ${hour}:${minute}`
+        );
+      }
+    });
+  }
+
+  const card = readFileSync(join(process.cwd(), "src", "features", "ride", "RideSummaryCard.tsx"), "utf8");
+  assert.match(card, /describeLastRide\(lastRideOn, horseName\)/);
+  assert.doesNotMatch(card, /\$\{lastRideOn\}/, "The card never prints the day as stored.");
 }
 
 // Negative or corrupt numbers never drag a total below zero.

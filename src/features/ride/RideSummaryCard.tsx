@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { ChevronRight } from "lucide-react-native";
 import type { RidePeriod, RideSummary } from "../../domain/ride-stats";
-import { describeLogged, describeMood, describeTracked, describeTrend } from "../../domain/ride-stats";
+import { describeLastRide, describeLogged, describeMood, describeTracked, describeTrend } from "../../domain/ride-stats";
 import { equinaTheme } from "../../ui/theme/theme";
 import { rideTrainingLabel } from "./ride-plan";
 
@@ -37,6 +37,7 @@ export type RideSummaryCardProps = {
   onPeriodChange: (period: RidePeriod) => void;
   /** Rides in the journal overall, used only to word the empty state. */
   lifetimeRides: number;
+  /** The newest ride's local calendar day, YYYY-MM-DD. Shown as "3 Nov", never as stored. */
   lastRideOn?: string;
   /** The horse whose rides these are; absent for a rider with no horse, whose rides are all theirs. */
   horseName?: string;
@@ -72,6 +73,7 @@ export function RideSummaryCard({
   const rideWord = summary?.rides === 1 ? "ride" : "rides";
   const daysText = summary?.daysRidden === 1 ? "on 1 day" : `across ${summary?.daysRidden ?? 0} days`;
   const hasFacts = Boolean(summary && (summary.trainings.length > 0 || mood || tracked || logged));
+  const lastRide = lifetimeRides > 0 ? describeLastRide(lastRideOn, horseName) : null;
 
   return (
     <View style={styles.card}>
@@ -103,9 +105,7 @@ export function RideSummaryCard({
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>{horseName ? `No rides with ${horseName} ${label}` : `No rides ${label}`}</Text>
           <Text style={styles.emptyBody}>
-            {lifetimeRides > 0 && lastRideOn
-              ? `${horseName ? `${horseName}'s` : "Your"} last ride was ${lastRideOn}. Log one and it appears here.`
-              : "Log a ride and this fills in on its own."}
+            {lastRide ? `${lastRide} Log one and it appears here.` : "Log a ride and this fills in on its own."}
           </Text>
         </View>
       ) : (
