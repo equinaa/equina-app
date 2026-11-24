@@ -97,7 +97,7 @@ function unduck() {
 
 /**
  * A phase begins, or the last one ends. The first one comes from the rider's
- * own tap on Start, which is what lets a browser play the chime at all.
+ * own tap on Start training, which is what lets a browser play the chime at all.
  */
 export function cuePhaseChange(kind: "phase" | "done") {
   buzz(kind);

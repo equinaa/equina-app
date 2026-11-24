@@ -3,7 +3,7 @@ import { Platform, StyleSheet, Text, TextInput, View } from "react-native";
 import { ChevronUp, Minus, Plus, RotateCcw, X } from "lucide-react-native";
 import type { RideMood } from "./RideExperience";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
-import { rideAlertsAllowed } from "./ride-cues";
+import { cuePhaseChange, prepareRideCues, rideAlertsAllowed } from "./ride-cues";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
@@ -67,8 +67,8 @@ const samePhases = (left: RidePhasePlan[], right: RidePhasePlan[]) =>
 
 /**
  * What the rider sets before getting on: the horse, the training, and the
- * phases with their minutes. Nothing starts here -- the clock waits on the
- * ride screen until the rider is in the saddle and taps Start.
+ * phases with their minutes. Start training starts the clock and the first
+ * phase at once, so the rider can put the phone away straight after.
  *
  * The same sheet logs a training done without the clock ("Add activity"):
  * the rider also says when it was, and it goes straight into the journal.
@@ -91,7 +91,7 @@ export function RideSetupSheet({
   horses: RideSetupHorse[];
   horseId?: string;
   trainingType: RideTrainingType;
-  /** The phases to open with: the ride being edited, or the last ones for this training. */
+  /** The phases to open with: the last ones for this training, or the yard's. */
   phases: RidePhasePlan[];
   memory: RideSetupMemory | null;
   onContinue?: (plan: RidePlan) => void;
@@ -119,6 +119,9 @@ export function RideSetupSheet({
   // A save outlives the sheet closing and opening again, so it can never be
   // sent twice.
   const inFlight = useRef(false);
+  // Start training waits on the notification question; a second tap meanwhile
+  // must not start a second ride.
+  const starting = useRef(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -134,6 +137,10 @@ export function RideSetupSheet({
     setNote("");
     setSaving(inFlight.current);
     setSaveError("");
+    // A browser plays sound only in answer to a tap, and the chime for the
+    // first phase comes from the tap on Start training: it has to be loaded
+    // by then.
+    if (!logging && Platform.OS === "web") void prepareRideCues();
     // Opening is the reset point; edits while open must survive re-renders.
   }, [visible]);
 
@@ -191,16 +198,31 @@ export function RideSetupSheet({
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (logging) {
       void save();
       return;
     }
-    if (problem || !onContinue) return;
-    // Asked here, on the ground, never mid-ride: alerts are what reach a
-    // locked phone. A no keeps the chime and the buzz with the screen on.
-    if (Platform.OS !== "web") void rideAlertsAllowed(true);
-    onContinue(plan);
+    if (problem || !onContinue || starting.current) return;
+    if (Platform.OS === "web") {
+      // Inside the tap itself, or the browser keeps every chime of the ride silent.
+      cuePhaseChange("phase");
+      onContinue(plan);
+      return;
+    }
+    starting.current = true;
+    try {
+      // Asked here, on the ground, never mid-ride, and answered before the
+      // clock starts: alerts are what reach a locked phone, and the first
+      // phase's are scheduled the moment the ride opens. A no keeps the chime
+      // and the buzz with the screen on.
+      await rideAlertsAllowed(true);
+      await prepareRideCues();
+      cuePhaseChange("phase");
+      onContinue(plan);
+    } finally {
+      starting.current = false;
+    }
   };
 
   return (
@@ -436,8 +458,8 @@ export function RideSetupSheet({
         ) : (
           <Text style={styles.note}>
             {Platform.OS === "web"
-              ? "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. Keep this page open; the screen stays on so your phone can chime at each phase."
-              : "Nothing is timed yet: the clock starts when you tap Start phase on the next screen. At each new phase your phone chimes and vibrates, with a notification if the screen is locked."}
+              ? "Tap Start training and keep this page open. Each phase starts automatically, with a chime when it changes. To ride with your phone locked, use the Equina app."
+              : "Tap Start training, then put your phone away. Each phase starts automatically, and you'll get a notification when it changes."}
           </Text>
         )}
         {problem ? <Text accessibilityRole="alert" style={styles.problem}>{problem}</Text> : null}
@@ -446,7 +468,7 @@ export function RideSetupSheet({
           testID={logging ? "add-activity-save" : "ride-setup-continue"}
           label={logging ? (saving ? "Saving..." : "Save to journal") : "Start training"}
           disabled={Boolean(problem) || saving}
-          onPress={submit}
+          onPress={() => void submit()}
         />
       </View>
     </EquinaSheet>

@@ -9,11 +9,11 @@ import { localDayOf } from "./local-day";
  * moment it is deleted.
  *
  * One honesty constraint shapes the whole shape of this: `elapsedSeconds` is
- * only as good as the timer, and the timer runs while the app is open. A rider
- * who starts a session and pockets the phone records a fraction of the real
- * hour. So time is reported as "tracked", never as "time in the saddle", and
- * it is never the headline. The headline is the ride count, which is the one
- * number the journal actually knows.
+ * the ride clock. It counts on with the phone locked, but it runs from the
+ * rider's tap on Start training to their tap on Finish, not from mounting to
+ * dismounting. So time is reported as "tracked", never as "time in the
+ * saddle", and it is never the headline. The headline is the ride count,
+ * which is the one number the journal actually knows.
  */
 
 export type RidePeriod = "week" | "month";

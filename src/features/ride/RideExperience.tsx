@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Pause,
-  Pencil,
   Play,
   SendHorizontal,
   Sparkles,
@@ -45,14 +44,12 @@ import {
   phaseRemainingMs,
   plannedMinutes,
   reachedPhases,
-  readyRun,
   resumeRun,
   rideElapsedMs,
   ridePhaseEntries,
   rideScheduleKey,
   rideTrainingLabel,
   skipPhase,
-  startRun,
   syncRun,
   upcomingRideAlerts,
   type RidePlan,
@@ -114,42 +111,56 @@ export const rideDurationLabel = (seconds: number) => {
 };
 
 const tickMs = 250;
-// A gap this long between ticks means the phone slept. A phase that began
-// meanwhile was already announced by its notification, so it is not said again.
+// A gap this long between ticks means the phone slept. On a phone, a phase that
+// began meanwhile was already announced by its notification, so it is not said
+// again. A browser sends none: there the chime waits for the page to be seen.
 const sleptMs = 2_500;
 const maxRideMs = 86_400_000;
 
 export function RideModeScreen({
   plan,
+  initialRun,
   discipline,
   image,
+  onRunChange,
   onFinish,
-  onExit,
-  onEdit
+  onExit
 }: {
   plan: RidePlan;
+  /**
+   * Already started: Start training on the setup sheet starts the clock. Also
+   * the saved run when the screen comes back -- after another tab, or after
+   * the app was closed mid-ride.
+   */
+  initialRun: RideRun;
   /** The horse's or the rider's, for a training that has none of its own. */
   discipline: OnboardingDiscipline;
   image: string;
+  /** Every change of the run's state, so the ride in progress can be kept. */
+  onRunChange?: (run: RideRun) => void;
   onFinish: (session: RideCompletion) => void;
   onExit: () => void;
-  /** Back to the setup sheet. Only before the clock starts. */
-  onEdit: () => void;
 }) {
   const phases = plan.phases;
-  const [run, setRun] = useState<RideRun>(readyRun);
+  // Phases that ran out while the screen was away are passed silently: the
+  // notifications said them, or nobody was there to hear.
+  const [run, setRun] = useState<RideRun>(() => syncRun(initialRun, phases, Date.now()).run);
   const [now, setNow] = useState(() => Date.now());
   const runRef = useRef(run);
   const lastTick = useRef(Date.now());
   const alertIds = useRef<string[]>([]);
   const alertQueue = useRef<Promise<void>>(Promise.resolve());
+  // A chime owed by a phase that changed while the page was hidden. Browsers
+  // send no notification, so it plays when the rider looks again.
+  const owedCue = useRef<"phase" | "done" | null>(null);
+  const runChange = useRef(onRunChange);
+  runChange.current = onRunChange;
   const entryMotion = useRef(new Animated.Value(0)).current;
   const phaseMotion = useRef(new Animated.Value(1)).current;
   const reducedMotion = useReducedMotion();
   const useNativeDriver = Platform.OS !== "web";
   runRef.current = run;
 
-  const started = run.startedAt !== null;
   const running = isRunning(run);
   const done = run.phasesDone;
   const currentPhase = phases[run.phaseIndex] ?? phases[0];
@@ -163,7 +174,9 @@ export function RideModeScreen({
 
   useEffect(() => {
     void prepareRideCues();
-    void cancelStaleRideAlerts();
+    // Queued ahead of the first scheduling below, which now runs at once: the
+    // clock is already going when this screen opens.
+    alertQueue.current = alertQueue.current.then(cancelStaleRideAlerts);
     const releaseScreen = holdScreenAwake();
     return () => {
       releaseScreen();
@@ -203,30 +216,64 @@ export function RideModeScreen({
     }).start();
   };
 
+  // Saved at every change of state. The run is timestamps, so a clock that
+  // simply runs writes nothing.
+  useEffect(() => {
+    runChange.current?.(run);
+  }, [run]);
+
+  const advance = (tick: number) => {
+    const slept = tick - lastTick.current > sleptMs;
+    lastTick.current = tick;
+    setNow(tick);
+    const step = syncRun(runRef.current, phases, tick);
+    if (step.run !== runRef.current) {
+      runRef.current = step.run;
+      setRun(step.run);
+    }
+    const cue = step.finished ? "done" : step.entered !== null && phases[step.entered] ? "phase" : null;
+    const hidden = AppState.currentState === "background";
+    if (Platform.OS === "web") {
+      // A hidden tab or a locked phone hears nothing from a browser; the cue
+      // is kept for the moment the page is seen again.
+      if (hidden) {
+        if (cue) owedCue.current = cue;
+        return;
+      }
+      const owed = cue ?? owedCue.current;
+      owedCue.current = null;
+      if (!owed) return;
+      cuePhaseChange(owed);
+      pulsePhase();
+      return;
+    }
+    // Out of sight -- locked, or another app in front -- the notification
+    // already told the rider; a second chime from the background would not.
+    // "inactive" (Control Center pulled down) still runs and still chimes.
+    if (!cue || slept || hidden) return;
+    cuePhaseChange(cue);
+    pulsePhase();
+  };
+  const advanceRef = useRef(advance);
+  advanceRef.current = advance;
+
   // The clock. Time comes from timestamps; the interval only wakes the screen
   // to show it and to notice when a phase's minutes are up.
   useEffect(() => {
     if (!running) return;
     lastTick.current = Date.now();
-    const interval = setInterval(() => {
-      const tick = Date.now();
-      const slept = tick - lastTick.current > sleptMs;
-      lastTick.current = tick;
-      setNow(tick);
-      const step = syncRun(runRef.current, phases, tick);
-      if (step.run === runRef.current) return;
-      runRef.current = step.run;
-      setRun(step.run);
-      // Out of sight -- locked, or another app in front -- the notification
-      // already told the rider; a second chime from the background would not.
-      // "inactive" (Control Center pulled down) still runs and still chimes.
-      if (slept || AppState.currentState === "background") return;
-      if (step.finished) cuePhaseChange("done");
-      else if (step.entered !== null && phases[step.entered]) cuePhaseChange("phase");
-      pulsePhase();
-    }, tickMs);
+    const interval = setInterval(() => advanceRef.current(Date.now()), tickMs);
     return () => clearInterval(interval);
-  }, [running, phases]);
+  }, [running]);
+
+  // Back in front: the screen is right at once rather than on the next tick,
+  // and in a browser the chime a hidden phase change owed plays now.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") advanceRef.current(Date.now());
+    });
+    return () => subscription.remove();
+  }, []);
 
   // What a locked phone is told, kept in step with the ride: every change of
   // phase still ahead, cleared on pause and rebuilt when the times ahead move.
@@ -239,18 +286,6 @@ export function RideModeScreen({
       alertIds.current = await scheduleRideAlerts(upcomingRideAlerts(runRef.current, phases, Date.now()));
     });
   }, [alertKey, phases]);
-
-  const startRide = () => {
-    const first = phases[0];
-    if (!first) return;
-    const tick = Date.now();
-    const next = startRun(run, tick);
-    runRef.current = next;
-    setRun(next);
-    setNow(tick);
-    cuePhaseChange("phase");
-    pulsePhase();
-  };
 
   const togglePause = () => {
     void Haptics.selectionAsync().catch(() => undefined);
@@ -310,17 +345,13 @@ export function RideModeScreen({
       : [{ translateY: phaseMotion.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }]
   };
 
-  // Before the start the screen shows the first phase and its full time, so
-  // the rider can get on, settle the phone and the horse, then tap Start.
   const phaseLabel = done ? "ALL PHASES DONE" : (currentPhase?.title ?? "").toUpperCase();
   const timerValue = done ? formatElapsed(elapsedSeconds) : formatElapsed(remainingSeconds);
-  const timerNote = !started
-    ? `Phase 1 of ${phases.length} · the clock waits for you`
-    : done
-      ? "Total ride time"
-      : !running
-        ? `Paused · phase ${run.phaseIndex + 1} of ${phases.length}`
-        : `remaining · phase ${run.phaseIndex + 1} of ${phases.length}`;
+  const timerNote = done
+    ? "Total ride time"
+    : !running
+      ? `Paused · phase ${run.phaseIndex + 1} of ${phases.length}`
+      : `remaining · phase ${run.phaseIndex + 1} of ${phases.length}`;
 
   return (
     <View testID="ride-mode" style={styles.rideRoot}>
@@ -349,20 +380,7 @@ export function RideModeScreen({
             <Text numberOfLines={1} style={styles.rideIdentityMeta}>{trainingLabel} · {totalMinutes} min</Text>
           </View>
 
-          <View style={styles.rideTopActions}>
-            {!started ? (
-              <MotionPressable
-                testID="ride-edit"
-                accessibilityRole="button"
-                accessibilityLabel="Change the training"
-                hitSlop={6}
-                onPress={onEdit}
-                style={styles.rideIconButton}
-              >
-                <Pencil size={18} color={equinaTheme.text.primary} />
-              </MotionPressable>
-            ) : null}
-          </View>
+          <View style={styles.rideTopActions} />
         </View>
 
         <View style={styles.rideBottom}>
@@ -403,23 +421,12 @@ export function RideModeScreen({
               <Text numberOfLines={1} style={styles.rideNext}>
                 Next · {nextPhase.title}{nextPhase.detail ? ` · ${nextPhase.detail}` : ""} · {nextPhase.minutes} min
               </Text>
-            ) : started ? (
+            ) : (
               <Text style={styles.rideNext}>Last phase</Text>
-            ) : null}
+            )}
           </Animated.View>
 
-          {!started ? (
-            <MotionPressable
-              testID="ride-start"
-              accessibilityRole="button"
-              accessibilityLabel={`Start ${currentPhase?.title ?? "the first phase"} and the clock`}
-              onPress={startRide}
-              style={styles.ridePrimaryButton}
-            >
-              <Play size={19} color={equinaTheme.colors.ink} fill={equinaTheme.colors.ink} />
-              <Text style={styles.ridePrimaryText}>Start phase</Text>
-            </MotionPressable>
-          ) : done ? (
+          {done ? (
             <MotionPressable
               testID="ride-toggle"
               accessibilityRole="button"

@@ -139,7 +139,7 @@ export const cleanPhases = (phases: RidePhasePlan[]): RidePhasePlan[] =>
  * On waking, `syncRun` moves the ride on to wherever the clock now is.
  */
 export type RideRun = {
-  /** Wall-clock ms of the rider's first start. Null while the ride waits for them. */
+  /** Wall-clock ms of the rider's first start. Null only before `startRun`. */
   startedAt: number | null;
   /** Ride time banked before the current stretch, in ms. */
   bankedMs: number;
@@ -316,7 +316,7 @@ export type RideSetupMemory = {
   phasesByType: Record<string, RidePhasePlan[]>;
 };
 
-const isPhase = (value: unknown): value is RidePhasePlan => {
+export const isPhase = (value: unknown): value is RidePhasePlan => {
   if (!value || typeof value !== "object") return false;
   const phase = value as Record<string, unknown>;
   return typeof phase.id === "string"

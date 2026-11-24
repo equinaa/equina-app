@@ -174,6 +174,8 @@ import type { HorseTimeOff, TrainingPlanDay } from "./backend";
 import type { StreakSummary } from "./domain/training-streak";
 import { switchableHorses } from "./features/records/horse-selection";
 import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
+import { clearActiveRide, useActiveRide } from "./features/ride/useActiveRide";
+import { restoreRun, type ActiveRide } from "./features/ride/active-ride";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { disciplineFromHorse, heroPhotoFor, heroPhotoPending as isHeroPhotoPending, snapshotSetsHomeHorse } from "./features/home/home-hero";
 import {
@@ -181,8 +183,11 @@ import {
   defaultTrainingType,
   phasesFor,
   plannedMinutes,
+  readyRun,
   rideTrainingTypeById,
-  type RidePlan
+  startRun,
+  type RidePlan,
+  type RideRun
 } from "./features/ride/ride-plan";
 import { useRideJournal } from "./features/ride/useRideJournal";
 import { createSeededEquinaApi } from "./seed/seed-data";
@@ -902,7 +907,7 @@ function EquinaApp() {
   const [shopOpenedListingId, setShopOpenedListingId] = useState(api.store.listings[0]?.id ?? "");
   const [pendingShopConversationId, setPendingShopConversationId] = useState("");
   const [rideActive, setRideActive] = useState(false);
-  // Set on the setup sheet before the ride screen opens; the clock waits there.
+  // Set on the setup sheet; its Start training starts the clock.
   const [rideSetupOpen, setRideSetupOpen] = useState(false);
   const [addActivityOpen, setAddActivityOpen] = useState(false);
   const [rideJournalOpen, setRideJournalOpen] = useState(false);
@@ -917,6 +922,9 @@ function EquinaApp() {
   const [switchingHorseId, setSwitchingHorseId] = useState("");
   const [horseSwitchError, setHorseSwitchError] = useState("");
   const [ridePlan, setRidePlan] = useState<RidePlan | null>(null);
+  // The ride's clock as of its last change, held here so the ride screen
+  // picks up where it was after another tab, and kept on the phone.
+  const [rideRun, setRideRun] = useState<RideRun | null>(null);
   // Seeded for demo mode only. A connected account counts its real journal.
   const [localSessionCount, setLocalSessionCount] = useState(4);
   const [careLogged, setCareLogged] = useState(false);
@@ -1022,6 +1030,7 @@ function EquinaApp() {
     // A ride, its setup and its alerts belong to the account that started it.
     setRideActive(false);
     setRidePlan(null);
+    setRideRun(null);
     setRideSetupOpen(false);
     setAddActivityOpen(false);
     setRideJournalOpen(false);
@@ -1050,6 +1059,7 @@ function EquinaApp() {
     onConnectedSnapshot: equinaSession.updateAccount,
     onSignOut: async () => {
       await clearShopDrafts(equinaSession.session?.user.id);
+      await clearActiveRide(equinaSession.session?.user.id);
       await clearOnboardingDraft();
       await equinaSession.signOut();
       resetAccountUi();
@@ -1085,11 +1095,35 @@ function EquinaApp() {
     photoUrl: onboardingHorsePhoto,
     horsesLoaded: horseRecords.horsesLoaded
   });
-  // A ride never outlives the app. Phase alerts left by one that was closed
-  // mid-ride would otherwise keep calling out phases nobody is riding.
+  // Phase alerts left by a ride the app was closed on would otherwise keep
+  // calling out phases nobody is riding. A ride brought back below schedules
+  // its own again, after these are gone, so none is doubled.
+  const staleAlertsCleared = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
-    void cancelStaleRideAlerts();
+    staleAlertsCleared.current = cancelStaleRideAlerts();
   }, []);
+  const rideActiveRef = useRef(rideActive);
+  rideActiveRef.current = rideActive;
+  // A ride in progress when the app or the page was closed opens again
+  // straight on the ride screen, at the phase and the time the clock says.
+  const restoreRide = (stored: ActiveRide) => {
+    void staleAlertsCleared.current.then(() => {
+      if (rideActiveRef.current) return;
+      setRidePlan(stored.plan);
+      setRideRun(restoreRun(stored.run, stored.plan.phases, Date.now()));
+      setRideActive(true);
+      setRideSetupOpen(false);
+      setLastRideRecapVisible(false);
+      setTab("home");
+    });
+  };
+  const activeRide = useActiveRide(
+    equinaSession.session?.user.id,
+    accountCreated && (equinaSession.phase === "authenticated" || equinaSession.phase === "demo"),
+    (stored) => {
+      if (stored) restoreRide(stored);
+    }
+  );
   // Every horse the rider has, not only the one selected in the Stable: a
   // rider with two horses picks today's on the setup sheet.
   const rideHorses: RideSetupHorse[] = horseRecords.horses.some((record) => !record.archivedAt)
@@ -1129,16 +1163,13 @@ function EquinaApp() {
   const todayTraining = todayPlanned ? rideTrainingTypeById(todayPlanned.trainingType) : undefined;
   const todayHorseId = todayPlanned?.horseId && horseNames[todayPlanned.horseId] ? todayPlanned.horseId : undefined;
   const nextTraining = todayTraining ?? rememberedTraining;
-  // Editing is only offered before the clock starts, so an open plan is the one to edit.
-  const rideSetupDraft = rideActive && ridePlan
-    ? { horseId: ridePlan.horseId, trainingType: ridePlan.trainingType, phases: ridePlan.phases }
-    : {
-        // The plan's horse for today, else Home's horse -- the last one
-        // picked -- and the remembered one only before the Stable has loaded.
-        horseId: todayHorseId ?? (horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId),
-        trainingType: nextTraining,
-        phases: phasesFor(rideSetupMemory.memory, nextTraining)
-      };
+  const rideSetupDraft = {
+    // The plan's horse for today, else Home's horse -- the last one picked --
+    // and the remembered one only before the Stable has loaded.
+    horseId: todayHorseId ?? (horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId),
+    trainingType: nextTraining,
+    phases: phasesFor(rideSetupMemory.memory, nextTraining)
+  };
   // Add activity opens on Home's horse: the last one the rider picked.
   const activityDraft = {
     horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
@@ -1591,24 +1622,29 @@ function EquinaApp() {
     setRideSetupOpen(true);
   };
 
+  // Start training starts the clock and the first phase in the same tap, so
+  // the rider can put the phone away straight after.
   const confirmRideSetup = (plan: RidePlan) => {
-    setRidePlan(plan);
     setRideSetupOpen(false);
+    if (rideActive) return;
+    setRidePlan(plan);
+    setRideRun(startRun(readyRun(), Date.now()));
     rideSetupMemory.remember(plan);
     // Riding another horse is picking it: Home shows the last horse picked.
     if (plan.horseId && plan.horseId !== horseRecords.selectedHorseId) {
       void horseRecords.switchHorse(plan.horseId).catch(() => undefined);
     }
-    if (rideActive) return;
     setRideActive(true);
     setLastRideRecapVisible(false);
     setDailyMood("Focused");
     dailyMoodRef.current = "Focused";
-    refresh("Ride set up. The clock starts when you start the first phase.");
+    refresh("Ride started.");
   };
 
   const finishRide = (session: RideCompletion) => {
     setRideActive(false);
+    setRideRun(null);
+    activeRide.clear();
     setLocalLastRide({ ...session, mood: dailyMood });
     setCareLogged(false);
     setSharedRide(false);
@@ -1700,6 +1736,8 @@ function EquinaApp() {
 
   const cancelRide = () => {
     setRideActive(false);
+    setRideRun(null);
+    activeRide.clear();
     setLastRideRecapVisible(false);
     refresh("Ride ended without saving.");
   };
@@ -2580,9 +2618,14 @@ function EquinaApp() {
               { pointerEvents: onboardingTransitioning ? "none" : "auto" }
             ]}
           >
-            {tab === "home" && rideActive && ridePlan ? (
+            {tab === "home" && rideActive && ridePlan && rideRun ? (
               <RideModeScreen
                 plan={ridePlan}
+                initialRun={rideRun}
+                onRunChange={(run) => {
+                  setRideRun(run);
+                  activeRide.save(ridePlan, run);
+                }}
                 // For a training with no discipline of its own (lunging,
                 // groundwork), the ride's horse's -- not the Stable selection,
                 // and no longer the rider's, which Home now keeps.
@@ -2590,7 +2633,6 @@ function EquinaApp() {
                 image={rideHorsePhoto || disciplineVisuals[onboardingDiscipline].home}
                 onFinish={finishRide}
                 onExit={cancelRide}
-                onEdit={() => setRideSetupOpen(true)}
               />
             ) : tab === "home" && lastRideRecapVisible && lastRide ? (
               <RideRecapScreen
