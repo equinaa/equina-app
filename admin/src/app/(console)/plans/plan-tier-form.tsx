@@ -51,7 +51,7 @@ export function PlanTierForm({ planKey, values }: { planKey: PlanKey; values: Re
           <label className="label" htmlFor={id("monthlyCredits")}>Ralf credits a month</label>
           <input id={id("monthlyCredits")} name="monthlyCredits" className="input" defaultValue={value("monthlyCredits")}
             inputMode="numeric" aria-invalid={invalid("monthlyCredits")} aria-describedby={describedBy("monthlyCredits", true)} />
-          <p id={`${id("monthlyCredits")}-hint`} className="hint">A message costs 1, one with a photo 3.</p>
+          <p id={`${id("monthlyCredits")}-hint`} className="hint">A message costs 1.</p>
           {error("monthlyCredits")}
         </div>
         <div className="field">

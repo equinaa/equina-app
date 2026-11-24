@@ -13,6 +13,7 @@ import {
   planStatusLine,
   tierFeatures
 } from "../src/features/plans/plan-rules";
+import { closedPlansCopy, closedTrialLine, closedTrialPill, creditsNote } from "../src/features/plans/plan-screen-copy";
 
 const free = (overrides: Partial<PlanState> = {}): PlanState => ({
   ...foundingPlan,
@@ -80,6 +81,48 @@ assert.equal(freeFeatures[1]?.text, "Free lessons, plus 2 lessons you choose");
 assert.equal(tierFeatures(draftPlanTiers[2]!)[5]?.text, "A ticket to Equina's annual event");
 assert.equal(tierFeatures(draftPlanTiers[2]!)[4]?.text, "Two 1-on-1 sessions with a coach");
 assert.equal(tierFeatures(draftPlanTiers[1]!)[4]?.text, "One 1-on-1 session with a coach");
+
+// --- The plan screen while nothing is for sale -------------------------------------------
+
+// Build 1 sells nothing on any platform, and this is the screen it shows.
+{
+  const freeTier = draftPlanTiers[0]!;
+  const plus = draftPlanTiers[1]!;
+  const premium = draftPlanTiers[2]!;
+  assert.equal(closedPlansCopy.title, "Subscriptions are not open yet");
+  assert.match(closedPlansCopy.body, /the Equina team sets your plan/, "During the beta staff grant plans from the Admin.");
+  assert.equal(creditsNote, "One Ralf credit is one message. The Equina team arranges coach sessions and event tickets with you.");
+  assert.doesNotMatch(creditsNote, /photo/i, "Ralf takes no photos: no message costs three credits.");
+
+  // Staff set the trial in the Admin, and it cannot be started yet.
+  assert.equal(closedTrialLine(draftPlanTiers), "When subscriptions open, Plus and Premium start with a 7-day free trial.");
+  assert.equal(closedTrialLine([freeTier, plus, { ...premium, trialDays: 0 }]), "When subscriptions open, Plus starts with a 7-day free trial.");
+  assert.equal(closedTrialLine([freeTier, plus, { ...premium, trialDays: 14 }]), null, "Two lengths: each card says its own.");
+  assert.equal(closedTrialLine(draftPlanTiers.map((tier) => ({ ...tier, trialDays: 0 }))), null, "Set to 0 in the Admin, nothing mentions a trial.");
+  assert.equal(closedTrialLine([]), null);
+  assert.deepEqual(draftPlanTiers.map(closedTrialPill), [null, "7-day free trial", "7-day free trial"]);
+  assert.equal(closedTrialPill({ ...plus, trialDays: 0 }), null);
+
+  // The same words on iOS, Android and the web: no store, no price, nowhere else to pay.
+  const closedLines = [
+    ...Object.values(closedPlansCopy),
+    creditsNote,
+    closedTrialLine(draftPlanTiers) ?? "",
+    ...draftPlanTiers.map((tier) => closedTrialPill(tier) ?? "")
+  ];
+  for (const line of closedLines) {
+    assert.doesNotMatch(line, /App Store|Apple|Google|Play Store|TestFlight/i, `"${line}" names a store.`);
+    assert.doesNotMatch(line, /[€$£]|\d[.,]\d\d\b/, `"${line}" names a price.`);
+    assert.doesNotMatch(line, /https?:|www\.|@/, `"${line}" sends the rider elsewhere.`);
+    assert.doesNotMatch(line, /!/);
+  }
+
+  // No word of the closed screen is typed into the component, where no test reads it.
+  const planScreen = readFileSync(join(process.cwd(), "src", "features", "plans", "PlanScreen.tsx"), "utf8");
+  assert.doesNotMatch(planScreen, /App Store|Google Play|photo/i);
+  const tierForm = readFileSync(join(process.cwd(), "admin", "src", "app", "(console)", "plans", "plan-tier-form.tsx"), "utf8");
+  assert.doesNotMatch(tierForm, /with a photo/i, "The Admin tells staff the same: a message costs one credit.");
+}
 
 // --- my_plan() as the app reads it ---------------------------------------------------------
 
