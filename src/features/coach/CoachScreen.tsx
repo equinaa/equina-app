@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -32,6 +31,7 @@ import type { EquinaBackend } from "../../backend";
 import { ConversationComposer } from "../../ui/conversation/ConversationComposer";
 import { ConversationMessage } from "../../ui/conversation/ConversationMessage";
 import { ConversationState } from "../../ui/conversation/ConversationState";
+import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingContainer";
 import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
@@ -192,10 +192,9 @@ export function CoachScreen({
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAvoidingContainer
       testID="ralf-conversation"
       style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={0}
     >
       <View style={styles.header}>
@@ -451,7 +450,7 @@ export function CoachScreen({
         reducedMotion={reducedMotion}
         controller={controller}
       />
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingContainer>
   );
 }
 

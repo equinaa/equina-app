@@ -12,6 +12,7 @@ import "./mux.test";
 import "./data-export.test";
 import "./image-metadata.test";
 import "./android-permissions.test";
+import "./android-keyboard.test";
 import "./labels.test";
 import "./training-streak.test";
 import "./time-off.test";

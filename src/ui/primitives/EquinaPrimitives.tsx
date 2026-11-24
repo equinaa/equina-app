@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from "react";
 import {
   Animated,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -17,6 +16,7 @@ import {
 } from "react-native";
 import { BlurView } from "expo-blur";
 import { ChevronLeft, ChevronRight, X } from "lucide-react-native";
+import { KeyboardAvoidingContainer } from "../keyboard/KeyboardAvoidingContainer";
 import { MotionPressable } from "../motion/MotionPressable";
 import { selectionHaptic } from "../motion/haptics";
 import { useReducedMotion } from "../motion/useReducedMotion";
@@ -201,10 +201,7 @@ export function EquinaSheet({
 
   return (
     <Modal transparent visible animationType="none" statusBarTranslucent onRequestClose={onDismiss}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={primitiveStyles.sheetRoot}
-      >
+      <KeyboardAvoidingContainer style={primitiveStyles.sheetRoot}>
         <Pressable accessibilityElementsHidden importantForAccessibility="no" onPress={onDismiss} style={primitiveStyles.sheetBackdrop} />
         <Animated.View
           accessibilityViewIsModal
@@ -256,7 +253,7 @@ export function EquinaSheet({
             {children}
           </ScrollView>
         </Animated.View>
-      </KeyboardAvoidingView>
+      </KeyboardAvoidingContainer>
     </Modal>
   );
 }
