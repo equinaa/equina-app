@@ -31,13 +31,20 @@ export type CoachContextAllowance = {
    * horse.
    */
   rides: { horseId: string | null } | null;
+  /**
+   * The conversation's own settings: training focus, this week's load and
+   * answer style. Held back only by "Minimal context", whose line in Account
+   * reads "Send only the current question".
+   */
+  conversationSettings: boolean;
 };
 
 /**
  * - A switch that was never saved reads as its column default: the three
  *   sources on, "Minimal context" off.
  * - "Minimal context" wins over the other three, whatever they hold: Account
- *   greys them out while it is on, and keeps their values.
+ *   greys them out while it is on, and keeps their values. It also holds back
+ *   the conversation's settings, so the question is all that is sent.
  * - Rides are those of the horse the conversation is about, never every
  *   horse's. A conversation with no horse (a rider who has none, or a question
  *   about a ride that had none) reads the rides logged with no horse, so one
@@ -49,11 +56,14 @@ export const coachContextFor = (
   switches: CoachContextSwitches | null | undefined,
   conversationHorseId: string | null | undefined,
 ): CoachContextAllowance => {
-  if (switches?.reduced_personalization) return { riderProfile: false, horseId: null, rides: null };
+  if (switches?.reduced_personalization) {
+    return { riderProfile: false, horseId: null, rides: null, conversationSettings: false };
+  }
   const horseId = conversationHorseId || null;
   return {
     riderProfile: switches?.use_rider_profile !== false,
     horseId: switches?.use_selected_horse !== false ? horseId : null,
     rides: switches?.use_ride_history !== false ? { horseId } : null,
+    conversationSettings: true,
   };
 };
