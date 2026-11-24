@@ -12,6 +12,7 @@ import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingCon
 import { EquinaBackButton, EquinaButton } from "../../ui/primitives/EquinaPrimitives";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { EmailAuthMode } from "./social-auth";
+import { supportEmail } from "../../config/support-contact";
 import { cleanCode, codeReady } from "./verification-code";
 
 // Matches the auth service's one-email-per-minute limit (max_frequency).
@@ -146,6 +147,15 @@ export function AuthVerificationScreen({
             ? "The link expires shortly and can only be exchanged by this device."
             : "The code expires shortly and is never stored by Equina."}
         </Text>
+        {/* A build cannot be patched, and what the hosted emails carry can
+            change under it: a way out that holds whatever arrives, or nothing. */}
+        {!waitingForLink ? (
+          <Text testID="auth-otp-no-code" style={styles.securityNote}>
+            {purpose === "signin"
+              ? "No code after a few minutes? Go back and sign in with your password."
+              : `No code after a few minutes? Write to ${supportEmail}.`}
+          </Text>
+        ) : null}
         <Pressable
           testID="auth-otp-resend"
           accessibilityRole="button"

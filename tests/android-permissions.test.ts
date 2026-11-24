@@ -48,8 +48,9 @@ const pluginOptions = (name: string): Record<string, unknown> => {
 {
   // Photos come from the system picker and nothing records sound. The picker's
   // two options are sentences now, not false: iOS needs them as purpose strings
-  // (tests/store-build-config.test.ts), and with a sentence the plugin asks
-  // Android for the permission again. expo-audio's own manifest asks for the
+  // (tests/store-build-config.test.ts). With a sentence the plugin asks Android
+  // for the microphone again and no longer blocks the camera, which the picker
+  // library's own manifest declares. expo-audio's own manifest asks for the
   // microphone as well. So on Android only a blocked permission keeps each out.
   for (const permission of ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]) {
     assert.ok(

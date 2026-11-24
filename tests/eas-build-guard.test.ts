@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readBackendConfig } from "../src/backend/config";
 import { revenueCatApiKey } from "../src/features/plans/purchase-catalog";
 import {
   backendAnswer,
   isEasBuild,
+  isLocalEasBuild,
   isStoreBuild,
   notSoldYet,
   reviewedSwitches,
@@ -59,6 +60,15 @@ const about = (problems: string[], name: string) => problems.filter((problem) =>
   for (const unset of [undefined, "", "  "]) {
     assert.equal(isEasBuild({ EAS_BUILD: unset, EAS_BUILD_RUNNER: unset, EAS_BUILD_PROFILE: unset }), false);
   }
+}
+
+// A build on this computer is told apart from one on EAS's machines.
+{
+  assert.equal(isLocalEasBuild({ EAS_BUILD_RUNNER: "local-build-plugin" }), true);
+  assert.equal(isLocalEasBuild({ EAS_BUILD: "1", EAS_BUILD_RUNNER: "eas-build" }), false, "EAS's machines, whatever EAS_BUILD says.");
+  assert.equal(isLocalEasBuild({ EAS_BUILD: "1" }), false, "Without the runner's name nothing says the build is local.");
+  assert.equal(isLocalEasBuild({ EAS_BUILD: "true", EAS_BUILD_RUNNER: "eas-build" }), false, "EAS's own machines.");
+  assert.equal(isLocalEasBuild({}), false);
 }
 
 // Which builds are checked: all but the development client.
@@ -251,6 +261,39 @@ for (const profile of ["preview", "production"]) {
   assert.equal(problemsWith({ ...storeKeys, EXPO_PUBLIC_PRIVACY_POLICY_URL: "https://example.com/privacy" }).length, 3);
   // The development client still takes whatever .env.local holds.
   assert.deepEqual(storeBuildProblems({ profile: "development", env: { ...storeKeys } }), []);
+}
+
+// A build on this computer with CI set is stopped: Expo then skips the cache
+// reset, and the app could carry the values of an earlier bundle made here.
+{
+  const local = { EAS_BUILD: "1", EAS_BUILD_RUNNER: "local-build-plugin" };
+  for (const ci of ["1", "true", "TRUE", "yes"]) {
+    const problems = problemsWith({ ...local, CI: ci });
+    assert.equal(problems.length, 1, `CI=${ci} stops a local build.`);
+    assert.match(problems[0]!, /^CI is set in this terminal\./);
+  }
+  for (const ci of [undefined, "", "0", "false", "False"]) {
+    assert.deepEqual(problemsWith({ ...local, CI: ci }), [], "Without CI a local build goes through.");
+  }
+  for (const easBuild of ["true", "1"]) {
+    assert.deepEqual(
+      problemsWith({ EAS_BUILD: easBuild, EAS_BUILD_RUNNER: "eas-build", CI: "1" }),
+      [],
+      "EAS's own machines set CI and start with an empty cache: nothing to stop there, however EAS_BUILD is spelled."
+    );
+  }
+  assert.deepEqual(problemsWith({ CI: "1" }), [], "Outside a build, CI means nothing to the rules.");
+  // The Expo CLI that expo itself loads: its own copy first, else the shared one.
+  const expoCli = [join(root, "node_modules", "expo", "node_modules", "@expo", "cli"), join(root, "node_modules", "@expo", "cli")].find(
+    (folder) => existsSync(join(folder, "package.json"))
+  );
+  assert.ok(expoCli, "Expo CLI is installed.");
+  const exportEmbed = readFileSync(join(expoCli, "build", "src", "export", "embed", "exportEmbedAsync.js"), "utf8");
+  assert.match(
+    exportEmbed,
+    /if \(_env\.env\.CI && options\.resetCache\) \{[^}]*options\.resetCache = false;/,
+    "The reason for this rule is still in Expo CLI. If it is gone, the rule can go too."
+  );
 }
 
 // Whether the address and the key are a live project's own is asked of the
@@ -462,6 +505,27 @@ for (const profile of ["preview", "production"]) {
   assert.equal(localLeftover.status, 1, "A local build also gets what the terminal exports, development keys included.");
   assert.match(localLeftover.errors, /EXPO_PUBLIC_REVENUECAT_IOS_API_KEY is a RevenueCat Test Store key/);
   assert.equal(run({ ...local, EAS_BUILD_PROFILE: "development" }).status, 0, "A local development client goes through.");
+  const localWithCi = run({
+    ...local,
+    EAS_BUILD_PROFILE: "production",
+    ...switches,
+    EXPO_PUBLIC_SUPABASE_URL: projectUrl,
+    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+    CI: "1"
+  });
+  assert.equal(localWithCi.status, 1, "A complete local build from a terminal with CI set is stopped.");
+  assert.match(localWithCi.errors, /CI is set in this terminal/);
+  const cloudWithCi = run({
+    EAS_BUILD: "true",
+    EAS_BUILD_RUNNER: "eas-build",
+    EAS_BUILD_PROFILE: "production",
+    EAS_BUILD_PLATFORM: "android",
+    ...switches,
+    EXPO_PUBLIC_SUPABASE_URL: projectUrl,
+    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+    CI: "1"
+  });
+  assert.equal(cloudWithCi.status, 0, "On EAS's machines CI is expected.");
   const oneNameOnly: Array<Record<string, string>> = [
     { EAS_BUILD_RUNNER: "local-build-plugin" },
     { EAS_BUILD_RUNNER: "eas-build" },

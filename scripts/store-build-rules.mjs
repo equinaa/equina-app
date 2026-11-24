@@ -47,6 +47,24 @@ export const isEasBuild = (env) =>
   clean(env.EAS_BUILD_PROFILE) !== "";
 
 /**
+ * Whether the build runs on this computer (`eas build --local`) instead of on
+ * EAS's own machines: the local build plugin names itself as the runner, after
+ * the terminal's own variables, so the runner alone decides. Expo's build
+ * tools tell the two apart the same way. EAS's machines set CI, so a looser
+ * test here could stop every build there.
+ */
+export const isLocalEasBuild = (env) => clean(env.EAS_BUILD_RUNNER) === "local-build-plugin";
+
+/**
+ * Whether Expo CLI takes this shell for CI. Expo reads CI as "true" or "1" and
+ * stops on any other value but "false" or "0", so everything else counts here.
+ */
+const ciIsSet = (env) => {
+  const value = clean(env.CI).toLowerCase();
+  return value !== "" && value !== "false" && value !== "0";
+};
+
+/**
  * Whether the checks apply. Only the development client is let through: it
  * loads its JavaScript from Metro, with the values of .env.local. Any other
  * profile, known or not, produces an app someone installs.
@@ -137,9 +155,10 @@ export const storeBuildProblems = ({ profile, env, switches = {} }) => {
     report(keyName, "holds a secret key. Only the publishable key may be built into the app.");
   }
 
-  // Every email carries a six-digit code. The app compares this value exactly.
+  // Store builds ask for the emailed code (docs/EQUINA_AUTH_DELIVERY.md). The
+  // app compares this value exactly.
   if (env.EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE !== "otp") {
-    report("EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE", 'is not "otp". The app would wait for a link the emails no longer carry.');
+    report("EXPO_PUBLIC_EQUINA_EMAIL_AUTH_MODE", 'is not "otp". Store builds ask for the emailed code (docs/EQUINA_AUTH_DELIVERY.md).');
   }
 
   if (clean(env.EXPO_PUBLIC_EQUINA_DEMO_MODE).toLowerCase() === "true") {
@@ -165,6 +184,17 @@ export const storeBuildProblems = ({ profile, env, switches = {} }) => {
         "is set, and this release sells nothing. With a store key and a privacy link built in, the paywall opens for every tester. Delete it from this environment."
       );
     }
+  }
+
+  // On this computer, a set CI makes Expo skip the cache reset that the native
+  // build asks for (@expo/cli, export/embed/exportEmbedAsync.js), and Metro's
+  // cache, shared by every checkout here, then hands the app the EXPO_PUBLIC_
+  // values of an earlier bundle. EAS's own machines start with an empty cache.
+  if (isLocalEasBuild(env) && ciIsSet(env)) {
+    report(
+      "CI",
+      "is set in this terminal. A build on this computer with CI set can carry the EXPO_PUBLIC_ values of an earlier build. Run it from a terminal without CI (unset CI)."
+    );
   }
 
   // The switches reviewed in git are the ones the build gets.

@@ -78,9 +78,10 @@ const canUseHorse = async (admin: ReturnType<typeof createAdminClient>, userId: 
 
 const providerReply = async (input: {
   message: string;
-  focus: string;
-  load: string;
-  style: string;
+  // Null when "Minimal context" holds the conversation's settings back.
+  focus: string | null;
+  load: string | null;
+  style: string | null;
   profile?: { display_name?: string; discipline?: string; skill_level?: string };
   horse?: { name?: string; breed?: string; discipline?: string };
   recentRides?: Array<Record<string, unknown>>;
@@ -96,7 +97,7 @@ const providerReply = async (input: {
 
   if ((!endpoint || !apiKey || !model) && allowDevelopmentFallback) {
     return {
-      text: `For this ${input.focus.toLowerCase()} session, keep one clear question: establish a repeatable rhythm, change only one variable, and finish after the first easy repetition. Keep the work appropriate for the rider and horse in front of you.`,
+      text: `For this ${(input.focus ?? "next").toLowerCase()} session, keep one clear question: establish a repeatable rhythm, change only one variable, and finish after the first easy repetition. Keep the work appropriate for the rider and horse in front of you.`,
       provider: "development",
       model: "deterministic-safe-fallback",
       providerRequestId: undefined,
@@ -493,9 +494,11 @@ Deno.serve(async (request) => {
       try {
         operation = await providerReply({
           message: input.message,
-          focus: conversation.context_focus,
-          load: conversation.context_load,
-          style: conversation.response_style,
+          // "Minimal context" reads "Send only the current question": the
+          // conversation's settings stay here with it, like the sources above.
+          focus: allowed.conversationSettings ? conversation.context_focus : null,
+          load: allowed.conversationSettings ? conversation.context_load : null,
+          style: allowed.conversationSettings ? conversation.response_style : null,
           profile,
           horse,
           recentRides,

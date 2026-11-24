@@ -353,6 +353,17 @@ assert.match(coachEdgeSource, /import \{ coachContextFor \} from "\.\.\/_shared\
   // checking the rider still has it.
   assert.match(horseRead, /canUseHorse\(admin, user\.id, allowed\.horseId\)/);
   assert.match(horseRead, /\.eq\("id", allowed\.horseId\)/);
+  // "Minimal context" reads "Send only the current question": the
+  // conversation's focus, weekly load and answer style reach the model only
+  // where the decision allows, and from nowhere else.
+  const modelCall = coachBlock("operation = await providerReply({");
+  for (const column of ["context_focus", "context_load", "response_style"]) {
+    coachStep(`conversation.${column}`);
+    assert.ok(
+      modelCall.includes(`allowed.conversationSettings ? conversation.${column} : null`),
+      `coach-chat holds ${column} back under Minimal context.`
+    );
+  }
 }
 // The model is told to write plain text; these rules were live before they
 // were in the repository, and a deploy must not drop them.

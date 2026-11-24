@@ -19,14 +19,19 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Equina uses the photos you choose for your profile, your horses, their records and Club posts.",
+          "photosPermission": "Equina uses the photos you choose for your profile, your horses and Club posts.",
           "cameraPermission": "Equina does not use the camera.",
           "microphonePermission": "Equina does not use the microphone."
         }
       ],
       "expo-video",
       "expo-asset",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Equina does not use Face ID."
+        }
+      ],
       [
         "expo-notifications",
         {

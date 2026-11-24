@@ -3,8 +3,9 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { equinaTheme } from "../src/ui/theme/theme";
 
-// The store builds (TestFlight and Google Play) are the "preview" and
-// "production" profiles in eas.json. The app reads EXPO_PUBLIC_* when it is
+// The team builds and the store builds are the "preview" profile (an internal
+// APK or ad hoc build) and the "production" profile (TestFlight and Google Play)
+// in eas.json. The app reads EXPO_PUBLIC_* when it is
 // bundled, and a build made by EAS never sees .env.local, so every name the app
 // reads needs an answer here: what does a store build get for it?
 //
@@ -154,6 +155,9 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   assert.equal(preview?.android?.buildType, "apk", "An internal Android build has to be an APK to install from a link.");
   assert.equal(production?.distribution, "store");
   assert.equal(production?.autoIncrement, true, "Each store build gets the next build number.");
+  // The version line (src/ui/states/app-version.ts) is how a tester's screenshot
+  // names a build. Without this a preview build reuses the last number EAS gave.
+  assert.equal(preview?.autoIncrement, true, "Each internal build gets its own build number too.");
   assert.ok(easJson.submit?.production, "eas submit --profile production has a profile to start from.");
 }
 
@@ -186,7 +190,11 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     picker.microphonePermission,
     "Both plugins write the microphone string and the order of the plugins decides which one stays, so they say the same."
   );
-  assert.match(String(picker.photosPermission), /profile.*horses.*records.*Club posts/, "The photo library is opened for all four.");
+  // expo-secure-store links the Face ID API, which the app never calls (no
+  // requireAuthentication), and would otherwise write Expo's generic request.
+  const secureStore = options("expo-secure-store");
+  assert.equal(secureStore.faceIDPermission, "Equina does not use Face ID.", "Face ID gets the same plain sentence as the camera.");
+  assert.match(String(picker.photosPermission), /profile.*horses.*Club posts/, "The photo library is opened for all three; a record's file comes from the document picker.");
 
   // With the strings in place the image picker plugin no longer removes these itself.
   for (const permission of ["CAMERA", "RECORD_AUDIO", "SYSTEM_ALERT_WINDOW"]) {
