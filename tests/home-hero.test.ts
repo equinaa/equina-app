@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { forgetSignedUrls, signedUrlsFor } from "../src/backend/signed-urls";
-import { planForHorse, ridesForHorse, trainingStreak, type PlanVersion, type TimeOffPeriod } from "../src/domain/training-streak";
+import { planForHorse, trainingStreak, trainingStreakFor, type PlanVersion, type TimeOffPeriod } from "../src/domain/training-streak";
 import {
   disciplineFromHorse,
+  heroDayOff,
   heroPhotoFor,
   heroPhotoPending,
+  homePlanCard,
   homeTodayFor,
   homeTodayLabel,
-  snapshotSetsHomeHorse
+  planCardTodayLine,
+  plannedTraining,
+  snapshotSetsHomeHorse,
+  summaryHorseId
 } from "../src/features/home/home-hero";
+import { rideTrainingTypeById } from "../src/features/ride/ride-plan";
 
 // After sign-in, Home showed a stock picture and then swapped to the rider's
 // own horse photo. These are the rules that keep the swap from happening.
@@ -100,7 +106,7 @@ import {
     ]
   }];
   const streakFor = (horseId: string | undefined, periods: TimeOffPeriod[] = []) =>
-    trainingStreak(planForHorse(versions, horseId), ridesForHorse([], horseId), today, periods);
+    trainingStreakFor(versions, [], horseId, today, periods);
   const startRide = "Flatwork";
   const say = (horseId: string | undefined, periods: TimeOffPeriod[] = [], loaded = true) =>
     homeTodayLabel(
@@ -130,6 +136,90 @@ import {
     startRide,
     "A week that starts next Monday is no plan today."
   );
+
+  // A rider with no horse who turned every day to rest still has a week,
+  // as before: today is a rest day, not the training Start ride opens with.
+  const restWeek: PlanVersion[] = [{ effectiveFrom: "2026-10-05", days: [] }];
+  assert.equal(
+    homeTodayLabel(homeTodayFor({ streak: trainingStreakFor(restWeek, [], undefined, today), timeOff: [], today }), startRide),
+    "Rest day"
+  );
+
+  // A planned training the app no longer lists (another version removed it,
+  // or a newer one added it). TODAY and the line under Start ride come from
+  // the same value, as App derives them, and say the same words.
+  const retired: PlanVersion[] = [{ effectiveFrom: "2026-10-05", days: [{ weekday: 1, trainingType: "long-reining", horseId: "daimon" }] }];
+  const retiredStreak = trainingStreakFor(retired, [], "daimon", today);
+  const remembered = rideTrainingTypeById("jumping")!;
+  const planned = retiredStreak.todayPlanned[0];
+  const startRideTraining = (planned ? plannedTraining(planned.trainingType) : undefined) ?? remembered;
+  const eyebrow = homeTodayLabel(homeTodayFor({ streak: retiredStreak, timeOff: [], horseId: "daimon", today }), startRideTraining.label);
+  assert.equal(eyebrow, "Long reining", "TODAY names the planned training.");
+  assert.equal(startRideTraining.label, eyebrow, "Start ride opens with it, in the same words; never the remembered Jumping.");
+  assert.equal(plannedTraining("dressage"), rideTrainingTypeById("dressage"), "A training the app lists is its own.");
+}
+
+// --- The hero and the plan card on a day with nothing to ride -------------------------------
+
+{
+  assert.deepEqual(heroDayOff({ kind: "rest" }, "Luna", true), {
+    title: "Rest day.",
+    body: "Nothing is planned for Luna today. Rest is part of the plan."
+  });
+  assert.equal(heroDayOff({ kind: "rest" }, undefined, true)?.body, "Nothing is planned for today. Rest is part of the plan.");
+  assert.deepEqual(heroDayOff({ kind: "time-off" }, "Daimon", true), {
+    title: "Time off.",
+    body: "Daimon is off work. Your streak stays safe."
+  });
+  assert.equal(
+    heroDayOff({ kind: "time-off" }, "Shadow", false)?.body,
+    "Shadow is off work.",
+    "No streak on Home for this horse (shared, or no week): none is promised."
+  );
+  assert.equal(heroDayOff({ kind: "training", trainingType: "dressage" }, "Daimon", true), null, "A training day keeps the discipline's words.");
+  assert.equal(heroDayOff({ kind: "unplanned" }, "Daimon", false), null);
+
+  // The card under the hero reads today the same way.
+  assert.equal(
+    planCardTodayLine({ ridden: false, planned: null, today: { kind: "time-off" } }),
+    "Time off. Nothing to keep today.",
+    "Under a hero saying Time off, the card never says Rest day."
+  );
+  assert.equal(planCardTodayLine({ ridden: false, planned: null, today: { kind: "rest" } }), "Rest day. Nothing to keep today.");
+  assert.equal(planCardTodayLine({ ridden: false, planned: "Dressage", today: { kind: "training", trainingType: "dressage" } }), "Today: Dressage");
+  assert.equal(planCardTodayLine({ ridden: true, planned: null, today: { kind: "time-off" } }), "Today's training is in the journal.");
+}
+
+// --- Home's plan card while the plan and the horses load ------------------------------------
+
+{
+  const loading = { inPlan: true, planLoaded: false, planFailed: false, horsesLoaded: false, horsesListed: false };
+  assert.equal(homePlanCard(loading), "none", "Both still loading: nothing yet.");
+  assert.equal(homePlanCard({ ...loading, planLoaded: true, horsesLoaded: true, horsesListed: true }), "week");
+  assert.equal(homePlanCard({ ...loading, planFailed: true, horsesLoaded: true, horsesListed: true }), "retry", "The plan failed.");
+  assert.equal(
+    homePlanCard({ ...loading, planLoaded: true, horsesLoaded: true }),
+    "retry",
+    "The horse list failed: without it Home cannot tell whose week it is, and offers to try again rather than nothing."
+  );
+  assert.equal(homePlanCard({ ...loading, planLoaded: true }), "none", "The horse list still on its way.");
+  assert.equal(
+    homePlanCard({ ...loading, inPlan: false, planLoaded: true, horsesLoaded: true, horsesListed: true }),
+    "none",
+    "A horse shared with the rider has no plan card."
+  );
+}
+
+// --- Whose rides Home's summary counts ----------------------------------------------------
+
+{
+  assert.equal(
+    summaryHorseId({ horsesListed: false, primaryHorseId: "daimon" }),
+    "daimon",
+    "Before the horse list is in, or when it failed: the account's primary, the horse the hero shows, never every horse."
+  );
+  assert.equal(summaryHorseId({ horsesListed: true, homeHorseId: "luna", primaryHorseId: "daimon" }), "luna", "Then Home's horse.");
+  assert.equal(summaryHorseId({ horsesListed: true, primaryHorseId: "daimon" }), undefined, "A rider with no horse: every ride.");
 }
 
 // --- One signed URL per stored file --------------------------------------------------------

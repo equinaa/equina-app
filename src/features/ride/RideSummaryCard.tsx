@@ -38,6 +38,8 @@ export type RideSummaryCardProps = {
   /** Rides in the journal overall, used only to word the empty state. */
   lifetimeRides: number;
   lastRideOn?: string;
+  /** The horse whose rides these are; absent for a rider with no horse, whose rides are all theirs. */
+  horseName?: string;
   /** Opens every ride, one line each. */
   onOpenJournal?: () => void;
 };
@@ -48,6 +50,7 @@ export function RideSummaryCard({
   onPeriodChange,
   lifetimeRides,
   lastRideOn,
+  horseName,
   onOpenJournal
 }: RideSummaryCardProps) {
   const label = period === "week" ? "this week" : "this month";
@@ -73,7 +76,7 @@ export function RideSummaryCard({
   return (
     <View style={styles.card}>
       <View style={[styles.topline, stacked && styles.toplineStacked]}>
-        <Text style={[styles.title, stacked && styles.titleStacked]}>Ride journal</Text>
+        <Text style={[styles.title, stacked && styles.titleStacked]}>{horseName ? `Ride journal · ${horseName}` : "Ride journal"}</Text>
         <View accessibilityRole="radiogroup" style={styles.toggle}>
           <View pointerEvents="none" style={styles.toggleTrack} />
           {periods.map((entry) => {
@@ -98,10 +101,10 @@ export function RideSummaryCard({
 
       {!summary || summary.rides === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>No rides {label}</Text>
+          <Text style={styles.emptyTitle}>{horseName ? `No rides with ${horseName} ${label}` : `No rides ${label}`}</Text>
           <Text style={styles.emptyBody}>
             {lifetimeRides > 0 && lastRideOn
-              ? `Your last ride was ${lastRideOn}. Log one and it appears here.`
+              ? `${horseName ? `${horseName}'s` : "Your"} last ride was ${lastRideOn}. Log one and it appears here.`
               : "Log a ride and this fills in on its own."}
           </Text>
         </View>
@@ -112,7 +115,7 @@ export function RideSummaryCard({
           <View style={[styles.split, stacked && styles.splitStacked]}>
             <View
               accessible
-              accessibilityLabel={[`${summary.rides} ${rideWord} ${label}`, daysText, trend].filter(Boolean).join(", ")}
+              accessibilityLabel={[`${summary.rides} ${rideWord}${horseName ? ` with ${horseName}` : ""} ${label}`, daysText, trend].filter(Boolean).join(", ")}
               style={stacked ? undefined : hasFacts ? styles.headline : styles.headlineAlone}
             >
               <Text style={styles.count}>{summary.rides}</Text>

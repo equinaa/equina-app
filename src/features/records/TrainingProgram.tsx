@@ -167,7 +167,10 @@ export function TrainingProgram({
         </View>
         <Text style={styles.summary}>
           {!planDays.some((planned) => planned.horseId === horseId)
-            ? `No training week yet. Plan the days you ride ${horseName}.`
+            ? canEditPlan
+              ? `No training week yet. Plan the days you ride ${horseName}.`
+              // Shared with the rider: not theirs to plan, so nothing to offer.
+              : `${horseName} is not in your training week.`
             : rides === 0
               ? `${horseName} has no rides planned this week.`
               : `${rides === 1 ? "1 ride" : `${rides} rides`} planned this week${week.some((entry) => entry.entry && entry.off) ? ", not counting days off" : ""}.`}

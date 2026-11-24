@@ -11,11 +11,11 @@ import "./admin.test";
 import "./mux.test";
 import "./data-export.test";
 import "./image-metadata.test";
-import "./horse-selection.test";
 import "./training-streak.test";
 import "./time-off.test";
 import "./coach-scripted-replies.test";
 // Top-level await inside, so it is imported rather than hoisted.
+await import("./horse-selection.test");
 await import("./home-hero.test");
 await import("./paywall.test");
 await import("./beta.test");

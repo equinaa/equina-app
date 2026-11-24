@@ -29,6 +29,7 @@ export function TrainingPlanSheet({
   reminders: initialReminders,
   scopeHorseId,
   scopeHorseName,
+  remindersForAllHorses = false,
   defaultTrainingType,
   saving,
   error,
@@ -41,6 +42,8 @@ export function TrainingPlanSheet({
   /** Edits only this horse's days. */
   scopeHorseId?: string;
   scopeHorseName?: string;
+  /** The rider has more than one horse of their own: the one switch covers them all, and says so. */
+  remindersForAllHorses?: boolean;
   /** The rider's usual training: a new riding day starts with it. */
   defaultTrainingType: string;
   saving: boolean;
@@ -86,8 +89,9 @@ export function TrainingPlanSheet({
     ? `At ${String(reminderHour).padStart(2, "0")}:00 on training days, on the Equina app on your phone.`
     : `At ${String(reminderHour).padStart(2, "0")}:00 on training days you have not logged yet.`;
 
-  // One switch for the rider: opened for one horse, it says it covers them all.
-  const remindersTitle = scoped ? "Morning reminders, for all your horses" : "Morning reminders";
+  // One switch for the rider: opened for one of several horses, it says it
+  // covers them all. With a single horse there is nothing more to cover.
+  const remindersTitle = remindersForAllHorses ? "Morning reminders, for all your horses" : "Morning reminders";
 
   return (
     <EquinaSheet

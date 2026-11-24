@@ -4,6 +4,7 @@ import type { StreakSummary, WeekDay } from "../../domain/training-streak";
 import { equinaTheme } from "../../ui/theme/theme";
 import { plannedRidesLabel } from "../ride/planned-rides";
 import { rideTrainingLabel } from "../ride/ride-plan";
+import { planCardTodayLine, type HomeToday } from "./home-hero";
 import { StreakFlame } from "./StreakFlame";
 
 const letters = ["M", "T", "W", "T", "F", "S", "S"] as const;
@@ -70,21 +71,25 @@ export function TrainingWeekCard({
   streak,
   horseName,
   horseNames,
+  homeToday = { kind: "unplanned" },
   onOpen,
   onPlan
 }: {
   streak: StreakSummary;
   horseName?: string;
   horseNames: Record<string, string>;
+  /** What today is for the horse, as the hero above says it. */
+  homeToday?: HomeToday;
   onOpen: () => void;
   onPlan: () => void;
 }) {
   if (!streak.hasPlan) {
+    const planTitle = horseName ? `Plan ${horseName}'s training week` : "Plan your training week";
     return (
       <Pressable
         testID="training-week-plan"
         accessibilityRole="button"
-        accessibilityLabel="Plan your training week"
+        accessibilityLabel={planTitle}
         onPress={onPlan}
         style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       >
@@ -93,7 +98,7 @@ export function TrainingWeekCard({
             <Flame size={18} color={equinaTheme.colors.brass} />
           </View>
           <View style={styles.copy}>
-            <Text style={styles.title}>Plan your training week</Text>
+            <Text style={styles.title}>{planTitle}</Text>
             <Text style={styles.body}>
               Pick the days you ride, with the horse and the training for each. Your streak counts them, and rest days never break it.
             </Text>
@@ -110,11 +115,7 @@ export function TrainingWeekCard({
     : horseName
       ? streak.todayPlanned.map((entry) => rideTrainingLabel(entry.trainingType) ?? "Training").join(", ")
       : plannedRidesLabel(streak.todayPlanned, horseNames);
-  const todayLine = streak.todayRidden
-    ? "Today's training is in the journal."
-    : today
-      ? `Today: ${today}`
-      : "Rest day. Nothing to keep today.";
+  const todayLine = planCardTodayLine({ ridden: streak.todayRidden, planned: today, today: homeToday });
 
   return (
     <Pressable

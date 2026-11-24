@@ -97,10 +97,12 @@ export const ridesForHorse = (rides: readonly RideEnd[], horseId: string | undef
 
 /**
  * The plan to save after editing one horse's week: that horse's days from
- * the editor, every other horse's as the plan has them now. Once the horse
- * list is in (`activeHorseIds`), the days of a horse that is no longer the
- * rider's own, in the stable, are dropped; before it, nothing is. Opened
- * without a horse (a rider with none), the editor's days are the plan.
+ * the editor, every other horse's as the plan has them now. With the rider's
+ * own horses in the stable (`activeHorseIds`), the days of a horse that is no
+ * longer one of them are dropped; without them, nothing is. They are read as
+ * the plan is saved: a list read earlier may not know a horse added since on
+ * another device, and would drop its week. Opened without a horse (a rider
+ * with none), the editor's days are the plan.
  */
 export const mergeHorseWeek = (
   current: readonly TrainingPlanDay[],
@@ -207,9 +209,7 @@ export const trainingStreak = (
   const nextMilestone = streakMilestones.find((milestone) => milestone > current) ?? current + 1;
   const previousMilestone = [...streakMilestones].reverse().find((milestone) => milestone <= current) ?? 0;
   return {
-    // A week with no day in it is no plan: a horse taken out of it gets the
-    // offer to plan one again.
-    hasPlan: Boolean(planOn(versions, today)?.days.length),
+    hasPlan: Boolean(planOn(versions, today)),
     current,
     best,
     ...(startedOn ? { startedOn } : {}),
@@ -219,6 +219,24 @@ export const trainingStreak = (
     previousMilestone,
     nextMilestone
   };
+};
+
+/**
+ * One horse's streak: its own week and the rides on it. A horse's week with
+ * no day in it is no plan: the horse was taken out of it, and Home offers to
+ * plan one again. A rider with no horse reads the week whole, exactly as it
+ * always was: a week of rest days is still their plan.
+ */
+export const trainingStreakFor = (
+  versions: readonly PlanVersion[],
+  rides: readonly RideEnd[],
+  horseId: string | undefined,
+  today: string,
+  periods: readonly TimeOffPeriod[] = []
+): StreakSummary => {
+  const week = planForHorse(versions, horseId);
+  const streak = trainingStreak(week, ridesForHorse(rides, horseId), today, periods);
+  return horseId === undefined ? streak : { ...streak, hasPlan: Boolean(planOn(week, today)?.days.length) };
 };
 
 /**

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import type { EquinaBackend, HorseTimeOff, HorseTimeOffInput, RideEnd, TrainingPlan, TrainingPlanDay } from "../../backend";
 import { localToday } from "../../domain/local-day";
-import { addDays, planForHorse, planOn, ridesForHorse, trainingStreak, upcomingPlannedDays } from "../../domain/training-streak";
+import { addDays, planOn, trainingStreakFor, upcomingPlannedDays } from "../../domain/training-streak";
 import { plannedRidesLabel } from "./planned-rides";
 import { cancelTrainingReminders, reminderWindowDays, syncTrainingReminders } from "./training-reminders";
 
@@ -45,8 +45,13 @@ export function useTrainingPlan({
   horseNames: Record<string, string>;
   /** Home's horse, whose streak this is. None for a rider with no horse: the week is read whole. */
   horseId?: string;
-  /** The rider's own horses still in the stable: the ones the reminders are for. */
-  activeHorseIds: readonly string[];
+  /**
+   * The rider's own horses still in the stable: the ones the reminders are
+   * for. Empty for a rider with no horse, whose week is read whole. Null when
+   * Home only shows horses shared with the rider: no plan on screen, so no
+   * reminders they could not see or switch off (`reminderHorsesFor`).
+   */
+  activeHorseIds: readonly string[] | null;
   /** The horse list has arrived. Until then an empty list means nothing. */
   horsesReady: boolean;
   /** A ride is under way: no permission prompt over it. */
@@ -134,7 +139,7 @@ export function useTrainingPlan({
 
   const today = localToday();
   const streak = useMemo(
-    () => trainingStreak(planForHorse(versions, horseId), ridesForHorse(completions, horseId), today, timeOff),
+    () => trainingStreakFor(versions, completions, horseId, today, timeOff),
     [versions, completions, today, timeOff, horseId]
   );
   const currentPlan = planOn(versions, today) as TrainingPlan | null;
@@ -142,8 +147,9 @@ export function useTrainingPlan({
   // The morning reminders follow the plan and the journal, from a plan that
   // was actually read, and from the horse list once it is in: an empty list
   // before it arrives would cancel every reminder. Turned off in the plan,
-  // they are cancelled. One switch for the rider and one reminder a day,
-  // naming every horse still to ride that day.
+  // or with no plan the rider can see (`activeHorseIds` null), they are
+  // cancelled. One switch for the rider and one reminder a day, naming every
+  // horse still to ride that day.
   const reminderKey = JSON.stringify([
     currentPlan?.reminders ? currentPlan.days : null,
     timeOff.map((period) => [period.horseId, period.startsOn, period.endsOn]),
@@ -157,7 +163,7 @@ export function useTrainingPlan({
     if (!enabled || !loaded || !horsesReady) return;
     const asked = askForReminders.current;
     askForReminders.current = false;
-    if (!currentPlan?.reminders) {
+    if (!currentPlan?.reminders || !activeHorseIds) {
       void cancelTrainingReminders();
       return;
     }
@@ -188,14 +194,18 @@ export function useTrainingPlan({
     wasEnabled.current = enabled;
   }, [enabled]);
 
-  /** The week from today on. The weeks before keep the plan they had. */
-  const save = useCallback(async (days: TrainingPlanDay[], reminders: boolean) => {
+  /**
+   * The week from today on. The weeks before keep the plan they had. The days
+   * can be worked out once the save is under way (the editor reads the
+   * rider's horses first), so the sheet says it is saving from the tap.
+   */
+  const save = useCallback(async (days: TrainingPlanDay[] | (() => Promise<TrainingPlanDay[]>), reminders: boolean) => {
     if (!backend || !enabled) throw new Error("Ride logging is not enabled for this account.");
     if (!loaded) throw new Error("Your training plan has not loaded yet. Reconnect and try again.");
     setSaving(true);
     setError("");
     try {
-      const saved = await backend.trainingPlans.save(localToday(), days, reminders);
+      const saved = await backend.trainingPlans.save(localToday(), typeof days === "function" ? await days() : days, reminders);
       askForReminders.current = reminders;
       setSaveTick((tick) => tick + 1);
       setVersions((current) =>
