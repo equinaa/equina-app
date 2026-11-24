@@ -144,6 +144,15 @@ const offline = backendError(
   assert.equal(cleanCode("1234567890"), "1234567890", "The longest code the server can send fits.");
   assert.equal(cleanCode("12345678901234"), "1234567890");
   assert.equal(cleanCode(""), "");
+  // A whole email pasted in: the digits of the address and of the year are not the code.
+  assert.equal(
+    cleanCode("Your Equina sign-in code\n\n123456\n\nSent by Equina to anna1987@example.com, 24 Nov 2026"),
+    "123456",
+    "The run that can be a code by itself is the code."
+  );
+  assert.equal(cleanCode("anna1987@example.com 87654321"), "87654321", "Digits before the code do not join it.");
+  assert.equal(cleanCode("123 456 78"), "12345678", "A code written in groups is still joined.");
+  assert.equal(cleanCode("12345"), "12345", "Typing, one digit at a time, is untouched.");
 
   for (const length of [0, 1, 5]) assert.equal(codeReady("1".repeat(length)), false, `${length} digits is not a code yet.`);
   for (const length of [6, 7, 8, 9, 10]) assert.equal(codeReady("1".repeat(length)), true, `A ${length}-digit code can be sent.`);

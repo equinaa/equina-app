@@ -9,10 +9,18 @@ export const codeMinLength = 6;
 export const codeMaxLength = 10;
 
 /**
- * What the field keeps of what was typed, pasted or filled in from the email:
- * "123 456" and "Your Equina sign-in code: 123456" both leave the digits.
+ * What the field keeps of what was typed, pasted or filled in from the email.
+ *
+ * A pasted email carries other digits too: the rider's own address
+ * ("anna1987@..."), a year. So a run of digits that can be a code by itself is
+ * the code, and the first such run wins. With no such run the digits are one
+ * code written in groups, "123 456", and are joined.
  */
-export const cleanCode = (typed: string) => typed.replace(/\D/g, "").slice(0, codeMaxLength);
+export const cleanCode = (typed: string) => {
+  const runs = typed.match(/\d+/g) ?? [];
+  const whole = runs.find((run) => run.length >= codeMinLength && run.length <= codeMaxLength);
+  return (whole ?? runs.join("")).slice(0, codeMaxLength);
+};
 
 /**
  * Whether the code may be sent. From six digits on, since a six-digit code is
