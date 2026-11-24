@@ -61,12 +61,23 @@ export type BackState = {
   /** The recap was asked for and there is a ride to recap. */
   recapVisible: boolean;
   ralfOpen: boolean;
+  /**
+   * Account shows one of its pages that it was not opened at, where its back
+   * arrow returns to Account's list. AccountScreen keeps its pages to itself
+   * and reports this.
+   */
+  accountPage: boolean;
   academyMode: "home" | "video";
   shopMode: "browse" | "sell";
   shopBuyerView: BackShopBuyerView;
   shopSellerView: BackShopSellerView;
   /** Horses was opened from the account's "Horses" row. */
   stableFromAccount: boolean;
+  /**
+   * Horses shows one horse's page, where the "Horses" arrow returns to the
+   * list. StableScreen keeps its pages to itself and reports this.
+   */
+  horsePage: boolean;
 };
 
 export type BackAction =
@@ -77,10 +88,12 @@ export type BackAction =
   | { type: "onboarding-back" }
   | { type: "close-recap" }
   | { type: "close-ralf" }
+  | { type: "account-root" }
   | { type: "close-account" }
   | { type: "academy-home" }
   | { type: "shop-buyer"; view: BackShopBuyerView }
   | { type: "shop-seller"; view: BackShopSellerView }
+  | { type: "stable-list" }
   | { type: "back-to-account" }
   | { type: "go-home" };
 
@@ -147,8 +160,12 @@ export function androidBackAction(state: BackState): BackAction {
 
   // Ralf opens over whichever tab asked for him.
   if (state.ralfOpen) return { type: "close-ralf" };
-  // Account closes to the tab it was opened from.
-  if (state.tab === "profile") return { type: "close-account" };
+  if (state.tab === "profile") {
+    // A page Account was not opened at goes back to Account's list, as its
+    // arrow does. The list, and the page Account was opened at, close
+    // Account to the tab it was opened from.
+    return state.accountPage ? { type: "account-root" } : { type: "close-account" };
+  }
   if (state.tab === "assistant" && state.academyMode === "video") return { type: "academy-home" };
   if (state.tab === "gear") {
     if (state.shopMode === "sell") {
@@ -159,7 +176,12 @@ export function androidBackAction(state: BackState): BackAction {
       if (view) return { type: "shop-buyer", view };
     }
   }
-  if (state.tab === "stable" && state.stableFromAccount) return { type: "back-to-account" };
+  if (state.tab === "stable") {
+    // A horse's page goes back to the list, as its "Horses" arrow does. The
+    // list goes back to the account when the account opened it.
+    if (state.horsePage) return { type: "stable-list" };
+    if (state.stableFromAccount) return { type: "back-to-account" };
+  }
 
   // A tab's front page goes Home, and Home leaves the app.
   return onHome ? system : { type: "go-home" };
@@ -173,10 +195,12 @@ export type BackSteps = {
   onboardingBack(): void;
   closeRecap(): void;
   closeRalf(): void;
+  accountRoot(): void;
   closeAccount(): void;
   academyHome(): void;
   shopBuyer(view: BackShopBuyerView): void;
   shopSeller(view: BackShopSellerView): void;
+  stableList(): void;
   backToAccount(): void;
   goHome(): void;
 };
@@ -200,6 +224,9 @@ export function carryOutBack(action: BackAction, steps: BackSteps): boolean {
     case "close-ralf":
       steps.closeRalf();
       return true;
+    case "account-root":
+      steps.accountRoot();
+      return true;
     case "close-account":
       steps.closeAccount();
       return true;
@@ -211,6 +238,9 @@ export function carryOutBack(action: BackAction, steps: BackSteps): boolean {
       return true;
     case "shop-seller":
       steps.shopSeller(action.view);
+      return true;
+    case "stable-list":
+      steps.stableList();
       return true;
     case "back-to-account":
       steps.backToAccount();

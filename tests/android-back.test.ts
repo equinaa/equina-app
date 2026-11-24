@@ -37,11 +37,13 @@ const home: BackState = {
   rideReady: false,
   recapVisible: false,
   ralfOpen: false,
+  accountPage: false,
   academyMode: "home",
   shopMode: "browse",
   shopBuyerView: "browse",
   shopSellerView: "dashboard",
-  stableFromAccount: false
+  stableFromAccount: false,
+  horsePage: false
 };
 const signedOut: BackState = { ...home, phase: "signedOut", accountCreated: false };
 const back = (patch: Partial<BackState>, from: BackState = home) => androidBackAction({ ...from, ...patch });
@@ -73,6 +75,27 @@ const flags = [false, true] as const;
   assert.deepEqual(back({ tab: "stable", stableFromAccount: true, ralfOpen: true }), { type: "close-ralf" });
   assert.deepEqual(back({ recapVisible: true }), { type: "close-recap" });
   assert.deepEqual(back({ tab: "stable", recapVisible: true }), { type: "go-home" }, "The recap only shows on Home.");
+}
+
+{
+  // Account's pages and a horse's page go up one level, as their arrows do,
+  // before Back leaves the screen.
+  assert.deepEqual(back({ tab: "profile", accountPage: true }), { type: "account-root" }, "Account > Privacy goes back to the Account list.");
+  assert.deepEqual(back({ tab: "profile", accountPage: true, ralfOpen: true }), { type: "close-ralf" });
+  assert.deepEqual(back({ tab: "profile", accountPage: true, modalSheetOpen: true }), stay);
+  assert.deepEqual(back({ tab: "stable", horsePage: true }), { type: "stable-list" }, "A horse's page goes back to the horse list.");
+  assert.deepEqual(
+    back({ tab: "stable", horsePage: true, stableFromAccount: true }),
+    { type: "stable-list" },
+    "Opened from the account, the list comes first and the account after it."
+  );
+  assert.deepEqual(back({ tab: "stable", horsePage: true, ralfOpen: true }), { type: "close-ralf" });
+  // Each screen's page counts only while its tab is the one showing.
+  assert.deepEqual(back({ accountPage: true, horsePage: true }), system);
+  assert.deepEqual(back({ tab: "community", accountPage: true, horsePage: true }), { type: "go-home" });
+  assert.deepEqual(back({ tab: "stable", accountPage: true }), { type: "go-home" });
+  assert.deepEqual(back({ tab: "profile", horsePage: true }), { type: "close-account" });
+  assert.deepEqual(back({ accountPage: true }, signedOut), system, "Nothing in the app decides Back before the account exists.");
 }
 
 {
@@ -194,6 +217,8 @@ const flags = [false, true] as const;
           return { ...state, recapVisible: false, tab: "home" };
         case "close-ralf":
           return { ...state, ralfOpen: false };
+        case "account-root":
+          return { ...state, accountPage: false };
         case "close-account":
           return { ...state, tab: state.accountReturnTab === "profile" ? "home" : state.accountReturnTab };
         case "academy-home":
@@ -202,14 +227,26 @@ const flags = [false, true] as const;
           return { ...state, shopBuyerView: action.view };
         case "shop-seller":
           return { ...state, shopSellerView: action.view };
+        case "stable-list":
+          return { ...state, horsePage: false };
         case "back-to-account":
           return { ...state, tab: "profile" };
         case "go-home":
           return { ...state, tab: "home", stableFromAccount: false };
       }
     })();
-    // App.tsx: leaving the Horses tab forgets that it was opened from the account.
-    return typeof next === "string" || next.tab === "stable" ? next : { ...next, stableFromAccount: false };
+    if (typeof next === "string") return next;
+    // App.tsx: Account and Horses are drawn only on their own tab and not
+    // under Ralf, so changing tab or closing Ralf mounts them again at their
+    // start, with no page up. Leaving the Horses tab also forgets that it was
+    // opened from the account.
+    const remounted = next.tab !== state.tab || action.type === "close-ralf";
+    return {
+      ...next,
+      accountPage: next.tab === "profile" && !remounted && next.accountPage,
+      horsePage: next.tab === "stable" && !remounted && next.horsePage,
+      stableFromAccount: next.tab === "stable" && next.stableFromAccount
+    };
   };
 
   const seen = new Set<BackAction["type"]>();
@@ -234,11 +271,12 @@ const flags = [false, true] as const;
   for (const tab of tabs) for (const accountReturnTab of tabs)
   for (const rideActive of flags) for (const rideReady of flags) for (const recapVisible of flags)
   for (const ralfOpen of flags) for (const stableFromAccount of flags)
+  for (const accountPage of flags) for (const horsePage of flags)
   for (const academyMode of ["home", "video"] as const) for (const shopMode of ["browse", "sell"] as const)
   for (const shopBuyerView of buyerViews) for (const shopSellerView of sellerViews) {
     runOut({
       ...home, tab, accountReturnTab, rideActive, rideReady, recapVisible, ralfOpen, stableFromAccount,
-      academyMode, shopMode, shopBuyerView, shopSellerView
+      accountPage, horsePage, academyMode, shopMode, shopBuyerView, shopSellerView
     });
   }
   // Before the app: every phase, signed in or not.
@@ -255,11 +293,19 @@ const flags = [false, true] as const;
   assert.deepEqual(
     [...seen].sort(),
     [
-      "academy-home", "back-to-account", "close-account", "close-ralf", "close-recap",
-      "go-home", "onboarding-back", "shop-buyer", "shop-seller", "stay", "system"
+      "academy-home", "account-root", "back-to-account", "close-account", "close-ralf", "close-recap",
+      "go-home", "onboarding-back", "shop-buyer", "shop-seller", "stable-list", "stay", "system"
     ],
     "Every step is reachable, and there is no other."
   );
+  // A horse's page opened from the account goes back one level at a time.
+  const path: string[] = [];
+  let state: Model | "system" | "stay" = { ...home, tab: "stable", stableFromAccount: true, horsePage: true, accountReturnTab: "gear" };
+  while (typeof state !== "string") {
+    path.push(androidBackAction(state).type);
+    state = press(state);
+  }
+  assert.deepEqual(path, ["stable-list", "back-to-account", "close-account", "go-home", "system"]);
 }
 
 {
@@ -271,10 +317,12 @@ const flags = [false, true] as const;
     "onboarding-back": { action: { type: "onboarding-back" }, step: "onboardingBack", args: [] },
     "close-recap": { action: { type: "close-recap" }, step: "closeRecap", args: [] },
     "close-ralf": { action: { type: "close-ralf" }, step: "closeRalf", args: [] },
+    "account-root": { action: { type: "account-root" }, step: "accountRoot", args: [] },
     "close-account": { action: { type: "close-account" }, step: "closeAccount", args: [] },
     "academy-home": { action: { type: "academy-home" }, step: "academyHome", args: [] },
     "shop-buyer": { action: { type: "shop-buyer", view: "checkout" }, step: "shopBuyer", args: ["checkout"] },
     "shop-seller": { action: { type: "shop-seller", view: "messages" }, step: "shopSeller", args: ["messages"] },
+    "stable-list": { action: { type: "stable-list" }, step: "stableList", args: [] },
     "back-to-account": { action: { type: "back-to-account" }, step: "backToAccount", args: [] },
     "go-home": { action: { type: "go-home" }, step: "goHome", args: [] }
   };
@@ -287,10 +335,12 @@ const flags = [false, true] as const;
       onboardingBack: spy("onboardingBack"),
       closeRecap: spy("closeRecap"),
       closeRalf: spy("closeRalf"),
+      accountRoot: spy("accountRoot"),
       closeAccount: spy("closeAccount"),
       academyHome: spy("academyHome"),
       shopBuyer: spy("shopBuyer"),
       shopSeller: spy("shopSeller"),
+      stableList: spy("stableList"),
       backToAccount: spy("backToAccount"),
       goHome: spy("goHome")
     };
@@ -396,11 +446,13 @@ const unwrap = (condition: string) =>
       "rideReady: Boolean(ridePlan && rideRun)",
       "recapVisible: lastRideRecapVisible && Boolean(lastRide)",
       "ralfOpen",
+      "accountPage: accountBackStep.current !== null",
       "academyMode",
       "shopMode",
       "shopBuyerView",
       "shopSellerView",
-      "stableFromAccount"
+      "stableFromAccount",
+      "horsePage: horseBackStep.current !== null"
     ],
     "App.tsx hands android-back.ts other values than the ones checked here."
   );
@@ -428,10 +480,12 @@ const unwrap = (condition: string) =>
       "onboardingBack: goBackOnboarding",
       "closeRecap: closeRideRecap",
       "closeRalf",
+      "accountRoot: () => accountBackStep.current?.()",
       "closeAccount",
       'academyHome: () => navigateAcademy("home")',
       "shopBuyer: setShopBuyerView",
       "shopSeller: setShopSellerView",
+      "stableList: () => horseBackStep.current?.()",
       "backToAccount",
       'goHome: () => { setStableFromAccount(false); setTab("home"); }'
     ],
@@ -454,6 +508,60 @@ const unwrap = (condition: string) =>
     /<TabDock[\s\S]*?onChange=\{\(next\) => \{\s*setStableFromAccount\(false\);\s*setTab\(next\);\s*\}\}/,
     "goHome is what the dock's Home does."
   );
+
+  // Account and Horses hand up the step their arrow takes, each to its own
+  // slot, and only from the props of the one screen that owns it.
+  for (const [slot, reporter, screen] of [
+    ["accountBackStep", "reportAccountBackStep", "AccountScreen"],
+    ["horseBackStep", "reportHorseBackStep", "StableScreen"]
+  ] as const) {
+    assert.ok(wiring.includes(`const ${slot} = useRef<(() => void) | null>(null);`), `${slot} is not where the listener can read it.`);
+    assert.match(
+      wiring,
+      new RegExp(`const ${reporter} = useCallback\\(\\(step: \\(\\(\\) => void\\) \\| null\\) => \\{\\s*${slot}\\.current = step;\\s*\\}, \\[\\]\\);`),
+      `${reporter} must only store the step, and keep one identity so the screen's effect does not run on every render.`
+    );
+    const element = equinaApp.indexOf(`<${screen}\n`);
+    assert.ok(element > 0, `EquinaApp no longer draws ${screen}.`);
+    const props = equinaApp.slice(element, equinaApp.indexOf("/>", element));
+    assert.ok(props.includes(`onBackStep={${reporter}}`), `${screen} must report to ${slot}.`);
+    assert.equal(app.split(`onBackStep={${reporter}}`).length - 1, 1, `${reporter} is handed to one screen only.`);
+  }
+
+  // AccountScreen: the arrow and Back take the same step, from the same test.
+  const account = readFileSync(join(root, "src", "features", "account", "AccountScreen.tsx"), "utf8");
+  assert.ok(account.includes('const backToList = route !== "root" && route !== initialRoute;'), "Account's pages are no longer told apart the same way.");
+  assert.match(
+    account,
+    /useEffect\(\(\) => \{\s*if \(!onBackStep\) return;\s*onBackStep\(backToList \? \(\) => navigate\("root"\) : null\);\s*return \(\) => onBackStep\(null\);\s*\}, \[backToList, onBackStep\]\);/,
+    "Account hands up the arrow's step to the list while it applies, and takes it back on unmount."
+  );
+  assert.ok(account.includes('{route !== "root" ? (\n        <AccountRouteHeader'), "Account's arrow is drawn on its pages only.");
+  assert.ok(account.includes('onBack={() => (backToList ? navigate("root") : onClose())}'), "Account's arrow takes another step than Back.");
+
+  // StableScreen: same for a horse's page, decided above its early returns
+  // (hooks after them would run on some renders only).
+  const stableStart = app.indexOf("function StableScreen(");
+  const stable = app.slice(stableStart, app.indexOf("\nfunction ", stableStart + 1));
+  const drawn = 'const horsePageDrawn = connected && !(loading && !loaded) && resolvedHasHorse && stableMode === "profile";';
+  const earlyReturns = [
+    "if (connected && loading && !loaded) {",
+    "if (!resolvedHasHorse) {",
+    'if (connected && stableMode === "list") {'
+  ];
+  const effect = stable.search(
+    /useEffect\(\(\) => \{\s*if \(!onBackStep\) return;\s*onBackStep\(horsePageDrawn \? backToHorseList : null\);\s*return \(\) => onBackStep\(null\);\s*\}, \[horsePageDrawn, onBackStep\]\);/
+  );
+  assert.ok(stable.includes(drawn), "The horse page is no longer told apart the same way: recheck it against StableScreen's early returns.");
+  assert.ok(stable.includes('const backToHorseList = () => setStableMode("list");'));
+  assert.ok(effect > 0, "StableScreen hands up the arrow's step while a horse's page is drawn, and takes it back on unmount.");
+  let lastReturn = effect;
+  for (const early of earlyReturns) {
+    const at = stable.indexOf(early);
+    assert.ok(at > lastReturn, `StableScreen's early returns moved (${early}): recheck horsePageDrawn and keep the effect above them.`);
+    lastReturn = at;
+  }
+  assert.match(stable, /testID="stable-back"[\s\S]{0,200}onPress=\{backToHorseList\}/, "The horse page's arrow takes another step than Back.");
 
   // None of these can be a step back: they end or save a ride, sign out,
   // delete, or drop the code screen.
