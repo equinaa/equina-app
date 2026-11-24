@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { AuthRepository } from "../src/backend/auth-repository";
 import { backendError, EquinaBackendError } from "../src/backend/errors";
 import { visibleProviders } from "../src/features/account/provider-visibility";
-import { signInCopy as copy } from "../src/features/account/sign-in-copy";
+import { emailStepCopy, signInCopy as copy } from "../src/features/account/sign-in-copy";
 import {
   accountAlreadyExists,
   emailRequestOutcome,
@@ -91,6 +91,36 @@ const offline = backendError(
     "A request that never left the device says nothing about any account.");
   for (const notice of [copy.notices.recoverySent, copy.notices.signInLinkSent]) {
     assert.match(notice, /^If an Equina account uses this email/);
+  }
+}
+
+// In code mode the rider gets a code and never a link, so no line that depends
+// on the mode may send them looking for one.
+{
+  const link = emailStepCopy("magic-link");
+  const code = emailStepCopy("otp");
+  assert.equal(link.usePasswordless, "Use a secure email link instead");
+  assert.equal(link.recoveryExpired, "The recovery session expired. Request a new recovery link.");
+  assert.equal(code.usePasswordless, "Use a code sent by email instead");
+  assert.equal(code.recoveryExpired, "The recovery session expired. Request a new reset code.");
+  for (const line of Object.values(code)) assert.doesNotMatch(line, /\blink\b/i, `Code mode says "${line}".`);
+  for (const line of Object.values(link)) assert.doesNotMatch(line, /\bcode\b/i, `Link mode says "${line}".`);
+
+  // Both screens ask the mode instead of typing either word themselves.
+  const root = process.cwd();
+  const sheet = readFileSync(join(root, "src", "features", "onboarding", "OnboardingScreen.tsx"), "utf8");
+  const app = readFileSync(join(root, "src", "App.tsx"), "utf8");
+  assert.match(sheet, /emailStepCopy\(emailAuthMode\)\.usePasswordless/);
+  assert.match(app, /emailStepCopy\(equinaSession\.emailAuthMode\)\.recoveryExpired/);
+  assert.doesNotMatch(sheet, /Use a secure email link instead/);
+  assert.doesNotMatch(app, /Request a new recovery link/);
+  // Every other line of the sheet that says "link" is chosen by the mode on
+  // that line or the one above it.
+  const sheetLines = sheet.split("\n");
+  for (const [index, text] of sheetLines.entries()) {
+    if (!/"[^"]*\blink\b[^"]*"/.test(text) || /testID=|accessibilityRole=/.test(text)) continue;
+    assert.match(`${sheetLines[index - 1] ?? ""}\n${text}`, /emailAuthMode === "magic-link"/,
+      `OnboardingScreen.tsx:${index + 1} says "link" whatever the mode.`);
   }
 }
 

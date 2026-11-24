@@ -1,3 +1,21 @@
+import type { EmailAuthMode } from "./social-auth";
+
+/**
+ * Lines that name what the email carries: a link to open, or a code to type.
+ * In code mode the rider never receives a link, so nothing on screen may send
+ * them looking for one.
+ */
+export const emailStepCopy = (mode: EmailAuthMode) =>
+  mode === "magic-link"
+    ? {
+        usePasswordless: "Use a secure email link instead",
+        recoveryExpired: "The recovery session expired. Request a new recovery link."
+      }
+    : {
+        usePasswordless: "Use a code sent by email instead",
+        recoveryExpired: "The recovery session expired. Request a new reset code."
+      };
+
 /**
  * Every word on the sign-in screen. Kept apart from the component so the
  * copy can be reviewed, and tested, without rendering anything.

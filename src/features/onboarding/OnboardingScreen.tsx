@@ -45,7 +45,7 @@ import {
 import { equinaTheme } from "../../ui/theme/theme";
 import { disciplineLabel } from "../../domain/labels";
 import { visibleProviders } from "../account/provider-visibility";
-import { signInCopy } from "../account/sign-in-copy";
+import { emailStepCopy, signInCopy } from "../account/sign-in-copy";
 
 export type OnboardingStep = "you" | "horse" | "preview";
 export type OnboardingDiscipline = "Dressage" | "Jumping" | "Eventing" | "Trail";
@@ -969,7 +969,7 @@ export function AccountMethodSheet({
               onPress={() => onMethodChange("email")}
               style={styles.authAlternative}
             >
-              <Text style={styles.authAlternativeText}>Use a secure email link instead</Text>
+              <Text style={styles.authAlternativeText}>{emailStepCopy(emailAuthMode).usePasswordless}</Text>
             </MotionPressable>
           ) : null}
           {method === "signin" ? (

@@ -115,7 +115,7 @@ import {
 } from "./features/records/HorseRecordSheets";
 import { CareSchedule } from "./features/records/CareSchedule";
 import { SignInScreen } from "./features/account/SignInScreen";
-import { signInCopy } from "./features/account/sign-in-copy";
+import { emailStepCopy, signInCopy } from "./features/account/sign-in-copy";
 import {
   accountAlreadyExists,
   emailRequestOutcome,
@@ -2771,7 +2771,7 @@ function EquinaApp() {
               // finished account, onboarding for one that never finished.
               await equinaSession.completePasswordRecovery(password);
             } catch {
-              setAuthError("The recovery session expired. Request a new recovery link.");
+              setAuthError(emailStepCopy(equinaSession.emailAuthMode).recoveryExpired);
             } finally {
               setAuthBusy(false);
             }
