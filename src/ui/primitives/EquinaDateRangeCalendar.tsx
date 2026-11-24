@@ -133,8 +133,9 @@ export function EquinaDateRangeCalendar({
         </View>
 
         <View>
-          {/* The letters are for the eye: each day says its weekday in full. */}
-          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.week}>
+          {/* The letters are for the eye: each day says its weekday in full.
+              aria-hidden rather than the native-only props, which the web ignores. */}
+          <View aria-hidden style={styles.week}>
             {weekdayInitials.map((initial, index) => (
               <Text key={index} style={styles.weekday}>{initial}</Text>
             ))}
