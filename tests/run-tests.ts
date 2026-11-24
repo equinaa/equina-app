@@ -20,6 +20,7 @@ import "./ride-recap-message.test";
 import "./ride-review-prompt.test";
 import "./active-ride.test";
 import "./store-build-config.test";
+import "./eas-build-guard.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./horse-selection.test");
 await import("./home-hero.test");
