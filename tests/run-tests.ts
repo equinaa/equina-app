@@ -29,4 +29,5 @@ await import("./club-social.test");
 await import("./ride-setup.test");
 await import("./ride-journal.test");
 await import("./add-activity.test");
+await import("./clean-stored-photos.test");
 await import("./backend-migrations.test");

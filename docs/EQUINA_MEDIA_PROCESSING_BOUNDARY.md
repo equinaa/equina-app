@@ -88,6 +88,16 @@ The cleaned file replaces the upload at the same path before any row points at i
 and the ticket then names the cleaned file's size, so completing the same ticket
 twice finds the file it expects.
 
+**Pictures stored before this rule** are not touched by a deploy.
+`scripts/clean-stored-photos.ts` runs the same cleaner over every file in the
+`avatars` and `horse-media` buckets and writes each cleaned picture over the stored
+one at the same path. Every file, not only the ones a profile or a horse points at:
+storage lets people read by folder, not by row, so a file left behind by an upload
+that never finished can be read by the same people. Without `--apply` the script
+only lists what it would do. It never deletes a file and never changes a row, and
+it lists the pictures it cannot clean (a HEIC photo stored earlier), so the rider
+can be asked to choose the photo again (`tests/clean-stored-photos.test.ts`).
+
 Record files and dispute evidence are kept exactly as they were sent, because the
 file is the record and its hash is stored with it. An image among them keeps its
 metadata, and the people in the table above can read it. They, and anything the
