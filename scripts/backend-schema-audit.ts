@@ -1,84 +1,14 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { citext } from "@electric-sql/pglite/contrib/citext";
-import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
+import { openBackendDatabase } from "../tests/backend-database";
 
 type Finding = Record<string, unknown>;
 
-const db = new PGlite({ extensions: { citext, pgcrypto } });
+// The same Supabase stand-in the tests run against, so the audit never reports
+// on a database the migrations were not written for.
+const db = await openBackendDatabase();
 
-await db.exec(`
-  create role anon;
-  create role authenticated;
-  create role service_role bypassrls;
-  create schema extensions;
-  create schema auth;
-  create schema storage;
-  create extension pgcrypto with schema extensions;
-  create extension citext with schema extensions;
-
-  create table auth.users (
-    id uuid primary key default gen_random_uuid(),
-    email text,
-    raw_user_meta_data jsonb not null default '{}'::jsonb,
-    created_at timestamptz not null default now()
-  );
-
-  create or replace function auth.uid()
-  returns uuid language sql stable set search_path = '' as $$
-    select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
-  $$;
-  create or replace function auth.jwt()
-  returns jsonb language sql stable set search_path = '' as $$
-    select nullif(current_setting('request.jwt.claims', true), '')::jsonb;
-  $$;
-  grant usage on schema auth to anon, authenticated;
-  grant execute on function auth.uid() to anon, authenticated;
-  grant execute on function auth.jwt() to anon, authenticated;
-
-  create table storage.buckets (
-    id text primary key,
-    name text not null unique,
-    public boolean not null default false,
-    file_size_limit bigint,
-    allowed_mime_types text[]
-  );
-
-  create table storage.objects (
-    id uuid primary key default gen_random_uuid(),
-    bucket_id text not null references storage.buckets(id) on delete cascade,
-    name text not null,
-    owner_id text,
-    metadata jsonb not null default '{}'::jsonb,
-    created_at timestamptz not null default now(),
-    unique (bucket_id, name)
-  );
-  alter table storage.objects enable row level security;
-
-  create or replace function storage.foldername(name text)
-  returns text[] language sql immutable set search_path = '' as $$
-    select string_to_array(trim(both '/' from name), '/');
-  $$;
-
-  create publication supabase_realtime;
-
-  -- Hosted Supabase gives anon, authenticated and service_role every privilege
-  -- on whatever is created in public. Auditing without it reports on a
-  -- database that never existed.
-  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
-`);
-
-const migrationsDirectory = join(process.cwd(), "supabase", "migrations");
-const migrationFiles = readdirSync(migrationsDirectory)
-  .filter((name) => name.endsWith(".sql"))
-  .sort();
-
-for (const fileName of migrationFiles) {
-  await db.exec(readFileSync(join(migrationsDirectory, fileName), "utf8"));
-}
+const migrationFiles = readdirSync(join(process.cwd(), "supabase", "migrations")).filter((name) => name.endsWith(".sql"));
 
 const query = async <T extends Finding>(sql: string) => (await db.query<T>(sql)).rows;
 
