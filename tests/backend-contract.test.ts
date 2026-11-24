@@ -293,6 +293,52 @@ assert.match(coachEdgeSource, /Deno\.env\.get\("EQUINA_SCRIPTED_REPLY_USER_IDS"\
   assert.match(scriptedReply, /return json\(\{[^;]*\}\);\s*\}$/, "The fixed-reply branch must end by returning its answer.");
   assert.doesNotMatch(scriptedReply, /providerReply|spend_coach_credits|user_preferences|ride_entries|from\("profiles"\)|from\("horses"\)/);
 }
+// Account > Privacy and Ralf promises that a switch turned off changes the
+// next request. What each switch allows is decided once, in coach-context.ts
+// (tests/coach-context.test.ts); here, coach-chat reads each source only
+// inside the branch that decision opens, so a table that is not allowed is
+// never queried.
+assert.match(coachEdgeSource, /import \{ coachContextFor \} from "\.\.\/_shared\/coach-context\.ts";/);
+{
+  const allowance = coachStep("const allowed = coachContextFor(preferences, conversation.selected_horse_id);");
+  assert.ok(coachPreferencesRead < allowance, "The switches are read before anything they allow.");
+  // The switches are not read anywhere else in the function.
+  assert.doesNotMatch(coachEdgeSource, /preferences\??\./, "coach-chat must leave the switches to coach-context.ts.");
+
+  const profileRead = coachBlock("if (allowed.riderProfile) {");
+  const horseRead = coachBlock("if (allowed.horseId) {");
+  const ridesRead = coachBlock("if (allowed.rides) {");
+  assert.ok(
+    allowance < coachStep("if (allowed.riderProfile) {") &&
+      coachStep("if (allowed.riderProfile) {") < coachStep("if (allowed.horseId) {") &&
+      coachStep("if (allowed.horseId) {") < coachStep("if (allowed.rides) {") &&
+      coachStep("if (allowed.rides) {") + ridesRead.length < coachCreditSpent,
+    "Context is gathered after the switches are read and before the model is paid for."
+  );
+  // Each source is read once in the whole function (coachStep refuses a
+  // second read), and that one read sits inside its own branch.
+  coachStep('admin.from("profiles")');
+  assert.ok(profileRead.includes('admin.from("profiles")'), "The rider profile is read only where its switch allows.");
+  coachStep('.select("name,breed,discipline")');
+  assert.ok(horseRead.includes('.select("name,breed,discipline")'), "The horse is read only where its switch allows.");
+  coachStep('from("ride_entries")');
+  assert.ok(ridesRead.includes('admin.from("ride_entries")'), "Rides are read only with Ride history on.");
+  // Nothing else can put a ride in the prompt.
+  coachStep("recentRides = ");
+  assert.ok(ridesRead.includes("recentRides = "));
+  // The rides: the rider's own, on the horse the conversation is about or,
+  // with no horse, logged with no horse. Never every horse's.
+  assert.match(ridesRead, /\.eq\("rider_id", user\.id\)/);
+  assert.match(
+    ridesRead,
+    /allowed\.rides\.horseId\s*\? ownRides\.eq\("horse_id", allowed\.rides\.horseId\)\s*: ownRides\.is\("horse_id", null\)/
+  );
+  assert.match(ridesRead, /\.order\("completed_at", \{ ascending: false \}\)\s*\.limit\(5\)/);
+  // The horse's own details are read for the horse the decision names, after
+  // checking the rider still has it.
+  assert.match(horseRead, /canUseHorse\(admin, user\.id, allowed\.horseId\)/);
+  assert.match(horseRead, /\.eq\("id", allowed\.horseId\)/);
+}
 // The model is told to write plain text; these rules were live before they
 // were in the repository, and a deploy must not drop them.
 assert.match(coachEdgeSource, /Never use markdown or other formatting symbols/);

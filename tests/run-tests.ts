@@ -16,6 +16,7 @@ import "./training-streak.test";
 import "./time-off.test";
 import "./calendar-month.test";
 import "./coach-scripted-replies.test";
+import "./coach-context.test";
 import "./ride-recap-message.test";
 import "./ride-review-prompt.test";
 import "./active-ride.test";

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RideEntry } from "../src/backend";
 import { coachHorseFor } from "../src/features/coach/coach-types";
+import { coachContextFor } from "../supabase/functions/_shared/coach-context";
 import type { RideSession } from "../src/features/ride/RideExperience";
 import { defaultRidePhases, rideTrainingTypes } from "../src/features/ride/ride-plan";
 import {
@@ -276,6 +277,15 @@ assert.equal(rideReviewFactsFromEntry({ ...liveEntry, trainingType: undefined, d
   assert.equal(none.selectedHorseId, undefined, "coach-chat then starts the conversation with no horse.");
   // A horse that leaves while Ralf is open hands him back to Home's, as before.
   assert.equal(coachHorseFor("gone", names, home), home);
+  // The server follows the same horse when it reads the journal on its own:
+  // asked about Max, Max's rides; asked with no horse, the rides logged with
+  // no horse, never Bella's because she is the horse on Home.
+  const everySwitchOn = { use_rider_profile: true, use_selected_horse: true, use_ride_history: true };
+  assert.deepEqual(coachContextFor(everySwitchOn, coachHorseFor("max", names, home).selectedHorseId).rides, { horseId: "max" });
+  assert.deepEqual(coachContextFor(everySwitchOn, none.selectedHorseId).rides, { horseId: null });
+  // With "Ride history" off the server adds no ride at all. The ride being
+  // asked about still goes, in the rider's own message, because they sent it.
+  assert.equal(coachContextFor({ ...everySwitchOn, use_ride_history: false }, "max").rides, null);
 }
 
 // Every training the app offers, with its usual phases, timed and logged,
