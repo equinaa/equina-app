@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Modal,
   Platform,
   Pressable,
@@ -33,14 +34,13 @@ import { ConversationMessage } from "../../ui/conversation/ConversationMessage";
 import { ConversationState } from "../../ui/conversation/ConversationState";
 import { ThinkingIndicator } from "../../ui/conversation/ThinkingIndicator";
 import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingContainer";
-import { ArrivingView } from "../../ui/motion/ArrivingView";
 import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { AccountMode } from "../account/account-types";
 import { ralfAiNotice } from "./coach-copy";
-import { coachMessageKey, ralfAnswerArrives, ralfIsThinking } from "./coach-thinking";
+import { coachMessageKey, ralfAnswerArrives, ralfIsThinking, showsSendingLine } from "./coach-thinking";
 import type { CoachConversationContext, CoachDisplayMessage } from "./coach-types";
 import { useCoachConversation, type CoachConversationController } from "./useCoachConversation";
 
@@ -158,20 +158,22 @@ export function CoachScreen({
   const [renameDraft, setRenameDraft] = useState("");
   const scrollRef = useRef<ScrollView>(null);
   const reducedMotion = useReducedMotion();
-  // The messages already on screen, so only an answer that arrives now fades
-  // in. Null while a conversation loads: what loads with it is simply there.
-  const shownMessages = useRef<Set<string> | null>(null);
+  // The messages already on screen, so only an answer to a question that was
+  // already there fades in (ralfAnswerArrives). Updated after each render.
+  const shownMessages = useRef(new Set<string>());
   const thinking = ralfIsThinking(controller.messages, controller.sending);
 
   useEffect(() => {
-    if (controller.loading) {
-      shownMessages.current = null;
-      return;
+    const shown = shownMessages.current;
+    for (const message of controller.messages) {
+      // A screen reader is not told about a row that simply mounts, so the
+      // answer that just arrived is read out once.
+      if (Platform.OS !== "web" && ralfAnswerArrives(message, controller.messages, shown)) {
+        AccessibilityInfo.announceForAccessibility(`Ralf: ${message.text}`);
+      }
     }
-    const shown = shownMessages.current ?? new Set<string>();
     for (const message of controller.messages) shown.add(coachMessageKey(message));
-    shownMessages.current = shown;
-  }, [controller.loading, controller.messages]);
+  }, [controller.messages]);
 
   useEffect(() => {
     setContextDraft(context);
@@ -323,18 +325,15 @@ export function CoachScreen({
           </View>
         ) : (
           controller.messages.map((message) => (
-            <ArrivingView
-              key={message.id}
-              animate={!reducedMotion && ralfAnswerArrives(message, shownMessages.current)}
-              style={styles.messageBlock}
-            >
+            <View key={message.id} style={styles.messageBlock}>
               <ConversationMessage
                 own={message.role === "user"}
                 body={message.text}
                 status={message.status}
                 author={message.role === "assistant" ? "Ralf" : undefined}
                 variant={message.role === "assistant" ? "coach" : "default"}
-                showPendingLabel={!thinking}
+                showPendingLabel={showsSendingLine(message, controller.messages, controller.sending)}
+                arriving={!reducedMotion && ralfAnswerArrives(message, controller.messages, shownMessages.current)}
                 meta={message.role === "assistant" && message.confidence
                   ? `${message.confidence.charAt(0).toUpperCase()}${message.confidence.slice(1)} confidence`
                   : undefined}
@@ -344,7 +343,7 @@ export function CoachScreen({
               {message.role === "assistant" && message.safetyCategory === "health_escalation" ? (
                 <Text style={styles.safetyNote}>For urgent or worsening signs, contact your veterinarian now.</Text>
               ) : null}
-            </ArrivingView>
+            </View>
           ))
         )}
         {thinking ? (

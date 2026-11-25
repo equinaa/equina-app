@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Easing, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Easing, Platform, type StyleProp, type ViewStyle } from "react-native";
 
 /**
  * A block that fades in and settles a few points up when it mounts with
@@ -24,7 +24,7 @@ export function ArrivingView({
       toValue: 1,
       duration: 320,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true
+      useNativeDriver: Platform.OS !== "web"
     });
     arrival.start();
     return () => arrival.stop();
@@ -37,7 +37,7 @@ export function ArrivingView({
         style,
         {
           opacity: progress,
-          transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }]
+          transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }]
         }
       ]}
     >

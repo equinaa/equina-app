@@ -4,8 +4,7 @@ type Shown = Pick<CoachDisplayMessage, "id" | "role" | "status" | "clientNonce">
 
 /**
  * Whether Ralf's "Thinking" row shows: a question is on its way and nothing has
- * answered it yet. The row stands in for the "Sending..." line under that
- * question, so it shows exactly while that line would.
+ * answered it yet.
  */
 export const ralfIsThinking = (messages: readonly Shown[], sending: boolean): boolean => {
   if (!sending) return false;
@@ -20,10 +19,32 @@ export const ralfIsThinking = (messages: readonly Shown[], sending: boolean): bo
 export const coachMessageKey = (message: Shown): string =>
   `${message.role}:${message.clientNonce || message.id}`;
 
+/** The answer to a question: the server stores it with the question's nonce. */
+const answered = (question: Shown, messages: readonly Shown[]): boolean =>
+  question.clientNonce !== "" &&
+  messages.some((message) => message.role === "assistant" && message.clientNonce === question.clientNonce);
+
 /**
- * Whether an answer arrives now, and so fades in, instead of having been in the
- * conversation when it opened. `shown` holds the keys already on screen, and is
- * null while a conversation loads: nothing that loads with it animates.
+ * Whether "Sending..." shows under a question. Never while a send is in flight,
+ * since the Thinking row says it then, and never once the question's answer is
+ * on screen: Realtime can deliver the answer before the send returns, and a
+ * late copy of the question can arrive still marked pending.
  */
-export const ralfAnswerArrives = (message: Shown, shown: ReadonlySet<string> | null): boolean =>
-  shown !== null && message.role === "assistant" && !shown.has(coachMessageKey(message));
+export const showsSendingLine = (message: Shown, messages: readonly Shown[], sending: boolean): boolean =>
+  message.role === "user" && message.status === "pending" && !sending && !answered(message, messages);
+
+/**
+ * Whether an answer arrives now, and so fades in: its question was on screen
+ * before it, and the answer was not. What comes in together with its question
+ * (a conversation opening, the demo restoring a saved one) is simply there.
+ * `shown` holds the keys of the messages already on screen.
+ */
+export const ralfAnswerArrives = (
+  message: Shown,
+  messages: readonly Shown[],
+  shown: ReadonlySet<string>
+): boolean => {
+  if (message.role !== "assistant" || message.clientNonce === "" || shown.has(coachMessageKey(message))) return false;
+  const question = messages.find((entry) => entry.role === "user" && entry.clientNonce === message.clientNonce);
+  return question !== undefined && shown.has(coachMessageKey(question));
+};

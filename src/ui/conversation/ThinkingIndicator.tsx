@@ -1,13 +1,15 @@
 import { useEffect, useRef } from "react";
-import { Animated, Easing, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, Text, View } from "react-native";
 import { equinaTheme } from "../theme/theme";
 
 const dotCount = 3;
+const nativeDriver = Platform.OS !== "web";
 
 /**
  * "Thinking" under the author's name, set where the answer will appear, with
  * three dots that rise and brighten in turn. With reduced motion the dots stay
- * still. Screen readers hear "<author> is thinking" once.
+ * still. A screen reader is told "<author> is thinking" when the row appears:
+ * a row that mounts is not announced on its own.
  */
 export function ThinkingIndicator({
   author,
@@ -21,14 +23,18 @@ export function ThinkingIndicator({
   const dots = useRef(Array.from({ length: dotCount }, () => new Animated.Value(0))).current;
 
   useEffect(() => {
+    if (Platform.OS !== "web") AccessibilityInfo.announceForAccessibility(`${author} is thinking`);
+  }, [author]);
+
+  useEffect(() => {
     if (reducedMotion) {
       dots.forEach((dot) => dot.setValue(1));
       return;
     }
     const pulse = (dot: Animated.Value) =>
       Animated.sequence([
-        Animated.timing(dot, { toValue: 1, duration: 300, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(dot, { toValue: 0, duration: 300, easing: Easing.in(Easing.quad), useNativeDriver: true })
+        Animated.timing(dot, { toValue: 1, duration: 300, easing: Easing.out(Easing.quad), useNativeDriver: nativeDriver }),
+        Animated.timing(dot, { toValue: 0, duration: 300, easing: Easing.in(Easing.quad), useNativeDriver: nativeDriver })
       ]);
     const loop = Animated.loop(
       Animated.sequence([Animated.stagger(150, dots.map(pulse)), Animated.delay(180)])
@@ -46,7 +52,6 @@ export function ThinkingIndicator({
       style={styles.row}
       accessible
       accessibilityLabel={`${author} is thinking`}
-      accessibilityLiveRegion="polite"
     >
       <Text style={styles.author}>{author}</Text>
       <View style={styles.line}>
