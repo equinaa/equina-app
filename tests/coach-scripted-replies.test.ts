@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   EQUINA_NEXT_STOP_REPLY,
+  EQUINA_READY_REPLY,
   normalizeCoachQuestion,
   scriptedCoachReply,
   scriptedReplyUserIds
@@ -72,3 +73,47 @@ assert.equal(scriptedCoachReply("Where should Equina go next?", brand, scriptedR
 assert.equal(scriptedCoachReply("Where should Equina go next?", brand.toUpperCase(), listed), EQUINA_NEXT_STOP_REPLY);
 
 assert.equal(normalizeCoachQuestion("  “Ralf,  Where should Equina go next ?” "), "ralf where should equina go next");
+
+// The Hong Kong film: the rider asks Ralf after her training, and the answer
+// is the brand's exact text.
+assert.equal(EQUINA_READY_REPLY, "You are ready. Hong Kong, 29 January. Let's go.");
+assert.ok(EQUINA_READY_REPLY.includes("Let's"), "a straight apostrophe, as the brand wrote it");
+assert.ok(!EQUINA_READY_REPLY.includes("’"));
+
+for (const asked of [
+  "Hey Ralf, what do you think?",
+  "hey ralf what do you think",
+  "HEY RALF, WHAT DO YOU THINK?",
+  "  Hey Ralf,  what do you think ?  ",
+  "Hey Ralf, what do you think？",
+  "Hey Ralf, what do you think?!",
+  "“Hey Ralf, what do you think?”",
+  "Hey, Ralf, what do you think?",
+  "Ralf, what do you think?",
+  // Dictation and autocorrect spell the name the common way.
+  "Hey Ralph, what do you think?",
+  "Hey Ralph what do you think"
+]) {
+  assert.equal(scriptedCoachReply(asked, brand, listed), EQUINA_READY_REPLY, `should match: ${JSON.stringify(asked)}`);
+}
+
+// A real question from the same account still reaches the model, and so does
+// the film's question from any other rider.
+for (const asked of [
+  "What do you think?",
+  "Hey, what do you think?",
+  "Hey Ralf, what do you think about Hong Kong?",
+  "Hey Ralf, what do you think of my ride today?",
+  "Hey Ralf, what do you think? Be honest.",
+  "Hey Ralf, what did you think?",
+  "Hey Ralf",
+  "Oi Ralf, o que você acha?"
+]) {
+  assert.equal(scriptedCoachReply(asked, brand, listed), null, `should not match: ${JSON.stringify(asked)}`);
+}
+assert.equal(scriptedCoachReply("Hey Ralf, what do you think?", rider, listed), null);
+assert.equal(scriptedCoachReply("Hey Ralf, what do you think?", brand, scriptedReplyUserIds(undefined)), null);
+
+// Each question keeps its own answer.
+assert.equal(scriptedCoachReply("Where should Equina go next?", brand, listed), EQUINA_NEXT_STOP_REPLY);
+assert.equal(scriptedCoachReply("Hey Ralf, where should Equina go next?", brand, listed), null);
