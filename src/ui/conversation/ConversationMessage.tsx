@@ -9,6 +9,7 @@ export function ConversationMessage({
   meta,
   author,
   variant = "default",
+  showPendingLabel = true,
   onLongPress,
   onRetry
 }: {
@@ -18,6 +19,8 @@ export function ConversationMessage({
   meta?: string;
   author?: string;
   variant?: "default" | "coach";
+  /** Off where the screen shows the wait another way, as Ralf's "Thinking" row does. */
+  showPendingLabel?: boolean;
   onLongPress?: () => void;
   onRetry?: () => void;
 }) {
@@ -38,7 +41,7 @@ export function ConversationMessage({
         ]}
       >
         <Text selectable style={[styles.body, coachReply && styles.bodyCoach, own && styles.bodyOwn]}>{body}</Text>
-        {status === "pending" ? <Text style={styles.pending}>Sending...</Text> : null}
+        {status === "pending" && showPendingLabel ? <Text style={styles.pending}>Sending...</Text> : null}
       </Pressable>
       {status === "failed" && onRetry ? (
         <Pressable
