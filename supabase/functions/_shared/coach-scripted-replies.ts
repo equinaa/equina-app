@@ -1,12 +1,12 @@
 /**
  * Fixed Ralf replies for named accounts.
  *
- * The brand account asks Ralf one question on camera and the answer has to be
- * exactly the same every time, so it is not left to the model: coach-chat
- * returns this text as it is, without calling the provider or spending a
- * credit. Only the accounts whose ids are listed in the
- * EQUINA_SCRIPTED_REPLY_USER_IDS secret get it; with the secret unset, nobody
- * does and every rider is answered by the model as usual.
+ * The brand account asks Ralf a few set questions on camera, and each answer
+ * has to be exactly the same every time, so it is not left to the model:
+ * coach-chat returns the text as it is, without calling the provider or
+ * spending a credit. Only the accounts whose ids are listed in the
+ * EQUINA_SCRIPTED_REPLY_USER_IDS secret get them; with the secret unset,
+ * nobody does and every rider is answered by the model as usual.
  *
  * Pure on purpose (no Deno or npm imports), so the Node tests import it.
  */
@@ -14,11 +14,21 @@
 /** En dash between the days (U+2013), as the brand writes it. */
 export const EQUINA_NEXT_STOP_REPLY = "Hong Kong. 29–31 January.";
 
-// The whole message has to be this question, never a sentence that contains
-// it, so a real question from the same account still reaches the model.
-// "equine" is how iOS autocorrect tends to rewrite the brand name, and the app
-// cannot turn autocorrect off for builds already in testers' hands.
-const nextStopQuestion = /^(?:(?:ralf|ralph) )?where should equin[ae] go next$/;
+/** Ralf's answer at the end of the training in the Hong Kong film. */
+export const EQUINA_READY_REPLY = "You are ready. Hong Kong, 29 January. Let's go.";
+
+// The whole message has to be one of these questions, never a sentence that
+// contains it, so a real question from the same account still reaches the
+// model.
+const scriptedQuestions: ReadonlyArray<{ question: RegExp; reply: string }> = [
+  // "equine" is how iOS autocorrect tends to rewrite the brand name, and the
+  // app cannot turn autocorrect off for builds already in testers' hands.
+  { question: /^(?:(?:ralf|ralph) )?where should equin[ae] go next$/, reply: EQUINA_NEXT_STOP_REPLY },
+  // The film's question names Ralf, so a bare "What do you think?" from the
+  // same account still goes to the model. "Ralph" is how the iPhone's
+  // dictation and autocorrect tend to spell the name.
+  { question: /^(?:hey )?(?:ralf|ralph) what do you think$/, reply: EQUINA_READY_REPLY },
+];
 
 /**
  * Lower case, one space between words, and none of the wrapping a phone keyboard
@@ -52,5 +62,6 @@ export const scriptedCoachReply = (
   allowedUserIds: Set<string>,
 ): string | null => {
   if (!allowedUserIds.has(userId.toLowerCase())) return null;
-  return nextStopQuestion.test(normalizeCoachQuestion(message)) ? EQUINA_NEXT_STOP_REPLY : null;
+  const asked = normalizeCoachQuestion(message);
+  return scriptedQuestions.find(({ question }) => question.test(asked))?.reply ?? null;
 };
