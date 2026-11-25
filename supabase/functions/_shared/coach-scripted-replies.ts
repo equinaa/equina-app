@@ -14,8 +14,11 @@
 /** En dash between the days (U+2013), as the brand writes it. */
 export const EQUINA_NEXT_STOP_REPLY = "Hong Kong. 29–31 January.";
 
-/** Ralf's answer at the end of the training in the Hong Kong film. */
-export const EQUINA_READY_REPLY = "You are ready. Hong Kong, 29 January. Let's go.";
+/**
+ * Ralf's answer at the end of the training in the Hong Kong film: one sentence
+ * per line, so it reads as three beats on the phone screen.
+ */
+export const EQUINA_READY_REPLY = "You are ready.\nHong Kong, 29 January.\nLet's go.";
 
 // The whole message has to be one of these questions, never a sentence that
 // contains it, so a real question from the same account still reaches the
