@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { RefreshCw } from "lucide-react-native";
+import { ArrivingView } from "../motion/ArrivingView";
 import { equinaTheme } from "../theme/theme";
 
 export function ConversationMessage({
@@ -9,6 +10,8 @@ export function ConversationMessage({
   meta,
   author,
   variant = "default",
+  showPendingLabel = true,
+  arriving = false,
   onLongPress,
   onRetry
 }: {
@@ -18,14 +21,20 @@ export function ConversationMessage({
   meta?: string;
   author?: string;
   variant?: "default" | "coach";
+  /** Off where the screen shows the wait another way, as Ralf's "Thinking" row does. */
+  showPendingLabel?: boolean;
+  /**
+   * The message just arrived: everything under the author's name fades in. The
+   * name stays still, so it does not blink where a "Thinking" row stood.
+   */
+  arriving?: boolean;
   onLongPress?: () => void;
   onRetry?: () => void;
 }) {
   const coachReply = variant === "coach" && !own;
 
-  return (
-    <View style={[styles.row, own && styles.rowOwn]}>
-      {author ? <Text style={styles.author}>{author}</Text> : null}
+  const content = (
+    <>
       <Pressable
         accessibilityRole={onLongPress ? "button" : undefined}
         accessibilityHint={onLongPress ? "Hold for message actions" : undefined}
@@ -38,7 +47,7 @@ export function ConversationMessage({
         ]}
       >
         <Text selectable style={[styles.body, coachReply && styles.bodyCoach, own && styles.bodyOwn]}>{body}</Text>
-        {status === "pending" ? <Text style={styles.pending}>Sending...</Text> : null}
+        {status === "pending" && showPendingLabel ? <Text style={styles.pending}>Sending...</Text> : null}
       </Pressable>
       {status === "failed" && onRetry ? (
         <Pressable
@@ -53,6 +62,15 @@ export function ConversationMessage({
         </Pressable>
       ) : null}
       {meta ? <Text style={[styles.meta, own && styles.metaOwn]}>{meta}</Text> : null}
+    </>
+  );
+
+  return (
+    <View style={[styles.row, own && styles.rowOwn]}>
+      {author ? <Text style={styles.author}>{author}</Text> : null}
+      {/* Only a coach reply can arrive with a fade; every other message keeps
+          its children directly in the row, laid out exactly as before. */}
+      {coachReply ? <ArrivingView animate={arriving} style={styles.content}>{content}</ArrivingView> : content}
     </View>
   );
 }
@@ -64,6 +82,13 @@ const styles = StyleSheet.create({
   },
   rowOwn: {
     alignItems: "flex-end"
+  },
+  // Holds what sits under a coach reply's author name, laid out as the row
+  // itself lays it out: full width, start-aligned, 4 points apart.
+  content: {
+    alignSelf: "stretch",
+    alignItems: "flex-start",
+    gap: 4
   },
   author: {
     color: equinaTheme.colors.brass,

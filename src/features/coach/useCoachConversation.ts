@@ -258,6 +258,10 @@ export function useCoachConversation({
   }, [send]);
 
   const startNew = useCallback(() => {
+    // A new conversation stays new. Clearing the active id makes the history
+    // load again, and that load would otherwise put the latest conversation
+    // straight back on screen.
+    resumeLatestRef.current = false;
     if (mode === "demo") void persistDemo([]);
     setActiveConversationId("");
     setMessages([]);
