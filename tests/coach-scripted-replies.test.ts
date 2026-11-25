@@ -75,8 +75,11 @@ assert.equal(scriptedCoachReply("Where should Equina go next?", brand.toUpperCas
 assert.equal(normalizeCoachQuestion("  “Ralf,  Where should Equina go next ?” "), "ralf where should equina go next");
 
 // The Hong Kong film: the rider asks Ralf after her training, and the answer
-// is the brand's exact text.
-assert.equal(EQUINA_READY_REPLY, "You are ready. Hong Kong, 29 January. Let's go.");
+// is the brand's exact text, one sentence per line so the phone shows three
+// lines instead of wrapping "go." onto a line of its own.
+assert.equal(EQUINA_READY_REPLY, "You are ready.\nHong Kong, 29 January.\nLet's go.");
+assert.deepEqual(EQUINA_READY_REPLY.split("\n"), ["You are ready.", "Hong Kong, 29 January.", "Let's go."]);
+assert.ok(!EQUINA_READY_REPLY.includes("\r") && !/ \n|\n /.test(EQUINA_READY_REPLY), "plain line breaks, no stray spaces");
 assert.ok(EQUINA_READY_REPLY.includes("Let's"), "a straight apostrophe, as the brand wrote it");
 assert.ok(!EQUINA_READY_REPLY.includes("’"));
 
