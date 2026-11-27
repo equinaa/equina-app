@@ -87,7 +87,7 @@ export const guessCoachLanguage = (text: string): LanguageGuess => {
 
   const best = Math.max(...LANGUAGES.map((language) => score[language]));
   const leaders = LANGUAGES.filter((language) => score[language] === best);
-  return { language: leaders[0], confident: best > 0 && leaders.length === 1 };
+  return { language: leaders[0] ?? "en", confident: best > 0 && leaders.length === 1 };
 };
 
 export const detectCoachLanguage = (text: string): CoachLanguage => guessCoachLanguage(text).language;
@@ -114,7 +114,7 @@ export const assessHealthConcern = (message: string): HealthAssessment => {
   const notEnglish = hits.filter((language) => language !== "en");
   // With no clear language, a worry written in exactly one language's words
   // says which language the rider reads.
-  const language = !guess.confident && notEnglish.length === 1 ? notEnglish[0] : guess.language;
+  const language = !guess.confident && notEnglish.length === 1 ? notEnglish[0] ?? guess.language : guess.language;
   return { concern: hits.length > 0, language };
 };
 

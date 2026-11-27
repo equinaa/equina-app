@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
     "outDir": "dist"
   },
   "include": [
