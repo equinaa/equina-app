@@ -437,13 +437,14 @@ export const activityProblem = (draft: ActivityDraft, now: number) => {
 
 /**
  * Whether an activity is scheduled rather than logged: a day ahead, or later
- * today at a time that has not ended yet.
+ * today at a time that has not come yet. One already started stays a log
+ * (and waits until it has ended).
  */
 export const activityIsAhead = (draft: ActivityDraft, now: number) => {
   const today = localDayOf(now) as string;
   if (!draft.day) return false;
   if (draft.day > today) return true;
-  return draft.day === today && activityStartedAt(draft).getTime() + plannedMinutes(draft.plan.phases) * 60_000 > now;
+  return draft.day === today && activityStartedAt(draft).getTime() > now;
 };
 
 /** What stops the rider from scheduling, in their words. Null when it can be scheduled. */

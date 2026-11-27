@@ -213,6 +213,7 @@ import {
 import {
   activityCompletion,
   activityProblem,
+  activityStartedAt,
   cleanPhases,
   defaultTrainingType,
   phasesFor,
@@ -1908,16 +1909,34 @@ function EquinaApp() {
         }))
       }
     };
-    const problem = activityProblem(draft, Date.now());
-    if (problem) throw new Error(problem);
-    const horseDiscipline = horseRecords.horses.find((record) => record.id === item.horseId)?.discipline;
-    const entry = await rideJournal.logRide({
-      session: activityCompletion(draft, horseDiscipline ? toCoachDiscipline(horseDiscipline) : onboardingDiscipline),
-      horseId: item.horseId,
-      riderNote: item.note,
-      source: "manual"
-    });
-    await plannedActivities.markDone(item.id, entry.id);
+    // A Done whose first half went through (the entry saved, the link not)
+    // finds that entry again rather than logging the training twice.
+    const startedAt = activityStartedAt(draft).getTime();
+    const already = rideJournal.entries.find((entry) =>
+      entry.source === "manual"
+      && Date.parse(entry.startedAt) === startedAt
+      && (entry.horseId ?? null) === (item.horseId ?? null)
+    );
+    let entryId = already?.id;
+    if (!entryId) {
+      const problem = activityProblem(draft, Date.now());
+      if (problem) throw new Error(problem);
+      const horseDiscipline = horseRecords.horses.find((record) => record.id === item.horseId)?.discipline;
+      const entry = await rideJournal.logRide({
+        session: activityCompletion(draft, horseDiscipline ? toCoachDiscipline(horseDiscipline) : onboardingDiscipline),
+        horseId: item.horseId,
+        riderNote: item.note,
+        source: "manual"
+      });
+      entryId = entry.id;
+    }
+    try {
+      await plannedActivities.markDone(item.id, entryId);
+    } catch (error) {
+      // Removed on another device, say: read the list again before the next try.
+      void plannedActivities.refresh();
+      throw error;
+    }
     refresh("Added to your journal.");
   };
 

@@ -112,8 +112,9 @@ export function ActivityCalendarScreen({
   const selectedActivities = byDay.get(selected) ?? [];
   const selectedUse = dayUseOn(selected, today);
   const grid = monthGrid(month);
-  // A scheduled activity marked done shows as the journal entry it became.
-  const plannedOn = (day: string) => planned.filter((item) => item.day === day && !(item.status === "done" && item.rideEntryId));
+  // A scheduled activity marked done shows as the journal entry it became
+  // (and not at all once that entry is deleted).
+  const plannedOn = (day: string) => planned.filter((item) => item.day === day && item.status !== "done");
   const selectedPlanned = plannedOn(selected);
 
   const goToMonth = (by: number) => {

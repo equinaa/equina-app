@@ -972,9 +972,38 @@ await assert.rejects(
 );
 await assert.rejects(
   db.query("update public.planned_activities set status = 'planned' where id = $1", [nextWeekId]),
-  /planned_activities_entry_only_when_done/,
+  /planned_activities_entry_only_when_done|answered activity stays/,
   "Only a done activity points at a journal entry."
 );
+await assert.rejects(
+  db.query("update public.planned_activities set status = 'planned', ride_entry_id = null where id = $1", [nextWeekId]),
+  /answered activity stays/,
+  "A done activity never goes back to planned, even unlinked first."
+);
+await assert.rejects(
+  db.query(
+    "insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases, note) values ($1, current_date + 1, 600, 'hack', $2::jsonb, $3)",
+    [riderA, plannedPhases, "x".repeat(2001)]
+  ),
+  /planned_activities_note_valid/,
+  "A note is as long as a ride's at most."
+);
+await db.exec("reset role;");
+await db.exec(`
+  alter table public.planned_activities disable trigger planned_activities_dates_guard;
+  insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases)
+  values ('${riderA}', current_date - 10, 600, 'hack', '${plannedPhases}'::jsonb);
+  alter table public.planned_activities enable trigger planned_activities_dates_guard;
+`);
+const missed = await db.query<{ id: string }>("select id from public.planned_activities where rider_id = $1 and day = current_date - 10", [riderA]);
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+await assert.rejects(
+  db.query("update public.planned_activities set day = current_date + 5 where id = $1", [missed.rows[0]?.id]),
+  /past activity can only be marked done or let go/,
+  "A missed plan is answered, not brought back as a future one."
+);
+const letGo = await db.query<{ status: string }>("update public.planned_activities set status = 'skipped' where id = $1 returning status", [missed.rows[0]?.id]);
+assert.equal(letGo.rows[0]?.status, "skipped", "A missed plan can be let go.");
 await db.query("delete from public.ride_entries where id = $1", [ownEntry.rows[0]?.id]);
 const unlinked = await db.query<{ status: string; ride_entry_id: string | null }>(
   "select status, ride_entry_id from public.planned_activities where id = $1",

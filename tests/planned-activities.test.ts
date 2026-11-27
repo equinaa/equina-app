@@ -39,6 +39,7 @@ process.env.TZ = "Europe/Lisbon";
   assert.equal(activityIsAhead(draft({}), now), true, "A day ahead is scheduled.");
   assert.equal(activityIsAhead(draft({ day: "2026-11-27", startMinutes: 17 * 60 }), now), true, "Later today, not yet ended, is scheduled.");
   assert.equal(activityIsAhead(draft({ day: "2026-11-27", startMinutes: 8 * 60 }), now), false, "This morning, ended by now, is logged.");
+  assert.equal(activityIsAhead(draft({ day: "2026-11-27", startMinutes: 9 * 60 + 30 }), now), false, "Started, not ended yet: still a log, told to wait.");
   assert.equal(activityIsAhead(draft({ day: "2026-11-26" }), now), false, "Yesterday is logged.");
   assert.equal(activityIsAhead(draft({ day: "" }), now), false, "No day yet (the sheet opening) is not ahead.");
   assert.equal(scheduleProblem(draft({}), now), null, "Next Friday at 09:00 can be scheduled.");
@@ -112,12 +113,14 @@ process.env.TZ = "Europe/Lisbon";
   const app = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
   assert.match(app, /onSchedule=\{ridePersistence \? scheduleActivity : undefined\}/);
   assert.match(app, /const problem = activityProblem\(draft, Date\.now\(\)\);\s+if \(problem\) throw new Error\(problem\);/, "Done follows the same rules as logging by hand.");
-  assert.match(app, /await plannedActivities\.markDone\(item\.id, entry\.id\);/);
+  assert.match(app, /const already = rideJournal\.entries\.find\(\(entry\) =>\s+entry\.source === "manual"\s+&& Date\.parse\(entry\.startedAt\) === startedAt/, "A retried Done reuses the entry it already saved.");
+  assert.match(app, /await plannedActivities\.markDone\(item\.id, entryId\);/);
   const sheet = readFileSync(join(process.cwd(), "src/features/ride/RideSetupSheet.tsx"), "utf8");
   assert.match(sheet, /const scheduling = logging && Boolean\(onSchedule\) && activityIsAhead\(draft, now\);/);
   assert.match(sheet, /title=\{scheduling \? "Schedule activity" : logging \? "Add activity" : "Customize training"\}/);
   const calendar = readFileSync(join(process.cwd(), "src/features/calendar/ActivityCalendarScreen.tsx"), "utf8");
   assert.match(calendar, /const answerable = item\.status === "planned" && ended;/, "Done or Didn't happen only once its time has passed.");
+  assert.match(calendar, /planned\.filter\(\(item\) => item\.day === day && item\.status !== "done"\)/, "A done plan shows as its journal entry, never as scheduled again.");
   assert.match(calendar, /\{answerable && loggable \? \(/, "Done only while the day can still be logged.");
 }
 

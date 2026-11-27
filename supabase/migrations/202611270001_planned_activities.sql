@@ -33,7 +33,8 @@ create table public.planned_activities (
     phases is not null and private.ride_phases_valid(phases)
     and not jsonb_path_exists(phases, '$[*].actual_seconds')
   ),
-  constraint planned_activities_note_valid check (note is null or char_length(note) <= 500),
+  -- As long as a ride's note (ride_entries.rider_note): Done carries it over.
+  constraint planned_activities_note_valid check (note is null or char_length(note) <= 2000),
   constraint planned_activities_status_known check (status in ('planned', 'done', 'skipped')),
   constraint planned_activities_entry_only_when_done check (ride_entry_id is null or status = 'done')
 );
@@ -59,6 +60,12 @@ begin
     end if;
     return new;
   end if;
+  -- An answer stays given: done or skipped never goes back to planned or
+  -- to the other answer. (A deleted journal entry unlinks a done plan
+  -- through on delete set null; its status does not change.)
+  if old.status <> 'planned' and new.status <> old.status then
+    raise exception 'An answered activity stays as it was.' using errcode = '22023';
+  end if;
   if new.day <> old.day
      or new.start_minutes <> old.start_minutes
      or new.training_type <> old.training_type
@@ -68,6 +75,10 @@ begin
      or (new.horse_id is not null and new.horse_id is distinct from old.horse_id) then
     if old.status <> 'planned' then
       raise exception 'An answered activity stays as it was.' using errcode = '22023';
+    end if;
+    -- A day gone by is answered, not moved to another day.
+    if old.day < current_date - 1 then
+      raise exception 'A past activity can only be marked done or let go.' using errcode = '22023';
     end if;
     if new.day not between current_date - 1 and current_date + 92 then
       raise exception 'An activity can be scheduled from today up to three months ahead.' using errcode = '22023';
