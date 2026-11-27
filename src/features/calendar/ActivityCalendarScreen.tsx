@@ -39,6 +39,9 @@ export function ActivityCalendarScreen({
   enabled,
   journal,
   journalSince,
+  journalLoading,
+  journalError,
+  onRetryJournal,
   horseNames,
   canAdd,
   onAddActivity,
@@ -54,6 +57,9 @@ export function ActivityCalendarScreen({
   /** The journal's rides, every one since `journalSince`. */
   journal: readonly RideEntry[];
   journalSince: Date;
+  journalLoading: boolean;
+  journalError: string;
+  onRetryJournal: () => void;
   horseNames: Record<string, string>;
   /** False while a ride is running or the journal cannot save. */
   canAdd: boolean;
@@ -69,7 +75,16 @@ export function ActivityCalendarScreen({
     setMonth(monthOf(initialDay));
   }, [visible, initialDay]);
 
-  const activities = useMonthActivities({ backend, enabled: enabled && visible, month, journal, journalSince });
+  const activities = useMonthActivities({
+    backend,
+    enabled: enabled && visible,
+    month,
+    journal,
+    journalSince,
+    journalLoading,
+    journalError,
+    onRetryJournal
+  });
   const byDay = activitiesByDay(activities.entries);
   const latestMonth = monthOf(today);
   const selectedActivities = byDay.get(selected) ?? [];

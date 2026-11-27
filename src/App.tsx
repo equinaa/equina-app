@@ -3371,6 +3371,9 @@ function EquinaApp() {
           enabled={ridePersistence}
           journal={rideJournal.entries}
           journalSince={startOfPreviousMonth()}
+          journalLoading={ridePersistence && !rideJournal.loaded}
+          journalError={rideJournal.error}
+          onRetryJournal={() => void rideJournal.refresh()}
           horseNames={horseNames}
           canAdd={ridePersistence && !rideActive}
           onAddActivity={(day) => {

@@ -10,7 +10,6 @@ import {
   logStateOn,
   monthSpan,
   dayHeading,
-  shortDayWithMonth,
   shortWeekdayDate,
   weekOf
 } from "../src/domain/activity-calendar";
@@ -21,18 +20,24 @@ import {
 // Which days take a new activity.
 {
   const today = "2026-11-27";
-  assert.equal(activityLogWindowDays, 31);
-  assert.equal(firstLoggableDay(today), "2026-10-28", "Today and the 30 days before it.");
+  assert.equal(activityLogWindowDays, 30);
+  assert.equal(firstLoggableDay(today), "2026-10-29", "Today and the 29 days before it.");
   assert.equal(logStateOn(today, today), "open");
-  assert.equal(logStateOn("2026-10-28", today), "open", "The oldest day of the window.");
-  assert.equal(logStateOn("2026-10-27", today), "tooOld");
+  assert.equal(logStateOn("2026-10-29", today), "open", "The oldest day of the window.");
+  assert.equal(logStateOn("2026-10-28", today), "tooOld");
   assert.equal(logStateOn("2026-11-28", today), "future");
-  assert.equal(firstLoggableDay("2026-03-01"), "2026-01-30", "Back across February.");
-  // The server takes an activity that ended up to 31 days ago: the oldest
-  // day's first minute is still inside that, a day's margin to spare.
-  const oldest = new Date(2026, 9, 28, 0, 0).getTime();
+  assert.equal(firstLoggableDay("2026-03-01"), "2026-01-31", "Back across February.");
+  // The server takes an activity that ended up to 744 hours (31 days) ago.
+  // The oldest day's first minute, even with the clocks gone back in
+  // between (Lisbon, 25 Oct 2026) and a save at 23:59, stays inside it.
+  const zone = process.env.TZ;
+  process.env.TZ = "Europe/Lisbon";
+  const oldest = new Date(2026, 9, 29, 0, 0).getTime();
   const nowLate = new Date(2026, 10, 27, 23, 59).getTime();
-  assert.ok(nowLate - oldest < 31 * 24 * 60 * 60 * 1000, "A day the app offers is never one the server refuses.");
+  assert.equal(firstLoggableDay("2026-11-27"), "2026-10-29");
+  assert.ok(nowLate - oldest < 744 * 60 * 60 * 1000, "A day the app offers is never one the server refuses, across a clock change.");
+  if (zone === undefined) delete process.env.TZ;
+  else process.env.TZ = zone;
 }
 
 // Monday to Sunday of a day's week.
@@ -78,7 +83,6 @@ import {
 {
   assert.equal(dayHeading("2026-11-27"), "Friday 27 November");
   assert.equal(shortWeekdayDate("2026-11-25"), "Wed 25");
-  assert.equal(shortDayWithMonth("2026-10-28"), "Wed 28 Oct");
 }
 
 // An older month is read by when its rides started, oldest first.
@@ -102,6 +106,21 @@ import {
   });
 }
 
+// Add activity picks its day from a week: the week of the day it opens on,
+// with arrows within the month window; the last-week chips are gone.
+{
+  const sheet = readFileSync(join(process.cwd(), "src/features/ride/RideSetupSheet.tsx"), "utf8");
+  assert.match(sheet, /<WeekDayPicker value=\{day\} today=\{localDayOf\(now\) as string\} onChange=\{setDay\} \/>/);
+  assert.doesNotMatch(sheet, /add-activity-day-/);
+  const picker = readFileSync(join(process.cwd(), "src/features/calendar/WeekDayPicker.tsx"), "utf8");
+  assert.match(picker, /const canGoBack = addDays\(monday, -1\) >= oldest;/, "Back while the week before has a day to pick.");
+  assert.match(picker, /const canGoForward = addDays\(monday, 7\) <= today;/, "Forward while the next week has started.");
+  assert.match(picker, /const open = logStateOn\(day, today\) === "open";/);
+  assert.match(picker, /disabled=\{!open\}/, "A day outside the window cannot be picked.");
+  // The sheet's day is empty until it opens: the picker shows today's week, never a date out of bounds.
+  assert.match(picker, /const shown = \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(value\) \? value : today;/);
+}
+
 // Wiring: the week sits under Home's hero, a day opens the calendar, and the
 // calendar's Add activity opens the sheet on that day.
 {
@@ -114,6 +133,19 @@ import {
   assert.match(app, /setAddActivityDay\(day\);\s+setAddActivityOpen\(true\);/);
   assert.match(app, /day=\{addActivityDay\}/);
   assert.match(app, /setAddActivityDay\(undefined\);\s+setAddActivityOpen\(true\);/, "Home's own button opens on the latest time, as before.");
+}
+
+
+// The month hook: a journal change drops a month read on its way and reads it
+// again (no spinner left waiting on a dropped answer); a month the journal
+// covers says "nothing logged" only once the journal has been read.
+{
+  const hook = readFileSync(join(process.cwd(), "src/features/calendar/useMonthActivities.ts"), "utf8");
+  assert.match(hook, /setRead\(\{\}\);\s+setLoading\(false\);\s+setVersion\(\(current\) => current \+ 1\);/);
+  assert.match(hook, /\}, \[known, load, version\]\);/);
+  assert.match(hook, /loading: journalLoading, error: journalLoading \? "" : journalError/);
+  const app = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
+  assert.match(app, /journalLoading=\{ridePersistence && !rideJournal\.loaded\}/);
 }
 
 console.log("Activity calendar passed.");

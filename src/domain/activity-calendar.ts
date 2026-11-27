@@ -3,12 +3,13 @@ import { localDayOf } from "./local-day";
 import { addDays, isoWeekday } from "./training-streak";
 
 /**
- * How far back an activity can be added by hand: today and the 30 days
- * before it. The server takes a logged activity that ended up to 31 days ago
- * (ride_entries_dates_plausible); a day inside these 31 can never end
- * further back than that.
+ * How far back an activity can be added by hand: today and the 29 days
+ * before it. The server takes a logged activity that ended up to 31 days
+ * (744 hours) ago (ride_entries_dates_plausible). Counted in local days, a
+ * window of 31 could reach past that when the clocks went back inside it (a
+ * local day of 25 hours); 30 always leaves a day to spare.
  */
-export const activityLogWindowDays = 31;
+export const activityLogWindowDays = 30;
 
 /** The oldest day an activity can be added for, as a local YYYY-MM-DD. */
 export const firstLoggableDay = (today: string) => addDays(today, -(activityLogWindowDays - 1));
@@ -81,10 +82,6 @@ const monthNames = [
 /** "Thursday 27 November": the heading over a day's activities. */
 export const dayHeading = (day: string) =>
   `${weekdayNames[isoWeekday(day) - 1]} ${Number(day.slice(8, 10))} ${monthNames[Number(day.slice(5, 7)) - 1]}`;
-
-/** "Thu 30 Oct": a day outside Add activity's last week, as a chip. */
-export const shortDayWithMonth = (day: string) =>
-  `${(weekdayNames[isoWeekday(day) - 1] ?? "").slice(0, 3)} ${Number(day.slice(8, 10))} ${(monthNames[Number(day.slice(5, 7)) - 1] ?? "").slice(0, 3)}`;
 
 /** "Wed 25": a day of the month shown just above it. */
 export const shortWeekdayDate = (day: string) =>

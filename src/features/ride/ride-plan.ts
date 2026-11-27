@@ -376,12 +376,6 @@ export const rememberSetup = (memory: RideSetupMemory | null, plan: RidePlan): R
 
 // Logging afterwards ----------------------------------------------------------
 
-/**
- * How far back Add activity reaches, today included. The database allows a
- * month (202610250001), so this can grow without a migration.
- */
-export const activityWindowDays = 7;
-
 /** A training the rider did without the clock, as set in Add activity. */
 export type ActivityDraft = {
   /** The local day it happened, YYYY-MM-DD. */
@@ -394,14 +388,6 @@ export type ActivityDraft = {
 const atLocalDay = (day: string, minutes = 0) => {
   const [year, month, date] = day.split("-").map(Number);
   return new Date(year ?? 0, (month ?? 1) - 1, date ?? 1, 0, minutes);
-};
-
-/** Today, yesterday and back through the window, newest first, as local days. */
-export const activityDays = (now: number): string[] => {
-  const today = new Date(now);
-  return Array.from({ length: activityWindowDays }, (_, back) =>
-    localDayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() - back)) as string
-  );
 };
 
 /** The instant the activity started, on the rider's local clock. */

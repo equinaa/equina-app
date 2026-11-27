@@ -4,15 +4,14 @@ import { ChevronUp, Minus, Plus, RotateCcw, X } from "lucide-react-native";
 import type { RideMood } from "./RideExperience";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { cuePhaseChange, prepareRideCues, rideAlertsAllowed } from "./ride-cues";
-import { shortDayWithMonth } from "../../domain/activity-calendar";
+import { localDayOf } from "../../domain/local-day";
+import { WeekDayPicker } from "../calendar/WeekDayPicker";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
 import {
-  activityDays,
   activityProblem,
   activityTimeExists,
-  activityWindowDays,
   addPhase,
   defaultActivityStart,
   defaultRidePhases,
@@ -40,21 +39,7 @@ export type RideSetupHorse = { id?: string; name: string };
 export type LoggedActivity = { draft: ActivityDraft; mood?: RideMood; note?: string };
 
 const moods: readonly RideMood[] = ["Fresh", "Focused", "Tender"];
-const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const minutesInDay = 24 * 60;
-
-/** "Today", "Yesterday", then "Thu 22" for the days before. */
-const dayLabel = (day: string, index: number) => {
-  if (index === 0) return "Today";
-  if (index === 1) return "Yesterday";
-  const [year, month, date] = day.split("-").map(Number);
-  const weekday = weekdays[new Date(year ?? 0, (month ?? 1) - 1, date ?? 1).getDay()];
-  return `${weekday} ${date}`;
-};
-
-/** The last week by name; an older day picked in the calendar says its month. */
-const chipLabel = (day: string, index: number) =>
-  index < activityWindowDays ? dayLabel(day, index) : shortDayWithMonth(day);
 
 // The list is rebuilt on every render of the app, so horses compare by who
 // they are, not by object. A horse from the demo has a name and no id.
@@ -175,9 +160,6 @@ export function RideSetupSheet({
   };
 
   const now = Date.now();
-  const lastWeek = logging ? activityDays(now) : [];
-  // A day from the calendar older than the last week gets a chip of its own, at the end.
-  const days = logging && day && !lastWeek.includes(day) ? [...lastWeek, day] : lastWeek;
   const plan: RidePlan = {
     ...(horse?.id ? { horseId: horse.id } : {}),
     horseName: horse?.name ?? "",
@@ -252,28 +234,7 @@ export function RideSetupSheet({
         {logging ? (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>When</Text>
-            <View accessibilityRole="radiogroup" style={styles.chips}>
-              {days.map((option, index) => {
-                const selected = option === day;
-                return (
-                  <MotionPressable
-                    key={option}
-                    testID={`add-activity-day-${index}`}
-                    accessibilityRole="radio"
-                    accessibilityLabel={chipLabel(option, index)}
-                    accessibilityState={{ selected }}
-                    pressedScale={0.97}
-                    onPress={() => {
-                      if (!selected) selectionHaptic();
-                      setDay(option);
-                    }}
-                    style={[styles.chip, selected && styles.chipSelected]}
-                  >
-                    <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{chipLabel(option, index)}</Text>
-                  </MotionPressable>
-                );
-              })}
-            </View>
+            <WeekDayPicker value={day} today={localDayOf(now) as string} onChange={setDay} />
             <View style={styles.timeRow}>
               <Text style={styles.timeLabel}>Started at</Text>
               <View
