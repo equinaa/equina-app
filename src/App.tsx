@@ -1026,7 +1026,6 @@ function EquinaApp() {
   // fallback only fills a header before a name exists.
   const riderName = onboardingName.trim();
   const riderDisplayName = riderName || "Rider";
-  const riderMonogram = riderDisplayName.slice(0, 2).toUpperCase();
   const primaryHorseName = onboardingHasHorse ? onboardingHorseName.trim() || horse.name : "";
   const rideHorseName = primaryHorseName || "Today's horse";
   const horseContextName = primaryHorseName || "the horse you ride";
@@ -3063,18 +3062,9 @@ function EquinaApp() {
         {tab !== "home" && !hideGlobalHeader && (
           <View style={styles.header}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={styles.brand}>{headerTitle}</Text>
+            {/* The account opens from Home's avatar only; here Ralf stands alone. */}
             <View style={styles.headerActions}>
               {ralfAvailable ? <RalfButton onPress={() => openRalf()} /> : null}
-              <Pressable
-                testID="profile-button"
-                accessibilityRole="button"
-                accessibilityLabel="Open account"
-                hitSlop={6}
-                style={({ pressed }) => [styles.profileDot, pressed && styles.tabItemPressed]}
-                onPress={openAccount}
-              >
-                <Text style={styles.profileDotText}>{riderMonogram}</Text>
-              </Pressable>
             </View>
           </View>
         )}
@@ -8689,22 +8679,6 @@ const styles = StyleSheet.create({
     color: equinaTheme.colors.pine,
     fontSize: 12,
     fontWeight: "400"
-  },
-  profileDot: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(247,243,234,0.055)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 0,
-    overflow: "hidden"
-  },
-  profileDotText: {
-    color: equinaTheme.colors.brass,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600"
   },
   ralfButton: {
     minHeight: 44,
