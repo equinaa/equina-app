@@ -376,7 +376,6 @@ export function OnboardingScreen({
     <KeyboardAvoidingContainer
       testID="onboarding-screen"
       style={styles.root}
-      keyboardVerticalOffset={0}
     >
       <View style={styles.chrome}>
         <View style={styles.topBar}>

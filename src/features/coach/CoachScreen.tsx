@@ -214,7 +214,6 @@ export function CoachScreen({
     <KeyboardAvoidingContainer
       testID="ralf-conversation"
       style={styles.root}
-      keyboardVerticalOffset={0}
     >
       <View style={styles.header}>
         <MotionPressable
