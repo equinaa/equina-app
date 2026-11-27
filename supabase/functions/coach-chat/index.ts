@@ -2,6 +2,7 @@ import { z } from "npm:zod@3.24.1";
 import { coachContextFor } from "../_shared/coach-context.ts";
 import { handleOptions, HttpError, json, readJson, requireMethod, respondToError } from "../_shared/http.ts";
 import { scriptedCoachReply, scriptedReplyUserIds } from "../_shared/coach-scripted-replies.ts";
+import { providerReplyText } from "../_shared/coach-provider-text.ts";
 import {
   crossesSafetyLine,
   healthEscalationReply,
@@ -198,37 +199,9 @@ const providerReply = async (input: {
     }
 
     const payload = await response.json() as Record<string, unknown>;
-    // Anthropic returns { content: [{ type: "text", text }] }. Its usage field
-    // already uses input_tokens/output_tokens, so the accounting below needs no
-    // change.
-    const anthropicText = Array.isArray(payload.content)
-      ? payload.content.flatMap((part) =>
-        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
-          ? [(part as { text: string }).text]
-          : []
-      ).join("\n")
-      : "";
-    const outputText = anthropicText
-      ? anthropicText
-      : typeof payload.output_text === "string"
-      ? payload.output_text
-      : Array.isArray(payload.output)
-      ? payload.output.flatMap((item) => {
-        if (!item || typeof item !== "object") return [];
-        const content = (item as { content?: unknown }).content;
-        if (!Array.isArray(content)) return [];
-        return content.flatMap((part) =>
-          part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
-            ? [(part as { text: string }).text]
-            : []
-        );
-      }).join("\n")
-      : Array.isArray(payload.choices) &&
-          payload.choices[0] &&
-          typeof payload.choices[0] === "object" &&
-          typeof (payload.choices[0] as { message?: { content?: unknown } }).message?.content === "string"
-      ? String((payload.choices[0] as { message: { content: string } }).message.content)
-      : "";
+    // Anthropic's usage field already uses input_tokens/output_tokens, so the
+    // accounting below reads either provider without a change.
+    const outputText = providerReplyText(payload);
     const text = providerTextSchema.parse(outputText);
     const usage = payload.usage && typeof payload.usage === "object"
       ? payload.usage as Record<string, unknown>
