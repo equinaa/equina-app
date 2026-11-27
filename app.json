@@ -63,16 +63,16 @@
         "usesNonExemptEncryption": false
       },
       "splash": {
-        "backgroundColor": "#161512",
+        "backgroundColor": "#4E301B",
         "image": "./assets/splash.png"
       }
     },
     "android": {
       "package": "com.equina.mobile",
       "softwareKeyboardLayoutMode": "resize",
-      "backgroundColor": "#161512",
+      "backgroundColor": "#4E301B",
       "splash": {
-        "backgroundColor": "#161512"
+        "backgroundColor": "#4E301B"
       },
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

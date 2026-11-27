@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { equinaTheme } from "../src/ui/theme/theme";
+import { LAUNCH_BROWN } from "../src/ui/launch/launch-look";
 
 // The team builds and the store builds are the "preview" profile (an internal
 // APK or ad hoc build) and the "production" profile (TestFlight and Google Play)
@@ -204,18 +204,24 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     );
   }
 
-  // A dark launch on both platforms, in the app's own ink.
-  const { ink } = equinaTheme.colors;
-  assert.equal(ios?.splash?.backgroundColor, ink);
-  assert.equal(android?.splash?.backgroundColor, ink);
-  assert.equal(android?.backgroundColor, ink, "The window behind React is dark too, from the launch screen until the first frame.");
+  // The launch is the icon's brown with the horse symbol, the same ground the React launch curtain
+  // (src/ui/launch) carries on, so the system's launch screen hands over to it without a seam.
+  assert.equal(ios?.splash?.backgroundColor, LAUNCH_BROWN);
+  assert.equal(android?.splash?.backgroundColor, LAUNCH_BROWN);
+  assert.equal(android?.backgroundColor, LAUNCH_BROWN, "The window behind React is the launch brown too, until the curtain's first frame.");
   assert.ok(
     ios?.splash?.image && existsSync(join(root, ios.splash.image)),
     "Without an image, SDK 55 leaves the iOS launch screen on the system colour and ignores the background colour."
   );
+  // iOS fits the launch image to the screen (aspect fit, centred): a square the screen's width with the
+  // symbol at LAUNCH_MARK_FRACTION of it puts the symbol where the curtain draws it.
+  const splashHeader = readFileSync(join(root, String(ios?.splash?.image))).subarray(0, 26);
+  assert.equal(splashHeader.readUInt32BE(16), splashHeader.readUInt32BE(20), "The launch image is square.");
+  assert.ok(splashHeader.readUInt32BE(16) >= 1290, "The launch image is sharp at the widest phone's 3x width.");
+  assert.ok(splashHeader[25] === 6, "The launch image is transparent around the symbol, over the brown.");
 }
 
-// The icons: the horse symbol from the Equina logo (ivory head in the dark crescent) on saddle brown.
+// The icons: the horse symbol from the Equina logo as a medal (brass rim, dark enamel, raised ivory head) on saddle brown.
 {
   const { icon, android, plugins = [] } = appJson.expo;
   const notifications = plugins.find((entry) => Array.isArray(entry) && entry[0] === "expo-notifications");
