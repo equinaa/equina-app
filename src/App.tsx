@@ -154,6 +154,7 @@ import { localDayOf, localToday, startOfPreviousMonth } from "./domain/local-day
 import { activitiesByDay } from "./domain/activity-calendar";
 import { ActivityCalendarScreen } from "./features/calendar/ActivityCalendarScreen";
 import { HomeWeekStrip } from "./features/calendar/HomeWeekStrip";
+import { RalfMedal } from "./features/coach/RalfMedal";
 import { usePlannedActivities } from "./features/calendar/usePlannedActivities";
 import { syncPlannedReminders } from "./features/calendar/planned-reminders";
 import { plannedReminders } from "./features/calendar/planned-schedule";
@@ -3713,8 +3714,6 @@ function EquinaApp() {
 
 // Ralf in a tab's header: a word, not just an icon, because riders look for
 // him by name.
-const ralfMedal = require("../assets/ralf/ralf-medal.png");
-
 /** Ralf as a medal, the app icon's treatment with his sparkle, a green dot for online, and his name. */
 function RalfButton({ onPress }: { onPress: () => void }) {
   return (
@@ -3726,10 +3725,7 @@ function RalfButton({ onPress }: { onPress: () => void }) {
       onPress={onPress}
       style={styles.ralfButton}
     >
-      <View style={styles.ralfMedal}>
-        <Image source={ralfMedal} style={styles.ralfMedalImage} accessibilityIgnoresInvertColors />
-        <View style={styles.ralfOnline} />
-      </View>
+      <RalfMedal size={36} />
       <Text style={styles.ralfButtonText}>{equinaCoach.name}</Text>
     </MotionPressable>
   );
@@ -8719,26 +8715,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     backgroundColor: equinaTheme.material.quiet
-  },
-  ralfMedal: {
-    width: 36,
-    height: 36
-  },
-  ralfMedalImage: {
-    width: 36,
-    height: 36
-  },
-  ralfOnline: {
-    // Online: Ralf answers any time.
-    position: "absolute",
-    right: -1,
-    bottom: -1,
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    backgroundColor: "#3FBF7F",
-    borderWidth: 2,
-    borderColor: equinaTheme.surfaces.frame
   },
   ralfButtonText: {
     color: equinaTheme.text.primary,
