@@ -42,7 +42,7 @@ const appJson = JSON.parse(readFileSync(join(root, "app.json"), "utf8")) as {
       versionCode?: number;
       backgroundColor?: string;
       splash?: { backgroundColor?: string };
-      adaptiveIcon?: { foregroundImage?: string; backgroundColor?: string };
+      adaptiveIcon?: { foregroundImage?: string; backgroundImage?: string; monochromeImage?: string; backgroundColor?: string };
       blockedPermissions?: string[];
     };
   };
@@ -215,7 +215,7 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   );
 }
 
-// The icons, whoever draws them. Today they are provisional: a plain E, ivory on ink.
+// The icons: the horse symbol from the Equina logo (ivory head in the dark crescent) on saddle brown.
 {
   const { icon, android, plugins = [] } = appJson.expo;
   const notifications = plugins.find((entry) => Array.isArray(entry) && entry[0] === "expo-notifications");
@@ -242,7 +242,17 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     { width: 1024, height: 1024, alpha: true },
     "The Android foreground is 1024 x 1024 on a transparent ground, with the mark inside the middle two thirds."
   );
-  assert.equal(android?.adaptiveIcon?.backgroundColor, equinaTheme.colors.ink, "Behind the foreground, the app's ink.");
+  assert.deepEqual(
+    png(android?.adaptiveIcon?.backgroundImage, "the Android adaptive icon background"),
+    { width: 1024, height: 1024, alpha: false },
+    "Behind the foreground, the same brown ground as the iOS icon, opaque."
+  );
+  assert.match(String(android?.adaptiveIcon?.backgroundColor), /^#[0-9A-F]{6}$/i, "A brown fallback colour, for launchers that skip the image.");
+  assert.deepEqual(
+    png(android?.adaptiveIcon?.monochromeImage, "the Android themed (monochrome) icon"),
+    { width: 1024, height: 1024, alpha: true },
+    "Android 13 themed icons tint one shape: the crescent, on transparent."
+  );
   const glyph = png(notificationIcon, "the Android notification icon");
   assert.ok(glyph.alpha && glyph.width === glyph.height && glyph.width >= 96, "The notification icon is a white shape on transparent, 96 px or more.");
 }
