@@ -463,7 +463,7 @@ const unwrap = (condition: string) =>
   const sheets = [...equinaApp.matchAll(/\bvisible=\{/g)].map((match) =>
     enclosed(equinaApp, (match.index ?? 0) + "visible=".length)
   );
-  assert.equal(sheets.length, 8, "EquinaApp draws a sheet more or less than before: recheck modalSheetOpen.");
+  assert.equal(sheets.length, 9, "EquinaApp draws a sheet more or less than before: recheck modalSheetOpen.");
   // The plan offer is drawn on a condition instead of taking visible.
   const offer = equinaApp.match(/\{([^{}?]+?) \? \(\s*<PlanOfferScreen\b/)?.[1];
   assert.ok(offer, "The plan offer is no longer drawn where it was.");

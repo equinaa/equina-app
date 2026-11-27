@@ -1,3 +1,4 @@
+import { logStateOn } from "../../domain/activity-calendar";
 import type { RidePhaseEntry } from "../../backend";
 import { localDayOf } from "../../domain/local-day";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
@@ -436,7 +437,11 @@ export const formatActivityTime = (minutes: number) =>
 export const activityProblem = (draft: ActivityDraft, now: number) => {
   const phases = ridePlanProblem(draft.plan.phases);
   if (phases) return phases;
-  if (!activityDays(now).includes(draft.day)) return `Activities can be added up to ${activityWindowDays - 1} days back.`;
+  // The chips offer the last week; the calendar can pick any day of the
+  // last month, which is how far back the server takes a logged activity.
+  const when = logStateOn(draft.day, localDayOf(now) as string);
+  if (when === "future") return "That day hasn't come yet. Pick today or a day before.";
+  if (when === "tooOld") return "Activities can be added up to a month back.";
   if (!activityTimeExists(draft.day, draft.startMinutes)) return "The clocks went forward at that time. Pick another start time.";
   const length = plannedMinutes(draft.plan.phases) * 60_000;
   if (atLocalDay(draft.day).getTime() + length > now) return "That can't have finished today yet. Pick an earlier day.";

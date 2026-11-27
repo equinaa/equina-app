@@ -89,8 +89,12 @@ const draft = (patch: Partial<ActivityDraft> = {}): ActivityDraft => ({ day: "20
     /hasn't finished yet/,
     "A training that would still be going on now cannot be logged."
   );
-  assert.match(activityProblem(draft({ day: "2026-10-18" }), now) ?? "", /up to 6 days back/, "Eight days ago is outside the window.");
-  assert.match(activityProblem(draft({ day: "2026-10-26" }), now) ?? "", /up to 6 days back/, "Tomorrow is not a day to log.");
+  // The chips offer the last week; the calendar reaches a month back, which
+  // is what the server takes.
+  assert.equal(activityProblem(draft({ day: "2026-10-18" }), now), null, "Eight days ago, picked in the calendar, can be saved.");
+  assert.equal(activityProblem(draft({ day: "2026-09-25" }), now), null, "Thirty days back is the oldest day.");
+  assert.match(activityProblem(draft({ day: "2026-09-24" }), now) ?? "", /up to a month back/, "Thirty-one days back is outside the window.");
+  assert.match(activityProblem(draft({ day: "2026-10-26" }), now) ?? "", /hasn't come yet/, "Tomorrow is not a day to log.");
   assert.match(
     activityProblem(draft({ plan: { ...plan, phases: [{ id: "a", title: " ", detail: "", minutes: 10 }] } }), now) ?? "",
     /Give every phase a name/,

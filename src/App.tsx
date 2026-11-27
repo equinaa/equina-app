@@ -150,7 +150,10 @@ import type { ClubSpaceImageKey } from "./features/club/club-groups";
 import { useClub } from "./features/club/useClub";
 import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
-import { localDayOf, localToday } from "./domain/local-day";
+import { localDayOf, localToday, startOfPreviousMonth } from "./domain/local-day";
+import { activitiesByDay } from "./domain/activity-calendar";
+import { ActivityCalendarScreen } from "./features/calendar/ActivityCalendarScreen";
+import { HomeWeekStrip } from "./features/calendar/HomeWeekStrip";
 import type { RideEntry } from "./backend/contracts";
 import { buildCareSchedule, completionFor, recordProviderLine, type CareItem } from "./domain/care-schedule";
 import { disciplineLabel, horseSexLabel } from "./domain/labels";
@@ -957,6 +960,10 @@ function EquinaApp() {
   // Set on the setup sheet; its Start training starts the clock.
   const [rideSetupOpen, setRideSetupOpen] = useState(false);
   const [addActivityOpen, setAddActivityOpen] = useState(false);
+  // The day picked in the calendar for Add activity; none from Home's button.
+  const [addActivityDay, setAddActivityDay] = useState<string | undefined>(undefined);
+  // The calendar, open on a day.
+  const [calendarDay, setCalendarDay] = useState<string | null>(null);
   const [rideJournalOpen, setRideJournalOpen] = useState(false);
   const [deletingRideId, setDeletingRideId] = useState("");
   const [horseSwitcherOpen, setHorseSwitcherOpen] = useState(false);
@@ -1086,6 +1093,8 @@ function EquinaApp() {
     setRideRun(null);
     setRideSetupOpen(false);
     setAddActivityOpen(false);
+    setAddActivityDay(undefined);
+    setCalendarDay(null);
     setRideJournalOpen(false);
     setHorseSwitcherOpen(false);
     setHorseCreatorOpen(false);
@@ -1201,6 +1210,8 @@ function EquinaApp() {
     enabled: ridePersistence
   });
   const horseNames = Object.fromEntries(horseRecords.horses.map((record) => [record.id, record.name]));
+  // The days with an activity, for the week at the top of Home.
+  const journalActivityDays = useMemo(() => new Set(activitiesByDay(rideJournal.entries).keys()), [rideJournal.entries]);
   const ownHorses = switchableHorses(horseRecords.horses, equinaSession.account?.userId);
   // Each horse has its own training week and streak: Home reads its horse's.
   // A horse shared with the rider is not in their plan (inPlan false).
@@ -2740,6 +2751,7 @@ function EquinaApp() {
           modalSheetOpen:
             rideSetupOpen ||
             addActivityOpen ||
+            calendarDay !== null ||
             horseSwitcherOpen ||
             horseCreatorOpen ||
             streakOpen ||
@@ -3025,8 +3037,11 @@ function EquinaApp() {
                 onToggleRide={startRide}
                 onAddActivity={ridePersistence && !rideActive ? () => {
                   rideJournal.clearError();
+                  setAddActivityDay(undefined);
                   setAddActivityOpen(true);
                 } : undefined}
+                activityDays={journalActivityDays}
+                onOpenCalendar={ridePersistence ? (day) => setCalendarDay(day) : undefined}
                 onOpenHorses={horseRecords.horsesListed && (ownHorses.length > 1 || horseRecords.canManageHorse) ? () => {
                   setHorseSwitchError("");
                   setHorseSwitcherOpen(true);
@@ -3299,6 +3314,7 @@ function EquinaApp() {
           trainingType={activityDraft.trainingType}
           phases={activityDraft.phases}
           memory={rideSetupMemory.memory}
+          day={addActivityDay}
           onLog={logActivity}
           onDismiss={() => setAddActivityOpen(false)}
         />
@@ -3345,6 +3361,25 @@ function EquinaApp() {
             setTrainingPlanOpen(true);
           }}
           onClose={() => setStreakOpen(false)}
+        />
+
+        <ActivityCalendarScreen
+          visible={calendarDay !== null}
+          today={localToday()}
+          initialDay={calendarDay ?? localToday()}
+          backend={equinaSession.backend}
+          enabled={ridePersistence}
+          journal={rideJournal.entries}
+          journalSince={startOfPreviousMonth()}
+          horseNames={horseNames}
+          canAdd={ridePersistence && !rideActive}
+          onAddActivity={(day) => {
+            setCalendarDay(null);
+            rideJournal.clearError();
+            setAddActivityDay(day);
+            setAddActivityOpen(true);
+          }}
+          onClose={() => setCalendarDay(null)}
         />
 
         <TrainingPlanSheet
@@ -3872,6 +3907,8 @@ function HomeScreen({
   heroPhotoPending,
   onToggleRide,
   onAddActivity,
+  activityDays,
+  onOpenCalendar,
   onOpenJournal,
   onOpenHorses,
   trainingStreak,
@@ -3911,6 +3948,10 @@ function HomeScreen({
   heroPhotoPending: boolean;
   /** Logs a training done without the clock. Absent where rides are not saved. */
   onAddActivity?: () => void;
+  /** The days with an activity: dots in the week at the top. */
+  activityDays: ReadonlySet<string>;
+  /** Opens the calendar on a day. Absent where rides are not saved. */
+  onOpenCalendar?: (day: string) => void;
   onOpenJournal?: () => void;
   /** Opens the rider's horses to pick another or add one. */
   onOpenHorses?: () => void;
@@ -4288,6 +4329,11 @@ function HomeScreen({
       </Animated.View>
 
       <Animated.View style={[styles.homeDetails, detailsStyle]}>
+        {/* Right under the hero: this week, each day opening the calendar. */}
+        {onOpenCalendar ? (
+          <HomeWeekStrip today={localToday()} activityDays={activityDays} onOpenDay={onOpenCalendar} />
+        ) : null}
+
         {/* Under Start ride: a training done without the clock still
             belongs in the journal. */}
         {onAddActivity ? (

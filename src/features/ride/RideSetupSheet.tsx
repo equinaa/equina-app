@@ -4,6 +4,7 @@ import { ChevronUp, Minus, Plus, RotateCcw, X } from "lucide-react-native";
 import type { RideMood } from "./RideExperience";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { cuePhaseChange, prepareRideCues, rideAlertsAllowed } from "./ride-cues";
+import { shortDayWithMonth } from "../../domain/activity-calendar";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
@@ -11,6 +12,7 @@ import {
   activityDays,
   activityProblem,
   activityTimeExists,
+  activityWindowDays,
   addPhase,
   defaultActivityStart,
   defaultRidePhases,
@@ -50,6 +52,10 @@ const dayLabel = (day: string, index: number) => {
   return `${weekday} ${date}`;
 };
 
+/** The last week by name; an older day picked in the calendar says its month. */
+const chipLabel = (day: string, index: number) =>
+  index < activityWindowDays ? dayLabel(day, index) : shortDayWithMonth(day);
+
 // The list is rebuilt on every render of the app, so horses compare by who
 // they are, not by object. A horse from the demo has a name and no id.
 const sameHorse = (left?: RideSetupHorse, right?: RideSetupHorse) =>
@@ -81,6 +87,7 @@ export function RideSetupSheet({
   trainingType,
   phases: initialPhases,
   memory,
+  day: requestedDay,
   onContinue,
   onLog,
   onDismiss
@@ -94,6 +101,12 @@ export function RideSetupSheet({
   /** The phases to open with: the last ones for this training, or the yard's. */
   phases: RidePhasePlan[];
   memory: RideSetupMemory | null;
+  /**
+   * Add activity only: the day picked in the calendar, any of the last month.
+   * Without one the sheet opens on the latest time the training could have
+   * ended by now.
+   */
+  day?: string;
   onContinue?: (plan: RidePlan) => void;
   /** Saves a logged activity. The sheet stays open, with what was entered, if it fails. */
   onLog?: (activity: LoggedActivity) => Promise<void>;
@@ -131,7 +144,7 @@ export function RideSetupSheet({
     setEdited(false);
     setAddedId(null);
     const opening = defaultActivityStart(Date.now(), plannedMinutes(initialPhases));
-    setDay(opening.day);
+    setDay(requestedDay ?? opening.day);
     setStartMinutes(opening.startMinutes);
     setMood(undefined);
     setNote("");
@@ -162,7 +175,9 @@ export function RideSetupSheet({
   };
 
   const now = Date.now();
-  const days = logging ? activityDays(now) : [];
+  const lastWeek = logging ? activityDays(now) : [];
+  // A day from the calendar older than the last week gets a chip of its own, at the end.
+  const days = logging && day && !lastWeek.includes(day) ? [...lastWeek, day] : lastWeek;
   const plan: RidePlan = {
     ...(horse?.id ? { horseId: horse.id } : {}),
     horseName: horse?.name ?? "",
@@ -245,7 +260,7 @@ export function RideSetupSheet({
                     key={option}
                     testID={`add-activity-day-${index}`}
                     accessibilityRole="radio"
-                    accessibilityLabel={dayLabel(option, index)}
+                    accessibilityLabel={chipLabel(option, index)}
                     accessibilityState={{ selected }}
                     pressedScale={0.97}
                     onPress={() => {
@@ -254,7 +269,7 @@ export function RideSetupSheet({
                     }}
                     style={[styles.chip, selected && styles.chipSelected]}
                   >
-                    <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{dayLabel(option, index)}</Text>
+                    <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{chipLabel(option, index)}</Text>
                   </MotionPressable>
                 );
               })}

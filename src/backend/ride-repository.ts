@@ -78,6 +78,17 @@ export class RideRepository {
   }
 
   /**
+   * Every ride that started from `from` up to (not including) `to`, oldest
+   * first: a month of the calendar older than the journal's page.
+   */
+  async listStartedBetween(from: string, to: string): Promise<RideEntry[]> {
+    const { data, error } = await this.client.from("ride_entries")
+      .select("*").gte("started_at", from).lt("started_at", to).order("started_at", { ascending: true }).limit(1000);
+    if (error) throw backendError(error, "That month's activities could not be loaded.");
+    return (data ?? []).map((row) => mapRideEntry(row as Record<string, unknown>));
+  }
+
+  /**
    * When every ride ended and on which horse, newest first, for the streak:
    * it counts back through the rider's whole history, not the page the
    * journal shows, and each horse has its own. Two small columns, read a
