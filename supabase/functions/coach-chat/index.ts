@@ -4,9 +4,10 @@ import { handleOptions, HttpError, json, readJson, requireMethod, respondToError
 import { scriptedCoachReply, scriptedReplyUserIds } from "../_shared/coach-scripted-replies.ts";
 import { providerReplyText } from "../_shared/coach-provider-text.ts";
 import {
+  assessHealthConcern,
   crossesSafetyLine,
   healthEscalationReply,
-  mentionsHealthConcern,
+  providerReviewLanguage,
   providerReviewReply,
   REPLY_LANGUAGE_RULE,
 } from "../_shared/coach-safety.ts";
@@ -434,9 +435,10 @@ Deno.serve(async (request) => {
       durationMs?: number;
     } = {};
 
-    if (mentionsHealthConcern(input.message)) {
+    const health = assessHealthConcern(input.message);
+    if (health.concern) {
       safetyCategory = "health_escalation";
-      responseText = healthEscalationReply(input.message);
+      responseText = healthEscalationReply(health.language);
       await admin.from("coach_safety_events").insert({
         user_id: user.id,
         conversation_id: conversation.id,
@@ -496,9 +498,9 @@ Deno.serve(async (request) => {
         throw providerError;
       }
       responseText = operation.text ?? "";
-      if (crossesSafetyLine(responseText)) {
+      if (crossesSafetyLine(responseText, input.message)) {
         safetyCategory = "provider_review";
-        responseText = providerReviewReply(input.message);
+        responseText = providerReviewReply(providerReviewLanguage(responseText, input.message));
         await admin.from("coach_safety_events").insert({
           user_id: user.id,
           conversation_id: conversation.id,

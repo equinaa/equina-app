@@ -75,7 +75,7 @@ const manualEntry: RideEntry = {
 // never be what trips it. The filter lives in _shared, so the test runs the
 // real one in every language it reads.
 const coachChat = readFileSync(join(process.cwd(), "supabase/functions/coach-chat/index.ts"), "utf8");
-assert.ok(coachChat.includes("mentionsHealthConcern(input.message)"));
+assert.ok(coachChat.includes("assessHealthConcern(input.message)"));
 assert.ok(mentionsHealthConcern("He felt lame behind"));
 assert.match(coachChat, /message: z\.string\(\)\.trim\(\)\.min\(1\)\.max\(3000\)/);
 assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
@@ -289,9 +289,11 @@ assert.equal(rideReviewFactsFromEntry({ ...liveEntry, trainingType: undefined, d
 }
 
 // Every training the app offers, with its usual phases, timed and logged,
-// with every feeling: the fixed wording never reads as a health question.
+// with every feeling, for horses whose names are words in another language
+// Ralf reads: the fixed wording never reads as a health question.
 const neutral: string[] = [];
-for (const training of rideTrainingTypes) {
+const horseNames = ["Test", "Dolores", "Seb", "Sebe", "Rana", "Rani", "Laz", "Dor", "Dores", "Remedios", "Doze", "Santa", "Coja"];
+for (const horseName of horseNames) for (const training of rideTrainingTypes) {
   const phases = defaultRidePhases(training).map((phase, index) => ({
     title: phase.title,
     detail: phase.detail,
@@ -303,11 +305,11 @@ for (const training of rideTrainingTypes) {
       neutral.push(rideReviewPrompt(rideReviewFactsFromEntry({
         ...liveEntry, trainingType: training.id, focus: training.label, phases, mood, source,
         completedPhases: 2, totalPhases: phases.length
-      }, "Test")));
+      }, horseName)));
     }
   }
 }
-assert.equal(neutral.length, rideTrainingTypes.length * 6);
+assert.equal(neutral.length, horseNames.length * rideTrainingTypes.length * 6);
 assert.deepEqual(neutral.filter((prompt) => mentionsHealthConcern(prompt)), []);
 // The rider's own words are still screened like any message to Ralf.
 assert.ok(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." }))));
