@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mentionsHealthConcern } from "../supabase/functions/_shared/coach-safety";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RideEntry } from "../src/backend";
@@ -71,12 +72,11 @@ const manualEntry: RideEntry = {
 
 // The filter coach-chat runs on the whole message. A hit answers with the
 // fixed "contact your veterinarian" reply, so the template's own words must
-// never be what trips it. Read from the function, which Node cannot import.
+// never be what trips it. The filter lives in _shared, so the test runs the
+// real one in every language it reads.
 const coachChat = readFileSync(join(process.cwd(), "supabase/functions/coach-chat/index.ts"), "utf8");
-const healthSource = /const healthPattern = \/(.+)\/i;/.exec(coachChat)?.[1];
-assert.ok(healthSource, "coach-chat still declares healthPattern as a single /.../i literal");
-const healthPattern = new RegExp(healthSource, "i");
-assert.match("He felt lame behind", healthPattern);
+assert.ok(coachChat.includes("mentionsHealthConcern(input.message)"));
+assert.ok(mentionsHealthConcern("He felt lame behind"));
 assert.match(coachChat, /message: z\.string\(\)\.trim\(\)\.min\(1\)\.max\(3000\)/);
 assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
 
@@ -100,7 +100,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   assert.ok(!prompt.includes("My note"));
   assert.ok(!prompt.includes("by hand"));
   assert.ok(!prompt.includes("—"));
-  assert.doesNotMatch(prompt, healthPattern);
+  assert.ok(!mentionsHealthConcern(prompt), prompt);
   assert.ok(prompt.length < RIDE_REVIEW_PROMPT_LIMIT);
 }
 
@@ -118,7 +118,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   assert.ok(!prompt.includes("planned"));
   assert.ok(!prompt.includes("felt"));
   assert.ok(prompt.endsWith(`\n\n${question}`));
-  assert.doesNotMatch(prompt, healthPattern);
+  assert.ok(!mentionsHealthConcern(prompt), prompt);
 }
 
 {
@@ -308,9 +308,9 @@ for (const training of rideTrainingTypes) {
   }
 }
 assert.equal(neutral.length, rideTrainingTypes.length * 6);
-assert.deepEqual(neutral.filter((prompt) => healthPattern.test(prompt)), []);
+assert.deepEqual(neutral.filter((prompt) => mentionsHealthConcern(prompt)), []);
 // The rider's own words are still screened like any message to Ralf.
-assert.match(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." })), healthPattern);
+assert.ok(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." }))));
 
 assert.equal(rideMinutesLabel(0), "<1 min");
 assert.equal(rideMinutesLabel(59), "<1 min");
