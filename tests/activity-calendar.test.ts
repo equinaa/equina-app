@@ -113,8 +113,12 @@ import {
   assert.match(sheet, /<WeekDayPicker value=\{day\} today=\{localDayOf\(now\) as string\} onChange=\{setDay\} \/>/);
   assert.doesNotMatch(sheet, /add-activity-day-/);
   const picker = readFileSync(join(process.cwd(), "src/features/calendar/WeekDayPicker.tsx"), "utf8");
-  assert.match(picker, /const canGoBack = addDays\(monday, -1\) >= oldest;/, "Back while the week before has a day to pick.");
-  assert.match(picker, /const canGoForward = addDays\(monday, 7\) <= today;/, "Forward while the next week has started.");
+  assert.match(picker, /const canGoBack = wholeMonth \? month > monthOf\(oldest\) : addDays\(monday, -1\) >= oldest;/, "Back while the week or month before has a day to pick.");
+  assert.match(picker, /const canGoForward = wholeMonth \? month < monthOf\(today\) : addDays\(monday, 7\) <= today;/, "Forward while the next week or month has started.");
+  // The calendar button opens the whole month; a day picked there goes back to its week.
+  assert.match(picker, /accessibilityLabel=\{wholeMonth \? "Show the week" : "Show the whole month"\}/);
+  assert.match(picker, /onChange\(day\);\s+\/\/ A day picked from the month goes back to its week\.\s+if \(wholeMonth\) setWholeMonth\(false\);/);
+  assert.match(picker, /monthGrid\(month\)\.map/);
   assert.match(picker, /const open = logStateOn\(day, today\) === "open";/);
   assert.match(picker, /disabled=\{!open\}/, "A day outside the window cannot be picked.");
   // The sheet's day is empty until it opens: the picker shows today's week, never a date out of bounds.

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { ChevronLeft, ChevronRight } from "lucide-react-native";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react-native";
 import { dayHeading, firstLoggableDay, logStateOn, weekOf } from "../../domain/activity-calendar";
-import { fullDayLabel } from "../../domain/calendar-month";
+import { addMonths, fullDayLabel, monthGrid, monthLabel, monthOf } from "../../domain/calendar-month";
 import { addDays } from "../../domain/training-streak";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
@@ -14,8 +14,9 @@ const DAY_TEXT_SCALE = 1.25;
 
 /**
  * When an activity happened, picked from a week: the week of the day chosen
- * (in the calendar, or today), with arrows to the weeks around it. Only the
- * days an activity can be added for are pickable: today and the 30 before.
+ * (in the calendar, or today), with arrows to the weeks around it. The
+ * calendar button opens the whole month instead, for a day further off. Only
+ * the days an activity can be added for are pickable: today and the 29 before.
  */
 export function WeekDayPicker({
   value,
@@ -33,19 +34,72 @@ export function WeekDayPicker({
   // The sheet sets its day as it opens; until then (an empty day) the week is today's.
   const shown = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : today;
   const [monday, setMonday] = useState(weekOf(shown)[0] ?? shown);
-  // A day picked from outside (the sheet opening on another day) brings its week.
+  const [month, setMonth] = useState(monthOf(shown));
+  const [wholeMonth, setWholeMonth] = useState(false);
+  // A day picked from outside (the sheet opening on another day) brings its week and month.
   useEffect(() => {
     setMonday(weekOf(shown)[0] ?? shown);
+    setMonth(monthOf(shown));
   }, [shown]);
 
-  const week = weekOf(monday);
   const oldest = firstLoggableDay(today);
-  const canGoBack = addDays(monday, -1) >= oldest;
-  const canGoForward = addDays(monday, 7) <= today;
+  const canGoBack = wholeMonth ? month > monthOf(oldest) : addDays(monday, -1) >= oldest;
+  const canGoForward = wholeMonth ? month < monthOf(today) : addDays(monday, 7) <= today;
 
   const move = (by: number) => {
     selectionHaptic();
-    setMonday((current) => addDays(current, by * 7));
+    if (wholeMonth) setMonth((current) => addMonths(current, by));
+    else setMonday((current) => addDays(current, by * 7));
+  };
+
+  const toggleMonth = () => {
+    selectionHaptic();
+    // Each opens on the day picked.
+    setMonday(weekOf(shown)[0] ?? shown);
+    setMonth(monthOf(shown));
+    setWholeMonth((current) => !current);
+  };
+
+  const cell = (day: string, index: number) => {
+    const selected = day === value;
+    const isToday = day === today;
+    const open = logStateOn(day, today) === "open";
+    return (
+      <Pressable
+        key={day}
+        testID={`${testID}-day-${wholeMonth ? day : index}`}
+        accessibilityRole="radio"
+        accessibilityLabel={`${fullDayLabel(day)}${isToday ? ", today" : ""}`}
+        accessibilityState={{ selected, disabled: !open }}
+        disabled={!open}
+        onPress={() => {
+          if (!selected) selectionHaptic();
+          onChange(day);
+          // A day picked from the month goes back to its week.
+          if (wholeMonth) setWholeMonth(false);
+        }}
+        style={({ pressed }) => [styles.day, pressed && styles.pressed]}
+      >
+        {wholeMonth ? null : (
+          <Text maxFontSizeMultiplier={DAY_TEXT_SCALE} style={[styles.weekday, !open && styles.textOff]}>
+            {weekdayShort[index]}
+          </Text>
+        )}
+        <View style={[styles.date, !open && styles.dateOff, isToday && styles.dateToday, selected && styles.dateSelected]}>
+          <Text
+            maxFontSizeMultiplier={DAY_TEXT_SCALE}
+            style={[
+              styles.dateText,
+              !open && styles.textOff,
+              isToday && styles.dateTextToday,
+              selected && styles.dateTextSelected
+            ]}
+          >
+            {Number(day.slice(8, 10))}
+          </Text>
+        </View>
+      </Pressable>
+    );
   };
 
   return (
@@ -56,9 +110,20 @@ export function WeekDayPicker({
         </Text>
         <View style={styles.arrows}>
           <MotionPressable
+            testID={`${testID}-month`}
+            accessibilityRole="button"
+            accessibilityLabel={wholeMonth ? "Show the week" : "Show the whole month"}
+            accessibilityState={{ expanded: wholeMonth }}
+            hitSlop={6}
+            onPress={toggleMonth}
+            style={[styles.arrow, wholeMonth && styles.arrowOn]}
+          >
+            <CalendarDays size={17} color={wholeMonth ? equinaTheme.colors.ink : equinaTheme.colors.brass} />
+          </MotionPressable>
+          <MotionPressable
             testID={`${testID}-previous`}
             accessibilityRole="button"
-            accessibilityLabel="Previous week"
+            accessibilityLabel={wholeMonth ? "Previous month" : "Previous week"}
             accessibilityState={{ disabled: !canGoBack }}
             disabled={!canGoBack}
             hitSlop={6}
@@ -70,7 +135,7 @@ export function WeekDayPicker({
           <MotionPressable
             testID={`${testID}-next`}
             accessibilityRole="button"
-            accessibilityLabel="Next week"
+            accessibilityLabel={wholeMonth ? "Next month" : "Next week"}
             accessibilityState={{ disabled: !canGoForward }}
             disabled={!canGoForward}
             hitSlop={6}
@@ -81,45 +146,27 @@ export function WeekDayPicker({
           </MotionPressable>
         </View>
       </View>
-      <View accessibilityRole="radiogroup" style={styles.days}>
-        {week.map((day, index) => {
-          const selected = day === value;
-          const isToday = day === today;
-          const open = logStateOn(day, today) === "open";
-          return (
-            <Pressable
-              key={day}
-              testID={`${testID}-day-${index}`}
-              accessibilityRole="radio"
-              accessibilityLabel={`${fullDayLabel(day)}${isToday ? ", today" : ""}`}
-              accessibilityState={{ selected, disabled: !open }}
-              disabled={!open}
-              onPress={() => {
-                if (!selected) selectionHaptic();
-                onChange(day);
-              }}
-              style={({ pressed }) => [styles.day, pressed && styles.pressed]}
-            >
-              <Text maxFontSizeMultiplier={DAY_TEXT_SCALE} style={[styles.weekday, !open && styles.textOff]}>
-                {weekdayShort[index]}
+      {wholeMonth ? (
+        <View accessibilityRole="radiogroup" testID={`${testID}-month-grid`}>
+          <Text style={styles.monthTitle}>{monthLabel(month)}</Text>
+          <View style={styles.days}>
+            {weekdayShort.map((letter) => (
+              <Text key={letter} maxFontSizeMultiplier={DAY_TEXT_SCALE} style={[styles.weekday, styles.monthLetter]}>
+                {letter}
               </Text>
-              <View style={[styles.date, isToday && styles.dateToday, selected && styles.dateSelected]}>
-                <Text
-                  maxFontSizeMultiplier={DAY_TEXT_SCALE}
-                  style={[
-                    styles.dateText,
-                    !open && styles.textOff,
-                    isToday && styles.dateTextToday,
-                    selected && styles.dateTextSelected
-                  ]}
-                >
-                  {Number(day.slice(8, 10))}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
+            ))}
+          </View>
+          {monthGrid(month).map((row, rowIndex) => (
+            <View key={rowIndex} style={[styles.days, styles.monthRow]}>
+              {row.map((day, column) => (day ? cell(day, column) : <View key={`empty-${column}`} style={styles.day} />))}
+            </View>
+          ))}
+        </View>
+      ) : (
+        <View accessibilityRole="radiogroup" style={styles.days}>
+          {weekOf(monday).map((day, index) => cell(day, index))}
+        </View>
+      )}
     </View>
   );
 }
@@ -155,6 +202,26 @@ const styles = StyleSheet.create({
   },
   arrowOff: {
     opacity: 0.3
+  },
+  arrowOn: {
+    backgroundColor: equinaTheme.colors.brass,
+    borderColor: equinaTheme.colors.brass
+  },
+  monthTitle: {
+    ...equinaTheme.typography.label,
+    color: equinaTheme.text.secondary,
+    textAlign: "center",
+    marginBottom: equinaTheme.spacing.xs
+  },
+  monthLetter: {
+    flex: 1,
+    textAlign: "center"
+  },
+  monthRow: {
+    marginTop: 4
+  },
+  dateOff: {
+    borderColor: "transparent"
   },
   days: {
     flexDirection: "row"
