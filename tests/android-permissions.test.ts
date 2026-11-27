@@ -46,20 +46,18 @@ const pluginOptions = (name: string): Record<string, unknown> => {
 }
 
 {
-  // Photos come from the system picker and nothing records sound. The picker's
-  // two options are sentences now, not false: iOS needs them as purpose strings
-  // (tests/store-build-config.test.ts). With a sentence the plugin asks Android
-  // for the microphone again and no longer blocks the camera, which the picker
-  // library's own manifest declares. expo-audio's own manifest asks for the
-  // microphone as well. So on Android only a blocked permission keeps each out.
-  for (const permission of ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]) {
-    assert.ok(
-      expo.android.blockedPermissions?.includes(permission),
-      `${permission} must stay blocked: the app never uses it, and Google Play would list it.`
-    );
-    assert.ok(!expo.android.permissions?.includes(permission), `${permission} must not be asked for.`);
-  }
-  assert.equal(pluginOptions("expo-audio").recordAudioAndroid, false, "expo-audio must not ask for the microphone either.");
+  // Photos come from the system picker; the camera stays out. The picker's
+  // options are sentences (iOS needs them as purpose strings, see
+  // tests/store-build-config.test.ts), so on Android only a blocked
+  // permission keeps the camera out.
+  assert.ok(expo.android.blockedPermissions?.includes("android.permission.CAMERA"), "The camera stays blocked: the app never uses it.");
+  assert.ok(!expo.android.permissions?.includes("android.permission.CAMERA"), "The camera must not be asked for.");
+  // The microphone is used for one thing (2026-11-27): asking Ralf by voice,
+  // turned into text on the phone. expo-speech-recognition asks for it;
+  // expo-audio still does not, and plays sound only in the foreground.
+  assert.ok(!expo.android.blockedPermissions?.includes("android.permission.RECORD_AUDIO"), "Asking Ralf by voice needs the microphone.");
+  assert.ok(pluginOptions("expo-speech-recognition"), "expo-speech-recognition's plugin declares the microphone and speech recognition.");
+  assert.equal(pluginOptions("expo-audio").recordAudioAndroid, false, "expo-audio does not ask for the microphone itself.");
   // Background playback adds a foreground service, which Google Play asks an app to declare.
   assert.equal(pluginOptions("expo-audio").enableBackgroundPlayback, false, "No foreground service.");
 }

@@ -2,12 +2,14 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   Platform,
+  Pressable,
   StyleSheet,
+  Text,
   TextInput,
   View
 } from "react-native";
-import { ArrowUp } from "lucide-react-native";
-import { actionHaptic } from "../motion/haptics";
+import { ArrowUp, Mic } from "lucide-react-native";
+import { actionHaptic, selectionHaptic } from "../motion/haptics";
 import { MotionPressable } from "../motion/MotionPressable";
 import { equinaTheme } from "../theme/theme";
 
@@ -18,7 +20,8 @@ export function ConversationComposer({
   disabled = false,
   sending = false,
   onChangeText,
-  onSend
+  onSend,
+  voice
 }: {
   testIDPrefix: string;
   value: string;
@@ -27,6 +30,17 @@ export function ConversationComposer({
   sending?: boolean;
   onChangeText: (value: string) => void;
   onSend: () => void;
+  /**
+   * Ask by voice (hold the mic, speak, let go): the words land in the box to
+   * be read before sending. Absent, or not available on this phone: no mic.
+   */
+  voice?: {
+    available: boolean;
+    listening: boolean;
+    hint: string;
+    start: () => void;
+    stop: () => void;
+  };
 }) {
   const [focused, setFocused] = useState(false);
   const canSend = !disabled && !sending && value.trim().length > 0;
@@ -36,9 +50,13 @@ export function ConversationComposer({
     onSend();
   };
 
+  const listening = Boolean(voice?.listening);
   return (
     <View style={styles.dock}>
-      <View style={[styles.composer, focused && styles.composerFocused]}>
+      {voice?.hint && !listening ? (
+        <Text testID={`${testIDPrefix}-voice-hint`} accessibilityLiveRegion="polite" style={styles.hint}>{voice.hint}</Text>
+      ) : null}
+      <View style={[styles.composer, (focused || listening) && styles.composerFocused, listening && styles.composerListening]}>
         <TextInput
           testID={`${testIDPrefix}-input`}
           accessibilityLabel={placeholder}
@@ -49,7 +67,7 @@ export function ConversationComposer({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onSubmitEditing={submit}
-          placeholder={placeholder}
+          placeholder={listening ? "Listening..." : placeholder}
           placeholderTextColor={equinaTheme.text.tertiary}
           returnKeyType="send"
           multiline
@@ -57,6 +75,24 @@ export function ConversationComposer({
           scrollEnabled
           style={[styles.input, Platform.OS === "web" ? styles.webInput : undefined]}
         />
+        {voice?.available ? (
+          <Pressable
+            testID={`${testIDPrefix}-voice`}
+            accessibilityRole="button"
+            accessibilityLabel={listening ? "Listening. Let go to stop" : "Hold to ask by voice"}
+            accessibilityState={{ disabled: disabled || sending, busy: listening }}
+            disabled={disabled || sending}
+            hitSlop={4}
+            onPressIn={() => {
+              selectionHaptic();
+              voice.start();
+            }}
+            onPressOut={() => voice.stop()}
+            style={[styles.send, listening && styles.micListening]}
+          >
+            <Mic size={19} strokeWidth={2.1} color={listening ? equinaTheme.colors.ink : equinaTheme.colors.brass} />
+          </Pressable>
+        ) : null}
         <MotionPressable
           testID={`${testIDPrefix}-send`}
           accessibilityRole="button"
@@ -133,5 +169,18 @@ const styles = StyleSheet.create({
   },
   sendReady: {
     backgroundColor: equinaTheme.colors.brass
+  },
+  composerListening: {
+    borderWidth: 1,
+    borderColor: equinaTheme.colors.brass
+  },
+  micListening: {
+    backgroundColor: equinaTheme.colors.brass
+  },
+  hint: {
+    ...equinaTheme.typography.meta,
+    color: equinaTheme.text.secondary,
+    paddingHorizontal: 4,
+    paddingBottom: 6
   }
 });

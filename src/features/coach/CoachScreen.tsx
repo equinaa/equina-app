@@ -38,6 +38,7 @@ import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
 import { RalfMedal } from "./RalfMedal";
+import { useVoiceInput } from "./useVoiceInput";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { AccountMode } from "../account/account-types";
 import { ralfAiNotice } from "./coach-copy";
@@ -153,6 +154,12 @@ export function CoachScreen({
   onContextChange: (next: CoachConversationContext) => void;
 }) {
   const [draft, setDraft] = useState("");
+  // Ask by voice: what is heard goes into the box, to read before sending.
+  const voice = useVoiceInput({
+    text: draft,
+    onText: setDraft,
+    enabled: controller.connected || controller.demo
+  });
   const [sheet, setSheet] = useState<Sheet>(null);
   const [selectedMessage, setSelectedMessage] = useState<CoachDisplayMessage | null>(null);
   const [contextDraft, setContextDraft] = useState(context);
@@ -363,6 +370,7 @@ export function CoachScreen({
         sending={controller.sending}
         onChangeText={setDraft}
         onSend={() => void submit()}
+        voice={voice}
       />
 
       <CoachSheet
