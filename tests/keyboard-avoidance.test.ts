@@ -353,4 +353,16 @@ for (const site of sites) {
   assert.doesNotMatch(readFileSync(join(root, site), "utf8"), /keyboardVerticalOffset/, `${site} still passes keyboardVerticalOffset.`);
 }
 
+// Onboarding, step 1 (a tester's account creation, 2026-11-27): the keyboard
+// shrinks the scroll view after the focus scroll has run, which left the Name
+// field half under the footer. The view scrolls again when its frame or content
+// changes while a field has focus, read from a ref because that change can land
+// before the focus state does. The return key moves on, like Continue.
+const onboardingSource = readFileSync(join(root, "src/features/onboarding/OnboardingScreen.tsx"), "utf8");
+assert.match(onboardingSource, /onLayout=\{keepFocusedFieldInView\}/);
+assert.match(onboardingSource, /onContentSizeChange=\{keepFocusedFieldInView\}/);
+assert.match(onboardingSource, /if \(fieldFocusedNow\.current\) scrollRef\.current\?\.scrollToEnd\(/);
+assert.match(onboardingSource, /fieldFocusedNow\.current = true;\s+setFieldFocused\(true\);/);
+assert.match(onboardingSource, /testID="onboarding-name"[\s\S]{0,400}onSubmitEditing=\{handleNext\}/);
+
 console.log("Keyboard avoidance (iOS and Android) passed.");
