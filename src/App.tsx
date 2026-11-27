@@ -3130,6 +3130,7 @@ function EquinaApp() {
                 horseRideEntries={homeHorseRides}
                 horseRideName={summaryHorseName}
                 riderName={riderDisplayName}
+                riderPhoto={accountController.snapshot.profile.avatarUrl}
                 arrivingFromOnboarding={onboardingTransitioning}
                 sharedRide={sharedRide}
                 showRecap={lastRideRecapVisible}
@@ -3722,8 +3723,7 @@ function RalfButton({ onPress }: { onPress: () => void }) {
       onPress={onPress}
       style={styles.ralfButton}
     >
-      <Sparkles size={16} color={equinaTheme.colors.brass} strokeWidth={1.9} />
-      <Text style={styles.ralfButtonText}>{equinaCoach.name}</Text>
+      <Sparkles size={20} color={equinaTheme.colors.brass} strokeWidth={1.9} />
     </MotionPressable>
   );
 }
@@ -4010,6 +4010,7 @@ function DockTabItem({
 const shownHeroPhotos = new Set<string>();
 
 function HomeScreen({
+  riderPhoto,
   horse,
   horseLastRide,
   rideEntries,
@@ -4047,6 +4048,8 @@ function HomeScreen({
   onOpenProfile,
   onShareRide
 }: {
+  /** The rider's own photo, when they have one: the avatar shows it instead of initials. */
+  riderPhoto?: string;
   /** Without the rider's latest ride: Home speaks of its horse's own (horseLastRide). */
   horse: Omit<HorseState, "lastRide">;
   /** Home's horse's latest ride, for Up next; for a rider with no horse, their latest ride. */
@@ -4343,6 +4346,21 @@ function HomeScreen({
   return (
     <View style={[styles.screen, styles.homeScreen]}>
       <View style={styles.homeTopBar}>
+        {/* The rider on the left, their greeting beside them; Ralf alone on the right. */}
+        <Pressable
+          testID="profile-button"
+          accessibilityRole="button"
+          accessibilityLabel="Open account"
+          hitSlop={6}
+          style={({ pressed }) => [styles.homeProfileButton, pressed && styles.tabItemPressed]}
+          onPress={onOpenProfile}
+        >
+          {riderPhoto ? (
+            <Image source={{ uri: riderPhoto }} style={styles.homeProfilePhoto} accessibilityIgnoresInvertColors />
+          ) : (
+            <Text style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
+          )}
+        </Pressable>
         <View style={styles.homeGreetingCopy}>
           <Text numberOfLines={2} style={styles.homeGreeting}>{greeting}, {riderFirstName}</Text>
           {onOpenHorses ? (
@@ -4363,19 +4381,7 @@ function HomeScreen({
             </Text>
           )}
         </View>
-        <View style={styles.headerActions}>
-          {onOpenRalf ? <RalfButton onPress={() => onOpenRalf()} /> : null}
-          <Pressable
-            testID="profile-button"
-            accessibilityRole="button"
-            accessibilityLabel="Open account"
-            hitSlop={6}
-            style={({ pressed }) => [styles.homeProfileButton, pressed && styles.tabItemPressed]}
-            onPress={onOpenProfile}
-          >
-            <Text style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
-          </Pressable>
-        </View>
+        {onOpenRalf ? <RalfButton onPress={() => onOpenRalf()} /> : null}
       </View>
 
       <Animated.View style={[styles.homeStage, viewportHeight < 720 && styles.homeStageCompact, heroStyle]}>
@@ -8698,19 +8704,15 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   ralfButton: {
-    minHeight: 44,
-    paddingHorizontal: 14,
+    // Ralf as an avatar: a round brass-ringed mark, the same size as the rider's.
+    width: 44,
+    height: 44,
     borderRadius: 22,
-    flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(196,160,90,0.45)",
     backgroundColor: equinaTheme.material.quiet
-  },
-  ralfButtonText: {
-    color: equinaTheme.text.primary,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600"
   },
   headerActions: {
     flexDirection: "row",
@@ -8829,10 +8831,15 @@ const styles = StyleSheet.create({
   homeProfileButton: {
     width: 44,
     height: 44,
-    borderRadius: equinaTheme.radius.control,
+    borderRadius: 22,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: equinaTheme.material.selected
+  },
+  homeProfilePhoto: {
+    width: 44,
+    height: 44
   },
   homeProfileInitial: {
     color: equinaTheme.colors.brass,
