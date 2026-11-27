@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { equinaTheme } from "../src/ui/theme/theme";
+import { LAUNCH_BROWN } from "../src/ui/launch/launch-look";
 
 // The team builds and the store builds are the "preview" profile (an internal
 // APK or ad hoc build) and the "production" profile (TestFlight and Google Play)
@@ -42,7 +42,7 @@ const appJson = JSON.parse(readFileSync(join(root, "app.json"), "utf8")) as {
       versionCode?: number;
       backgroundColor?: string;
       splash?: { backgroundColor?: string };
-      adaptiveIcon?: { foregroundImage?: string; backgroundColor?: string };
+      adaptiveIcon?: { foregroundImage?: string; backgroundImage?: string; monochromeImage?: string; backgroundColor?: string };
       blockedPermissions?: string[];
     };
   };
@@ -204,18 +204,24 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     );
   }
 
-  // A dark launch on both platforms, in the app's own ink.
-  const { ink } = equinaTheme.colors;
-  assert.equal(ios?.splash?.backgroundColor, ink);
-  assert.equal(android?.splash?.backgroundColor, ink);
-  assert.equal(android?.backgroundColor, ink, "The window behind React is dark too, from the launch screen until the first frame.");
+  // The launch is the icon's brown with the horse symbol, the same ground the React launch curtain
+  // (src/ui/launch) carries on, so the system's launch screen hands over to it without a seam.
+  assert.equal(ios?.splash?.backgroundColor, LAUNCH_BROWN);
+  assert.equal(android?.splash?.backgroundColor, LAUNCH_BROWN);
+  assert.equal(android?.backgroundColor, LAUNCH_BROWN, "The window behind React is the launch brown too, until the curtain's first frame.");
   assert.ok(
     ios?.splash?.image && existsSync(join(root, ios.splash.image)),
     "Without an image, SDK 55 leaves the iOS launch screen on the system colour and ignores the background colour."
   );
+  // iOS fits the launch image to the screen (aspect fit, centred): a square the screen's width with the
+  // symbol at LAUNCH_MARK_FRACTION of it puts the symbol where the curtain draws it.
+  const splashHeader = readFileSync(join(root, String(ios?.splash?.image))).subarray(0, 26);
+  assert.equal(splashHeader.readUInt32BE(16), splashHeader.readUInt32BE(20), "The launch image is square.");
+  assert.ok(splashHeader.readUInt32BE(16) >= 1290, "The launch image is sharp at the widest phone's 3x width.");
+  assert.ok(splashHeader[25] === 6, "The launch image is transparent around the symbol, over the brown.");
 }
 
-// The icons, whoever draws them. Today they are provisional: a plain E, ivory on ink.
+// The icons: the horse symbol from the Equina logo as a medal (brass rim, dark enamel, raised ivory head) on saddle brown.
 {
   const { icon, android, plugins = [] } = appJson.expo;
   const notifications = plugins.find((entry) => Array.isArray(entry) && entry[0] === "expo-notifications");
@@ -242,9 +248,47 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     { width: 1024, height: 1024, alpha: true },
     "The Android foreground is 1024 x 1024 on a transparent ground, with the mark inside the middle two thirds."
   );
-  assert.equal(android?.adaptiveIcon?.backgroundColor, equinaTheme.colors.ink, "Behind the foreground, the app's ink.");
+  assert.deepEqual(
+    png(android?.adaptiveIcon?.backgroundImage, "the Android adaptive icon background"),
+    { width: 1024, height: 1024, alpha: false },
+    "Behind the foreground, the same brown ground as the iOS icon, opaque."
+  );
+  assert.match(String(android?.adaptiveIcon?.backgroundColor), /^#[0-9A-F]{6}$/i, "A brown fallback colour, for launchers that skip the image.");
+  assert.deepEqual(
+    png(android?.adaptiveIcon?.monochromeImage, "the Android themed (monochrome) icon"),
+    { width: 1024, height: 1024, alpha: true },
+    "Android 13 themed icons tint one shape: the crescent, on transparent."
+  );
   const glyph = png(notificationIcon, "the Android notification icon");
   assert.ok(glyph.alpha && glyph.width === glyph.height && glyph.width >= 96, "The notification icon is a white shape on transparent, 96 px or more.");
+}
+
+// The ride chimes, which a locked phone plays as notification sounds. The
+// plugin copies each file into the app under its own name, and Android refuses
+// a build whose raw resource names have anything but a-z, 0-9 and _.
+{
+  const { plugins = [] } = appJson.expo;
+  const notifications = plugins.find((entry) => Array.isArray(entry) && entry[0] === "expo-notifications");
+  const sounds: unknown = Array.isArray(notifications) ? notifications[1]?.sounds : undefined;
+  assert.ok(Array.isArray(sounds) && sounds.length > 0, "app.json ships the ride chimes as notification sounds.");
+  const cues = readFileSync(join(root, "src/features/ride/ride-cues.ts"), "utf8");
+  for (const path of sounds as string[]) {
+    const name = path.split("/").pop() ?? "";
+    assert.ok(existsSync(join(root, path)), `${path} exists.`);
+    assert.match(name, /^[a-z0-9_]+\.(wav|aiff|caf)$/, `${name}: lowercase letters, digits and _ only, and a format iOS plays for a notification.`);
+    // A WAV is a list of chunks: "fmt " says the bytes per second, "data" holds the sound.
+    const wav = readFileSync(join(root, path));
+    const chunks = new Map<string, { at: number; size: number }>();
+    for (let at = 12; at + 8 <= wav.length; at += 8 + wav.readUInt32LE(at + 4) + (wav.readUInt32LE(at + 4) % 2)) {
+      chunks.set(wav.toString("ascii", at, at + 4), { at: at + 8, size: wav.readUInt32LE(at + 4) });
+    }
+    const format = chunks.get("fmt ");
+    const data = chunks.get("data");
+    assert.ok(wav.toString("ascii", 8, 12) === "WAVE" && format && data, `${name} is a WAV with sound in it.`);
+    const seconds = data.size / wav.readUInt32LE(format.at + 8);
+    assert.ok(seconds < 30, `${name} is under the 30 s iOS allows a notification sound.`);
+    assert.ok(cues.includes(`file: "${name}"`), `ride-cues.ts asks for ${name} by the name the app ships it under.`);
+  }
 }
 
 console.log("Store build configuration passed.");

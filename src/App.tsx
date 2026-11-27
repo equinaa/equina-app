@@ -223,6 +223,7 @@ import { useReducedMotion } from "./ui/motion/useReducedMotion";
 import { RootErrorBoundary } from "./ui/states/RootErrorBoundary";
 import { androidBackAction, carryOutBack } from "./ui/navigation/android-back";
 import { equinaTheme } from "./ui/theme/theme";
+import { releaseLaunchCurtain } from "./ui/launch/LaunchCurtain";
 import { floatingDockContentInset, floatingDockMetrics } from "./ui/layout/metrics";
 
 type Tab = "home" | "gear" | "stable" | "assistant" | "community" | "profile";
@@ -885,6 +886,10 @@ export default function App() {
 
 function EquinaApp() {
   const equinaSession = useEquinaSession();
+  // The launch curtain (src/Root.tsx) lifts once the app knows where the rider stands.
+  useEffect(() => {
+    if (equinaSession.phase !== "restoring") releaseLaunchCurtain();
+  }, [equinaSession.phase]);
   const seeded = useMemo(() => createSeededEquinaApi(), []);
   const { api, buyerSession, sellerSession, horse } = seeded;
   const [accountCreated, setAccountCreated] = useState(false);
@@ -2825,11 +2830,12 @@ function EquinaApp() {
   };
 
   if (equinaSession.phase === "restoring") {
+    // Edge to edge, like the native launch screen it continues.
     return (
-      <SafeAreaView style={styles.shell}>
+      <>
         <StatusBar barStyle="light-content" />
         <SessionGateScreen state="restoring" />
-      </SafeAreaView>
+      </>
     );
   }
 
