@@ -2,6 +2,7 @@
   "expo": {
     "name": "Equina",
     "slug": "equina",
+    "owner": "alexkato88",
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "equina",
@@ -9,7 +10,7 @@
     "icon": "./assets/icon.png",
     "extra": {
       "eas": {
-        "projectId": "e42e13a7-0029-41ca-9d7e-3bb6af63a8a1"
+        "projectId": "d6c22d07-33b0-45f9-a250-334940fdb50f"
       }
     },
     "assetBundlePatterns": [
