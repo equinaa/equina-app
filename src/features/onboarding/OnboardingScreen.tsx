@@ -914,7 +914,11 @@ export function AccountMethodSheet({
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="email"
-            textContentType="emailAddress"
+            // iOS pairs a saved password with the field marked as the
+            // account's username; "emailAddress" only suggests the rider's
+            // own email from Contacts, so the Passwords app had nothing to
+            // fill here.
+            textContentType="username"
             keyboardType="email-address"
             returnKeyType={usesPassword ? "next" : "done"}
             maxLength={120}
