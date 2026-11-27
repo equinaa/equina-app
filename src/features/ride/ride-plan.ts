@@ -1,4 +1,4 @@
-import { logStateOn } from "../../domain/activity-calendar";
+import { dayUseOn, logStateOn } from "../../domain/activity-calendar";
 import type { RidePhaseEntry } from "../../backend";
 import { localDayOf } from "../../domain/local-day";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
@@ -432,6 +432,29 @@ export const activityProblem = (draft: ActivityDraft, now: number) => {
   const length = plannedMinutes(draft.plan.phases) * 60_000;
   if (atLocalDay(draft.day).getTime() + length > now) return "That can't have finished today yet. Pick an earlier day.";
   if (activityStartedAt(draft).getTime() + length > now) return "That hasn't finished yet. Pick an earlier start time.";
+  return null;
+};
+
+/**
+ * Whether an activity is scheduled rather than logged: a day ahead, or later
+ * today at a time that has not ended yet.
+ */
+export const activityIsAhead = (draft: ActivityDraft, now: number) => {
+  const today = localDayOf(now) as string;
+  if (!draft.day) return false;
+  if (draft.day > today) return true;
+  return draft.day === today && activityStartedAt(draft).getTime() + plannedMinutes(draft.plan.phases) * 60_000 > now;
+};
+
+/** What stops the rider from scheduling, in their words. Null when it can be scheduled. */
+export const scheduleProblem = (draft: ActivityDraft, now: number) => {
+  const phases = ridePlanProblem(draft.plan.phases);
+  if (phases) return phases;
+  const use = dayUseOn(draft.day, localDayOf(now) as string);
+  if (use === "tooFar") return "Activities can be scheduled up to three months ahead.";
+  if (use === "tooOld") return "Activities can be added up to a month back.";
+  if (!activityTimeExists(draft.day, draft.startMinutes)) return "The clocks go forward at that time. Pick another start time.";
+  if (activityStartedAt(draft).getTime() <= now) return "That time has passed. Pick a later start time.";
   return null;
 };
 

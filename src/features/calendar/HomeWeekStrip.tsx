@@ -9,19 +9,23 @@ const DAY_TEXT_SCALE = 1.25;
 const weekdayShort = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
 
 /**
- * This week at the top of Home, Monday to Sunday with their dates: today
- * ringed in brass, a dot under each day with an activity. A day opens the
+ * This week on Home, Monday to Sunday with their dates: today ringed in
+ * brass, a dot under each day with an activity done and a ring under each
+ * day with one scheduled. A day opens the
  * calendar on it, where its activities are and one can be added.
  */
 export function HomeWeekStrip({
   today,
   activityDays,
+  plannedDays,
   onOpenDay
 }: {
   /** The local day, YYYY-MM-DD. */
   today: string;
   /** The days, YYYY-MM-DD, with at least one activity. */
   activityDays: ReadonlySet<string>;
+  /** The days, YYYY-MM-DD, with an activity scheduled and not answered yet. */
+  plannedDays: ReadonlySet<string>;
   /** The calendar on a day; today from the Calendar link. */
   onOpenDay: (day: string) => void;
 }) {
@@ -46,13 +50,14 @@ export function HomeWeekStrip({
         {week.map((day, index) => {
           const isToday = day === today;
           const active = activityDays.has(day);
+          const scheduled = plannedDays.has(day);
           const ahead = day > today;
           return (
             <Pressable
               key={day}
               testID={`home-week-day-${index}`}
               accessibilityRole="button"
-              accessibilityLabel={`${dayHeading(day)}${isToday ? ", today" : ""}${active ? ", has activities" : ""}`}
+              accessibilityLabel={`${dayHeading(day)}${isToday ? ", today" : ""}${active ? ", has activities" : ""}${scheduled ? ", activity scheduled" : ""}`}
               onPress={() => onOpenDay(day)}
               style={({ pressed }) => [styles.day, pressed && styles.pressed]}
             >
@@ -62,7 +67,7 @@ export function HomeWeekStrip({
                   {Number(day.slice(8, 10))}
                 </Text>
               </View>
-              <View style={[styles.dot, active && styles.dotOn]} />
+              <View style={[styles.dot, active ? styles.dotOn : scheduled && styles.dotScheduled]} />
             </Pressable>
           );
         })}
@@ -154,6 +159,13 @@ const styles = StyleSheet.create({
   },
   dotOn: {
     backgroundColor: equinaTheme.colors.brass
+  },
+  dotScheduled: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    borderWidth: 1.5,
+    borderColor: equinaTheme.colors.brass
   },
   pressed: {
     opacity: 0.6

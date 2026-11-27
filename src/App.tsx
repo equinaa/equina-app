@@ -154,6 +154,10 @@ import { localDayOf, localToday, startOfPreviousMonth } from "./domain/local-day
 import { activitiesByDay } from "./domain/activity-calendar";
 import { ActivityCalendarScreen } from "./features/calendar/ActivityCalendarScreen";
 import { HomeWeekStrip } from "./features/calendar/HomeWeekStrip";
+import { usePlannedActivities } from "./features/calendar/usePlannedActivities";
+import { syncPlannedReminders } from "./features/calendar/planned-reminders";
+import { plannedReminders } from "./features/calendar/planned-schedule";
+import type { PlannedActivity } from "./backend";
 import type { RideEntry } from "./backend/contracts";
 import { buildCareSchedule, completionFor, recordProviderLine, type CareItem } from "./domain/care-schedule";
 import { disciplineLabel, horseSexLabel } from "./domain/labels";
@@ -208,12 +212,15 @@ import {
 } from "./features/home/home-hero";
 import {
   activityCompletion,
+  activityProblem,
+  cleanPhases,
   defaultTrainingType,
   phasesFor,
   plannedMinutes,
   readyRun,
   rideTrainingTypeById,
   startRun,
+  type ActivityDraft,
   type RidePlan,
   type RideRun
 } from "./features/ride/ride-plan";
@@ -1212,6 +1219,32 @@ function EquinaApp() {
   const horseNames = Object.fromEntries(horseRecords.horses.map((record) => [record.id, record.name]));
   // The days with an activity, for the week at the top of Home.
   const journalActivityDays = useMemo(() => new Set(activitiesByDay(rideJournal.entries).keys()), [rideJournal.entries]);
+  // Activities scheduled ahead (202611270001), and the days that have one still planned.
+  const plannedActivities = usePlannedActivities({ backend: equinaSession.backend, enabled: ridePersistence });
+  const plannedDays = useMemo(
+    () => new Set(plannedActivities.items.filter((item) => item.status === "planned").map((item) => item.day)),
+    [plannedActivities.items]
+  );
+  // Asked for notifications right after the rider schedules one; otherwise
+  // only a phone already allowed gets the reminders.
+  const plannedRemindersAsk = useRef(false);
+  useEffect(() => {
+    const ask = plannedRemindersAsk.current;
+    plannedRemindersAsk.current = false;
+    void syncPlannedReminders(
+      plannedReminders(plannedActivities.items, (item) => {
+        const training = rideTrainingTypeById(item.trainingType)?.label ?? item.trainingType;
+        const horse = item.horseId ? horseNames[item.horseId] : undefined;
+        return {
+          title: horse ? `${training} with ${horse}` : training,
+          body: "It's time for the training you scheduled. Mark it done in the calendar after."
+        };
+      }, Date.now()),
+      ask
+    );
+    // Horse names only change the words; the list decides what is scheduled.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plannedActivities.items]);
   const ownHorses = switchableHorses(horseRecords.horses, equinaSession.account?.userId);
   // Each horse has its own training week and streak: Home reads its horse's.
   // A horse shared with the rider is not in their plan (inPlan false).
@@ -1833,6 +1866,58 @@ function EquinaApp() {
       source: "manual"
     });
     setAddActivityOpen(false);
+    refresh("Added to your journal.");
+  };
+
+  // A day ahead (or later today) in Add activity goes on the calendar instead
+  // of the journal, with a reminder when it starts.
+  const scheduleActivity = async ({ draft, note }: { draft: ActivityDraft; note?: string }) => {
+    await plannedActivities.schedule({
+      ...(draft.plan.horseId ? { horseId: draft.plan.horseId } : {}),
+      day: draft.day,
+      startMinutes: draft.startMinutes,
+      trainingType: draft.plan.trainingType.id,
+      phases: cleanPhases(draft.plan.phases).map((phase) => ({
+        title: phase.title,
+        ...(phase.detail ? { detail: phase.detail } : {}),
+        plannedSeconds: phase.minutes * 60
+      })),
+      ...(note ? { note } : {})
+    });
+    plannedRemindersAsk.current = true;
+    setAddActivityOpen(false);
+    refresh("Scheduled. It's on your calendar.");
+  };
+
+  // Its time has come and the rider says it happened: logged as it was
+  // planned, and linked to the journal entry it became.
+  const markPlannedDone = async (item: PlannedActivity) => {
+    const trainingType = rideTrainingTypeById(item.trainingType) ?? { id: item.trainingType, label: item.trainingType };
+    const draft: ActivityDraft = {
+      day: item.day,
+      startMinutes: item.startMinutes,
+      plan: {
+        ...(item.horseId ? { horseId: item.horseId } : {}),
+        horseName: item.horseId ? horseNames[item.horseId] ?? "" : "",
+        trainingType,
+        phases: item.phases.map((phase, index) => ({
+          id: `planned-${index}`,
+          title: phase.title,
+          detail: phase.detail ?? "",
+          minutes: Math.max(1, Math.round(phase.plannedSeconds / 60))
+        }))
+      }
+    };
+    const problem = activityProblem(draft, Date.now());
+    if (problem) throw new Error(problem);
+    const horseDiscipline = horseRecords.horses.find((record) => record.id === item.horseId)?.discipline;
+    const entry = await rideJournal.logRide({
+      session: activityCompletion(draft, horseDiscipline ? toCoachDiscipline(horseDiscipline) : onboardingDiscipline),
+      horseId: item.horseId,
+      riderNote: item.note,
+      source: "manual"
+    });
+    await plannedActivities.markDone(item.id, entry.id);
     refresh("Added to your journal.");
   };
 
@@ -3041,6 +3126,7 @@ function EquinaApp() {
                   setAddActivityOpen(true);
                 } : undefined}
                 activityDays={journalActivityDays}
+                plannedDays={plannedDays}
                 onOpenCalendar={ridePersistence ? (day) => setCalendarDay(day) : undefined}
                 onOpenHorses={horseRecords.horsesListed && (ownHorses.length > 1 || horseRecords.canManageHorse) ? () => {
                   setHorseSwitchError("");
@@ -3316,6 +3402,7 @@ function EquinaApp() {
           memory={rideSetupMemory.memory}
           day={addActivityDay}
           onLog={logActivity}
+          onSchedule={ridePersistence ? scheduleActivity : undefined}
           onDismiss={() => setAddActivityOpen(false)}
         />
 
@@ -3376,6 +3463,16 @@ function EquinaApp() {
           onRetryJournal={() => void rideJournal.refresh()}
           horseNames={horseNames}
           canAdd={ridePersistence && !rideActive}
+          planned={plannedActivities.items}
+          plannedError={plannedActivities.error}
+          onRetryPlanned={() => void plannedActivities.refresh()}
+          onMarkDone={markPlannedDone}
+          onSkip={async (item) => {
+            await plannedActivities.skip(item.id);
+          }}
+          onRemove={async (item) => {
+            await plannedActivities.remove(item.id);
+          }}
           onAddActivity={(day) => {
             setCalendarDay(null);
             rideJournal.clearError();
@@ -3911,6 +4008,7 @@ function HomeScreen({
   onToggleRide,
   onAddActivity,
   activityDays,
+  plannedDays,
   onOpenCalendar,
   onOpenJournal,
   onOpenHorses,
@@ -3953,6 +4051,8 @@ function HomeScreen({
   onAddActivity?: () => void;
   /** The days with an activity: dots in the week at the top. */
   activityDays: ReadonlySet<string>;
+  /** The days with an activity scheduled: rings in the week. */
+  plannedDays: ReadonlySet<string>;
   /** Opens the calendar on a day. Absent where rides are not saved. */
   onOpenCalendar?: (day: string) => void;
   onOpenJournal?: () => void;
@@ -4334,7 +4434,7 @@ function HomeScreen({
       <Animated.View style={[styles.homeDetails, detailsStyle]}>
         {/* Right under the hero: this week, each day opening the calendar. */}
         {onOpenCalendar ? (
-          <HomeWeekStrip today={localToday()} activityDays={activityDays} onOpenDay={onOpenCalendar} />
+          <HomeWeekStrip today={localToday()} activityDays={activityDays} plannedDays={plannedDays} onOpenDay={onOpenCalendar} />
         ) : null}
 
         {/* Under Start ride: a training done without the clock still

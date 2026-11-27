@@ -86,3 +86,30 @@ export const dayHeading = (day: string) =>
 /** "Wed 25": a day of the month shown just above it. */
 export const shortWeekdayDate = (day: string) =>
   `${(weekdayNames[isoWeekday(day) - 1] ?? "").slice(0, 3)} ${Number(day.slice(8, 10))}`;
+
+/**
+ * How far ahead an activity can be scheduled: about three months. The server
+ * takes a plan up to 92 days out (planned_activities_dates_guard).
+ */
+export const activityScheduleDaysAhead = 90;
+
+/** The furthest day an activity can be scheduled for. */
+export const lastSchedulableDay = (today: string) => addDays(today, activityScheduleDaysAhead);
+
+/**
+ * What a day can take: an activity logged as done ("log"), one scheduled
+ * ahead ("schedule"), or nothing new (too old, too far).
+ */
+export type DayUse = "log" | "schedule" | "tooOld" | "tooFar";
+
+export const dayUseOn = (day: string, today: string): DayUse => {
+  if (day < firstLoggableDay(today)) return "tooOld";
+  if (day > lastSchedulableDay(today)) return "tooFar";
+  return day > today ? "schedule" : "log";
+};
+
+/** Whether a day can be picked in Add activity, to log or to schedule. */
+export const pickableDay = (day: string, today: string) => {
+  const use = dayUseOn(day, today);
+  return use === "log" || use === "schedule";
+};

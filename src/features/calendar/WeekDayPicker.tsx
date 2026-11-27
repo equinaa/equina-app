@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react-native";
-import { dayHeading, firstLoggableDay, logStateOn, weekOf } from "../../domain/activity-calendar";
+import { dayHeading, firstLoggableDay, lastSchedulableDay, logStateOn, pickableDay, weekOf } from "../../domain/activity-calendar";
 import { addMonths, fullDayLabel, monthGrid, monthLabel, monthOf } from "../../domain/calendar-month";
 import { addDays } from "../../domain/training-streak";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
@@ -21,6 +21,7 @@ const DAY_TEXT_SCALE = 1.25;
 export function WeekDayPicker({
   value,
   today,
+  ahead = false,
   onChange,
   testID = "add-activity-week"
 }: {
@@ -28,6 +29,8 @@ export function WeekDayPicker({
   value: string;
   /** The local day, YYYY-MM-DD. */
   today: string;
+  /** Days ahead can be picked too, to schedule an activity (up to three months). */
+  ahead?: boolean;
   onChange: (day: string) => void;
   testID?: string;
 }) {
@@ -44,7 +47,8 @@ export function WeekDayPicker({
 
   const oldest = firstLoggableDay(today);
   const canGoBack = wholeMonth ? month > monthOf(oldest) : addDays(monday, -1) >= oldest;
-  const canGoForward = wholeMonth ? month < monthOf(today) : addDays(monday, 7) <= today;
+  const latest = ahead ? lastSchedulableDay(today) : today;
+  const canGoForward = wholeMonth ? month < monthOf(latest) : addDays(monday, 7) <= latest;
 
   const move = (by: number) => {
     selectionHaptic();
@@ -63,7 +67,7 @@ export function WeekDayPicker({
   const cell = (day: string, index: number) => {
     const selected = day === value;
     const isToday = day === today;
-    const open = logStateOn(day, today) === "open";
+    const open = ahead ? pickableDay(day, today) : logStateOn(day, today) === "open";
     return (
       <Pressable
         key={day}

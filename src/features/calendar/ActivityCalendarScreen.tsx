@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { ChevronLeft, ChevronRight, PencilLine, Timer } from "lucide-react-native";
-import type { EquinaBackend, RideEntry } from "../../backend";
-import { activitiesByDay, dayHeading, logStateOn, shortWeekdayDate } from "../../domain/activity-calendar";
+import { CalendarClock, ChevronLeft, ChevronRight, PencilLine, Timer } from "lucide-react-native";
+import type { EquinaBackend, PlannedActivity, RideEntry } from "../../backend";
+import { activitiesByDay, dayHeading, dayUseOn, lastSchedulableDay, logStateOn, shortWeekdayDate } from "../../domain/activity-calendar";
 import { addMonths, fullDayLabel, monthGrid, monthLabel, monthOf, weekdayInitials } from "../../domain/calendar-month";
 import { disciplineLabel } from "../../domain/labels";
 import { EquinaButton } from "../../ui/primitives/EquinaPrimitives";
@@ -11,6 +11,7 @@ import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
 import { formatActivityTime, rideTrainingLabel } from "../ride/ride-plan";
+import { plannedStart } from "./planned-schedule";
 import { rideMinutesLabel } from "../ride/ride-review-prompt";
 import { useMonthActivities } from "./useMonthActivities";
 
@@ -25,11 +26,15 @@ const startTimeOf = (entry: RideEntry) => {
   return formatActivityTime(started.getHours() * 60 + started.getMinutes());
 };
 
+const plannedMinutesOf = (activity: PlannedActivity) =>
+  Math.round(activity.phases.reduce((sum, phase) => sum + phase.plannedSeconds, 0) / 60);
+
 /**
- * The rider's activities month by month. Every day with one has a dot; a day
- * picked shows its activities underneath, and Add activity for it when it is
- * within the last month (how far back the server takes one). Days still
- * ahead can be looked at, not logged.
+ * The rider's activities month by month. A day with one done has a dot, a day
+ * with one scheduled a ring. A day picked shows both underneath: what was
+ * done, and what was scheduled, to mark done or let go once its time has
+ * come. Add activity logs a day of the last month or schedules one up to
+ * three months ahead.
  */
 export function ActivityCalendarScreen({
   visible,
@@ -44,7 +49,13 @@ export function ActivityCalendarScreen({
   onRetryJournal,
   horseNames,
   canAdd,
+  planned,
+  plannedError,
+  onRetryPlanned,
   onAddActivity,
+  onMarkDone,
+  onSkip,
+  onRemove,
   onClose
 }: {
   visible: boolean;
@@ -63,11 +74,22 @@ export function ActivityCalendarScreen({
   horseNames: Record<string, string>;
   /** False while a ride is running or the journal cannot save. */
   canAdd: boolean;
+  /** The scheduled activities, from a month back on. */
+  planned: readonly PlannedActivity[];
+  plannedError: string;
+  onRetryPlanned: () => void;
   onAddActivity: (day: string) => void;
+  /** Logs a scheduled activity whose time has come, as it was planned. */
+  onMarkDone: (activity: PlannedActivity) => Promise<void>;
+  onSkip: (activity: PlannedActivity) => Promise<void>;
+  onRemove: (activity: PlannedActivity) => Promise<void>;
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState(initialDay);
   const [month, setMonth] = useState(monthOf(initialDay));
+  // The scheduled activity being answered or removed, and what went wrong with it.
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [plannedProblem, setPlannedProblem] = useState<{ id: string; message: string } | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -86,10 +108,13 @@ export function ActivityCalendarScreen({
     onRetryJournal
   });
   const byDay = activitiesByDay(activities.entries);
-  const latestMonth = monthOf(today);
+  const latestMonth = monthOf(lastSchedulableDay(today));
   const selectedActivities = byDay.get(selected) ?? [];
-  const selectedState = logStateOn(selected, today);
+  const selectedUse = dayUseOn(selected, today);
   const grid = monthGrid(month);
+  // A scheduled activity marked done shows as the journal entry it became.
+  const plannedOn = (day: string) => planned.filter((item) => item.day === day && !(item.status === "done" && item.rideEntryId));
+  const selectedPlanned = plannedOn(selected);
 
   const goToMonth = (by: number) => {
     const next = addMonths(month, by);
@@ -97,7 +122,21 @@ export function ActivityCalendarScreen({
     selectionHaptic();
     setMonth(next);
     // The pick follows into the month: today there, else its first day.
-    setSelected(next === latestMonth ? today : `${next}-01`);
+    setSelected(next === monthOf(today) ? today : `${next}-01`);
+  };
+
+  const act = async (activity: PlannedActivity, action: (item: PlannedActivity) => Promise<void>) => {
+    if (busyId) return;
+    selectionHaptic();
+    setBusyId(activity.id);
+    setPlannedProblem(null);
+    try {
+      await action(activity);
+    } catch (error) {
+      setPlannedProblem({ id: activity.id, message: error instanceof Error && error.message ? error.message : "That did not work. Try again." });
+    } finally {
+      setBusyId(null);
+    }
   };
 
   return (
@@ -162,13 +201,14 @@ export function ActivityCalendarScreen({
                       const isSelected = day === selected;
                       const isToday = day === today;
                       const count = byDay.get(day)?.length ?? 0;
+                      const scheduled = plannedOn(day).filter((item) => item.status === "planned").length;
                       const ahead = day > today;
                       return (
                         <Pressable
                           key={day}
                           testID={`activity-calendar-day-${day}`}
                           accessibilityRole="button"
-                          accessibilityLabel={`${fullDayLabel(day)}${isToday ? ", today" : ""}${count ? `, ${count} ${count === 1 ? "activity" : "activities"}` : ""}`}
+                          accessibilityLabel={`${fullDayLabel(day)}${isToday ? ", today" : ""}${count ? `, ${count} ${count === 1 ? "activity" : "activities"}` : ""}${scheduled ? `, ${scheduled} scheduled` : ""}`}
                           accessibilityState={{ selected: isSelected }}
                           onPress={() => {
                             if (!isSelected) selectionHaptic();
@@ -189,7 +229,7 @@ export function ActivityCalendarScreen({
                               {Number(day.slice(8, 10))}
                             </Text>
                           </View>
-                          <View style={[styles.dot, count > 0 && styles.dotOn]} />
+                          <View style={[styles.dot, count > 0 ? styles.dotOn : scheduled > 0 && styles.dotScheduled]} />
                         </Pressable>
                       );
                     })}
@@ -199,14 +239,17 @@ export function ActivityCalendarScreen({
 
               {activities.loading ? (
                 <ActivityIndicator color={equinaTheme.colors.brass} style={styles.loading} />
-              ) : activities.error ? (
+              ) : activities.error || plannedError ? (
                 <Pressable
                   testID="activity-calendar-retry"
                   accessibilityRole="button"
-                  onPress={() => void activities.retry()}
+                  onPress={() => {
+                    if (activities.error) void activities.retry();
+                    if (plannedError) onRetryPlanned();
+                  }}
                   style={styles.retry}
                 >
-                  <Text style={styles.error}>{activities.error} Tap to try again.</Text>
+                  <Text style={styles.error}>{activities.error || plannedError} Tap to try again.</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -248,20 +291,106 @@ export function ActivityCalendarScreen({
                     );
                   })}
                 </View>
-              ) : activities.loading ? null : (
-                <Text style={styles.empty}>
-                  {selectedState === "future" ? "This day is still ahead." : "Nothing logged on this day."}
-                </Text>
-              )}
+              ) : null}
 
-              {selectedState === "open" && canAdd ? (
+              {selectedPlanned.length > 0 ? (
+                <View style={styles.list}>
+                  {selectedPlanned.map((item) => {
+                    const horse = item.horseId ? horseNames[item.horseId] : undefined;
+                    const training = rideTrainingLabel(item.trainingType) ?? item.trainingType;
+                    const minutes = plannedMinutesOf(item);
+                    const ended = plannedStart(item).getTime() + minutes * 60_000 <= Date.now();
+                    const answerable = item.status === "planned" && ended;
+                    const loggable = logStateOn(item.day, today) === "open";
+                    const busy = busyId === item.id;
+                    return (
+                      <View key={item.id} style={[styles.row, styles.plannedRow]} testID={`activity-calendar-planned-${item.id}`}>
+                        <View style={styles.plannedTop}>
+                          <View style={[styles.rowIcon, styles.plannedIcon]}>
+                            <CalendarClock size={16} strokeWidth={2} color={equinaTheme.colors.brass} />
+                          </View>
+                          <View
+                            style={styles.rowCopy}
+                            accessible
+                            accessibilityLabel={`Scheduled: ${training}, ${formatActivityTime(item.startMinutes)}, ${minutes} min${horse ? `, ${horse}` : ""}${item.status === "skipped" ? ", did not happen" : ""}`}
+                          >
+                            <Text numberOfLines={1} style={[styles.rowTitle, item.status === "skipped" && styles.rowTitleSkipped]}>{training}</Text>
+                            <Text numberOfLines={1} style={styles.rowMeta}>
+                              {[formatActivityTime(item.startMinutes), `${minutes} min`, horse].filter(Boolean).join(" · ")}
+                            </Text>
+                            <Text style={styles.plannedState}>
+                              {item.status === "skipped"
+                                ? "Didn't happen"
+                                : answerable
+                                  ? loggable ? "Did it happen?" : "Too long ago to log"
+                                  : "Scheduled"}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.plannedActions}>
+                          {answerable && loggable ? (
+                            <EquinaButton
+                              testID={`activity-calendar-done-${item.id}`}
+                              label={busy ? "Saving..." : "Done"}
+                              disabled={busy}
+                              showArrow={false}
+                              style={styles.plannedAction}
+                              onPress={() => void act(item, onMarkDone)}
+                            />
+                          ) : null}
+                          {answerable ? (
+                            <EquinaButton
+                              testID={`activity-calendar-skip-${item.id}`}
+                              label="Didn't happen"
+                              variant="secondary"
+                              disabled={busy}
+                              showArrow={false}
+                              style={styles.plannedAction}
+                              onPress={() => void act(item, onSkip)}
+                            />
+                          ) : (
+                            <EquinaButton
+                              testID={`activity-calendar-remove-${item.id}`}
+                              label={busy ? "Removing..." : "Remove"}
+                              variant="secondary"
+                              disabled={busy}
+                              showArrow={false}
+                              style={styles.plannedAction}
+                              onPress={() => void act(item, onRemove)}
+                            />
+                          )}
+                        </View>
+                        {plannedProblem?.id === item.id ? (
+                          <Text accessibilityRole="alert" style={styles.error}>{plannedProblem.message}</Text>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              {selectedActivities.length === 0 && selectedPlanned.length === 0 && !activities.loading ? (
+                <Text style={styles.empty}>
+                  {selected > today ? "Nothing scheduled yet." : "Nothing logged on this day."}
+                </Text>
+              ) : null}
+
+              {(selectedUse === "log" || selectedUse === "schedule") && canAdd ? (
                 <EquinaButton
                   testID="activity-calendar-add"
-                  label={selected === today ? "Add activity today" : `Add activity on ${shortWeekdayDate(selected)}`}
+                  label={
+                    selected === today
+                      ? "Add activity today"
+                      : selectedUse === "schedule"
+                        ? `Schedule on ${shortWeekdayDate(selected)}`
+                        : `Add activity on ${shortWeekdayDate(selected)}`
+                  }
                   onPress={() => onAddActivity(selected)}
                 />
-              ) : selectedState === "tooOld" ? (
+              ) : selectedUse === "tooOld" ? (
                 <Text style={styles.note}>Activities can be added up to a month back.</Text>
+              ) : selectedUse === "tooFar" ? (
+                <Text style={styles.note}>Activities can be scheduled up to three months ahead.</Text>
               ) : null}
             </View>
           </ScrollView>
@@ -390,6 +519,47 @@ const styles = StyleSheet.create({
   },
   dotOn: {
     backgroundColor: equinaTheme.colors.brass
+  },
+  dotScheduled: {
+    borderWidth: 1.5,
+    borderColor: equinaTheme.colors.brass,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5
+  },
+  plannedRow: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: equinaTheme.spacing.sm,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "rgba(196,160,90,0.45)",
+    backgroundColor: "transparent"
+  },
+  plannedTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.compact
+  },
+  plannedIcon: {
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderColor: "rgba(196,160,90,0.6)"
+  },
+  plannedState: {
+    ...equinaTheme.typography.meta,
+    color: equinaTheme.colors.brass
+  },
+  rowTitleSkipped: {
+    color: equinaTheme.text.tertiary,
+    textDecorationLine: "line-through"
+  },
+  plannedActions: {
+    flexDirection: "row",
+    gap: equinaTheme.spacing.sm
+  },
+  plannedAction: {
+    flex: 1
   },
   loading: {
     marginTop: equinaTheme.spacing.sm

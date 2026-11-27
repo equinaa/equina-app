@@ -474,6 +474,30 @@ export type HorseTimeOff = {
 
 export type HorseTimeOffInput = Omit<HorseTimeOff, "id" | "createdAt">;
 
+/**
+ * A training put on a day ahead (202611270001). Not a ride: the journal and
+ * the streak count only what was done. Marked done, it becomes a logged
+ * activity (rideEntryId); or the rider lets it go (skipped).
+ */
+export type PlannedActivityStatus = "planned" | "done" | "skipped";
+
+export type PlannedActivity = {
+  id: string;
+  horseId?: string;
+  /** The rider's local day, YYYY-MM-DD. */
+  day: string;
+  /** Minutes after local midnight. */
+  startMinutes: number;
+  trainingType: string;
+  /** As planned: no ridden seconds. */
+  phases: Array<Pick<RidePhaseEntry, "title" | "detail" | "plannedSeconds">>;
+  note?: string;
+  status: PlannedActivityStatus;
+  rideEntryId?: string;
+};
+
+export type PlannedActivityInput = Pick<PlannedActivity, "horseId" | "day" | "startMinutes" | "trainingType" | "phases" | "note">;
+
 /** One day of the rider's training week. weekday: 1 = Monday ... 7 = Sunday. */
 export type TrainingPlanDay = {
   weekday: number;
