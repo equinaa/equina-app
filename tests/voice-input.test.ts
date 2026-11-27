@@ -20,11 +20,22 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
   // On the phone only: no audio leaves it, and a phone that cannot do that gets no mic.
   assert.match(hook, /requiresOnDeviceRecognition: true/);
   assert.match(hook, /module\.isRecognitionAvailable\(\) && module\.supportsOnDeviceRecognition\(\)/);
-  assert.match(hook, /if \(Platform\.OS === "web"\) return \(loaded = null\);/, "Not on the web, where the browser would send the audio away.");
+  assert.match(hook, /if \(Platform\.OS === "web" \|\| /, "Not on the web, where the browser would send the audio away.");
   // A build without the native module (made before it was added) runs on, without a mic.
   assert.match(hook, /try \{\s+loaded = \(require\("expo-speech-recognition"\) as SpeechPackage\)\.ExpoSpeechRecognitionModule;\s+\} catch \{\s+loaded = null;/);
-  // Let go before the permission answer: it does not start after all.
-  assert.match(hook, /if \(released\.current\) \{\s+setListening\(false\);\s+return;/);
+  // Let go before the permission answer: it does not start after all; let go
+  // before the native session began: stopped as soon as it does.
+  assert.match(hook, /if \(released\.current\) \{\s+busy\.current = false;\s+setListening\(false\);\s+return;/);
+  assert.match(hook, /module\.addListener\("start", \(\) => \{\s+if \(released\.current\) module\.stop\(\);/);
+  // One session at a time: a press while the last one finishes is ignored, so its late words never land twice.
+  assert.match(hook, /if \(!module \|\| !enabled \|\| busy\.current\) return;/);
+  // The phone's language, not the library's en-US default; Android only from 13 (on-device guaranteed).
+  assert.match(hook, /lang: deviceSpeechLocale\(\),/);
+  assert.match(hook, /Platform\.OS === "android" && Number\(Platform\.Version\) < 33/);
+  assert.match(hook, /event\.error === "language-not-supported"[\s\S]{0,200}setSupported\(false\)/, "A language without an on-device model hides the mic.");
+  // Other apps' music is ducked, then handed back.
+  assert.match(hook, /categoryOptions: \["defaultToSpeaker", "allowBluetooth", "duckOthers"\]/);
+  assert.match(hook, /setAudioSessionActiveIOS\(false, \{ notifyOthersOnDeactivation: true \}\)/);
   assert.match(hook, /setHint\("Hold the mic while you speak\."\)/, "A tap says how it works.");
 }
 

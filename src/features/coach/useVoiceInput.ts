@@ -10,13 +10,28 @@ type SpeechModule = SpeechPackage["ExpoSpeechRecognitionModule"];
 let loaded: SpeechModule | null | undefined;
 const speechModule = (): SpeechModule | null => {
   if (loaded !== undefined) return loaded;
-  if (Platform.OS === "web") return (loaded = null);
+  // Not on the web (the browser would send the audio away), and on Android
+  // only from 13: before it the library falls back to the network service.
+  if (Platform.OS === "web" || (Platform.OS === "android" && Number(Platform.Version) < 33)) return (loaded = null);
   try {
     loaded = (require("expo-speech-recognition") as SpeechPackage).ExpoSpeechRecognitionModule;
   } catch {
     loaded = null;
   }
   return loaded;
+};
+
+/**
+ * The phone's language, which is the one its dictation knows and the one
+ * the availability check looks at. Without it the library falls back to
+ * en-US, whose on-device model may be missing.
+ */
+export const deviceSpeechLocale = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || "en-US";
+  } catch {
+    return "en-US";
+  }
 };
 
 /** Whether this phone can turn speech into text without sending the audio anywhere. */
@@ -29,6 +44,9 @@ export const voiceInputAvailable = () => {
     return false;
   }
 };
+
+const PERMISSION_HINT = "Allow the microphone and speech recognition in Settings to ask by voice.";
+const RETRY_HINT = "Couldn't hear that. Hold the mic and try again.";
 
 export type VoiceInput = {
   /** The phone can do it: the mic shows. */
@@ -47,6 +65,10 @@ export type VoiceInput = {
  * the phone (requiresOnDeviceRecognition): no audio leaves it, and nothing
  * is recorded. The words go into the box, where the rider reads them and
  * sends them like any typed question.
+ *
+ * One session at a time: a press while the last one is still finishing
+ * waits for it, so its late words never land twice. Music playing in another
+ * app is ducked while listening and handed back after.
  */
 export function useVoiceInput({
   text,
@@ -58,13 +80,15 @@ export function useVoiceInput({
   onText: (next: string) => void;
   enabled: boolean;
 }): VoiceInput {
-  const [available] = useState(voiceInputAvailable);
+  const [supported, setSupported] = useState(voiceInputAvailable);
   const [listening, setListening] = useState(false);
   const [hint, setHint] = useState("");
   const base = useRef("");
   const heard = useRef("");
   const startedAt = useRef(0);
-  // Let go before the permission answer came back: do not start after all.
+  // From press to the session's "end": no second session meanwhile.
+  const busy = useRef(false);
+  // Let go before the session started (permission prompt, native start): stop it once it does.
   const released = useRef(false);
   const latestText = useRef(text);
   latestText.current = text;
@@ -72,9 +96,24 @@ export function useVoiceInput({
   onTextRef.current = onText;
 
   useEffect(() => {
-    const module = available ? speechModule() : null;
+    const module = supported ? speechModule() : null;
     if (!module) return;
+    const finish = () => {
+      busy.current = false;
+      setListening(false);
+      if (Platform.OS === "ios") {
+        try {
+          // Hand the audio back: music another app was playing resumes.
+          module.setAudioSessionActiveIOS(false, { notifyOthersOnDeactivation: true });
+        } catch {
+          // Already inactive.
+        }
+      }
+    };
     const subscriptions = [
+      module.addListener("start", () => {
+        if (released.current) module.stop();
+      }),
       module.addListener("result", (event) => {
         const transcript = event.results[0]?.transcript ?? "";
         // Android hands each pause's words over as final, then starts again;
@@ -83,15 +122,20 @@ export function useVoiceInput({
         if (event.isFinal) heard.current = shown;
         onTextRef.current(joinSpoken(base.current, shown));
       }),
-      module.addListener("end", () => setListening(false)),
+      module.addListener("end", finish),
       module.addListener("error", (event) => {
-        setListening(false);
+        finish();
         if (event.error === "aborted" || event.error === "no-speech" || event.error === "speech-timeout") return;
-        setHint(
-          event.error === "not-allowed"
-            ? "Allow the microphone and speech recognition in Settings to ask by voice."
-            : "Couldn't hear that. Hold the mic and try again."
-        );
+        if (event.error === "not-allowed") {
+          setHint(PERMISSION_HINT);
+          return;
+        }
+        if (event.error === "language-not-supported" || event.error === "service-not-allowed") {
+          // This phone's language has no on-device model: no mic, rather than one that never works.
+          setSupported(false);
+          return;
+        }
+        setHint(RETRY_HINT);
       })
     ];
     return () => {
@@ -102,11 +146,12 @@ export function useVoiceInput({
         // Nothing was listening.
       }
     };
-  }, [available]);
+  }, [supported]);
 
   const start = useCallback(() => {
     const module = speechModule();
-    if (!module || !enabled) return;
+    if (!module || !enabled || busy.current) return;
+    busy.current = true;
     released.current = false;
     startedAt.current = Date.now();
     base.current = latestText.current;
@@ -115,24 +160,34 @@ export function useVoiceInput({
     setListening(true);
     void module.requestPermissionsAsync().then((permission) => {
       if (!permission.granted) {
+        busy.current = false;
         setListening(false);
-        setHint("Allow the microphone and speech recognition in Settings to ask by voice.");
+        setHint(PERMISSION_HINT);
         return;
       }
       if (released.current) {
+        busy.current = false;
         setListening(false);
         return;
       }
       module.start({
+        lang: deviceSpeechLocale(),
         interimResults: true,
         continuous: true,
         requiresOnDeviceRecognition: true,
         addsPunctuation: true,
-        iosTaskHint: "dictation"
+        iosTaskHint: "dictation",
+        // Duck other apps' audio while listening instead of stopping it.
+        iosCategory: {
+          category: "playAndRecord",
+          categoryOptions: ["defaultToSpeaker", "allowBluetooth", "duckOthers"],
+          mode: "measurement"
+        }
       });
     }).catch(() => {
+      busy.current = false;
       setListening(false);
-      setHint("Couldn't hear that. Hold the mic and try again.");
+      setHint(RETRY_HINT);
     });
   }, [enabled]);
 
@@ -141,13 +196,21 @@ export function useVoiceInput({
     released.current = true;
     // A tap is not a question: say how it works.
     if (Date.now() - startedAt.current < 350 && !heard.current) setHint("Hold the mic while you speak.");
+    // The listening look goes as the finger lifts; the session ends a moment
+    // later, and "end" lets the next press in.
+    setListening(false);
     if (!module) return;
     try {
       module.stop();
     } catch {
-      setListening(false);
+      busy.current = false;
     }
+    // Should "end" never come, the mic still frees up.
+    const pressed = startedAt.current;
+    setTimeout(() => {
+      if (startedAt.current === pressed) busy.current = false;
+    }, 4000);
   }, []);
 
-  return { available: available && enabled, listening, hint, start, stop };
+  return { available: supported && enabled, listening, hint, start, stop };
 }

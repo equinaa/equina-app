@@ -4097,6 +4097,8 @@ function HomeScreen({
   onOpenProfile: () => void;
   onShareRide: () => void;
 }) {
+  // The rider's photo that failed to load, if any: the avatar falls back to initials.
+  const [failedRiderPhoto, setFailedRiderPhoto] = useState<string | null>(null);
   const { height: viewportHeight } = useWindowDimensions();
   const heroAnim = useRef(new Animated.Value(0)).current;
   const heroImageAnim = useRef(new Animated.Value(0)).current;
@@ -4348,10 +4350,16 @@ function HomeScreen({
           style={({ pressed }) => [styles.homeProfileButton, pressed && styles.tabItemPressed]}
           onPress={onOpenProfile}
         >
-          {riderPhoto ? (
-            <Image source={{ uri: riderPhoto }} style={styles.homeProfilePhoto} accessibilityIgnoresInvertColors />
+          {riderPhoto && riderPhoto !== failedRiderPhoto ? (
+            <Image
+              source={{ uri: riderPhoto }}
+              style={styles.homeProfilePhoto}
+              accessibilityIgnoresInvertColors
+              // An expired link or no signal: the initials, never an empty circle.
+              onError={() => setFailedRiderPhoto(riderPhoto)}
+            />
           ) : (
-            <Text style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
           )}
         </Pressable>
         <View style={styles.homeGreetingCopy}>
