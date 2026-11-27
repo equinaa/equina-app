@@ -247,4 +247,32 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   assert.ok(glyph.alpha && glyph.width === glyph.height && glyph.width >= 96, "The notification icon is a white shape on transparent, 96 px or more.");
 }
 
+// The ride chimes, which a locked phone plays as notification sounds. The
+// plugin copies each file into the app under its own name, and Android refuses
+// a build whose raw resource names have anything but a-z, 0-9 and _.
+{
+  const { plugins = [] } = appJson.expo;
+  const notifications = plugins.find((entry) => Array.isArray(entry) && entry[0] === "expo-notifications");
+  const sounds: unknown = Array.isArray(notifications) ? notifications[1]?.sounds : undefined;
+  assert.ok(Array.isArray(sounds) && sounds.length > 0, "app.json ships the ride chimes as notification sounds.");
+  const cues = readFileSync(join(root, "src/features/ride/ride-cues.ts"), "utf8");
+  for (const path of sounds as string[]) {
+    const name = path.split("/").pop() ?? "";
+    assert.ok(existsSync(join(root, path)), `${path} exists.`);
+    assert.match(name, /^[a-z0-9_]+\.(wav|aiff|caf)$/, `${name}: lowercase letters, digits and _ only, and a format iOS plays for a notification.`);
+    // A WAV is a list of chunks: "fmt " says the bytes per second, "data" holds the sound.
+    const wav = readFileSync(join(root, path));
+    const chunks = new Map<string, { at: number; size: number }>();
+    for (let at = 12; at + 8 <= wav.length; at += 8 + wav.readUInt32LE(at + 4) + (wav.readUInt32LE(at + 4) % 2)) {
+      chunks.set(wav.toString("ascii", at, at + 4), { at: at + 8, size: wav.readUInt32LE(at + 4) });
+    }
+    const format = chunks.get("fmt ");
+    const data = chunks.get("data");
+    assert.ok(wav.toString("ascii", 8, 12) === "WAVE" && format && data, `${name} is a WAV with sound in it.`);
+    const seconds = data.size / wav.readUInt32LE(format.at + 8);
+    assert.ok(seconds < 30, `${name} is under the 30 s iOS allows a notification sound.`);
+    assert.ok(cues.includes(`file: "${name}"`), `ride-cues.ts asks for ${name} by the name the app ships it under.`);
+  }
+}
+
 console.log("Store build configuration passed.");
