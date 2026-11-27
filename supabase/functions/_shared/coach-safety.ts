@@ -39,15 +39,21 @@ export const foldForMatching = (text: string): string =>
     // Curly apostrophes and the acute accent Brazilian keyboards put in "won´t".
     .replace(/[‘’ʼ´]/g, "'");
 
-const termsPattern = (terms: readonly string[]): RegExp | null =>
-  terms.length ? new RegExp(`\\b(?:${terms.join("|")})\\b`) : null;
+const termsPattern = (terms: readonly string[] | undefined): RegExp | null =>
+  terms?.length ? new RegExp(`\\b(?:${terms.join("|")})\\b`) : null;
+
+/** Accented terms keep their accents, so \b (ASCII only) cannot bound them. */
+const accentedPattern = (terms: readonly string[] | undefined): RegExp | null =>
+  terms?.length ? new RegExp(`(?<![\\p{L}\\p{M}])(?:${terms.join("|")})(?![\\p{L}\\p{M}])`, "u") : null;
 
 type CompiledPack = {
   health: RegExp | null;
+  healthAccented: RegExp | null;
   healthWhenDetected: RegExp | null;
   unsafeOutput: RegExp | null;
   unsafeOutputWhenDetected: RegExp | null;
   markers: Set<string>;
+  phraseMarkers: RegExp[];
 };
 
 const compiled = Object.fromEntries(
@@ -55,13 +61,42 @@ const compiled = Object.fromEntries(
     const pack = PACKS[language];
     return [language, {
       health: termsPattern(pack.health),
+      healthAccented: accentedPattern(pack.healthAccented),
       healthWhenDetected: termsPattern(pack.healthWhenDetected),
       unsafeOutput: termsPattern(pack.unsafeOutput),
       unsafeOutputWhenDetected: termsPattern(pack.unsafeOutputWhenDetected),
       markers: new Set(pack.markers),
+      phraseMarkers: (pack.phraseMarkers ?? []).map((phrase) => new RegExp(`\\b(?:${phrase})\\b`)),
     }];
   }),
 ) as Record<CoachLanguage, CompiledPack>;
+
+/** Lower case with composed accents, for the letters and accented terms. */
+const lowerComposed = (text: string) => text.normalize("NFC").toLowerCase();
+
+/**
+ * How strongly a text reads as each language: 4 for a letter only that
+ * language writes, 2 for each phrase marker found, 1 for each distinct marker
+ * word. A word repeated ten times counts once, so a shared word cannot
+ * outweigh distinct evidence.
+ */
+export const scoreCoachLanguages = (text: string): Record<CoachLanguage, number> => {
+  const lower = lowerComposed(text);
+  const folded = foldForMatching(text);
+  const words = new Set(folded.split(/[^a-z']+/).filter(Boolean));
+  const score = Object.fromEntries(LANGUAGES.map((language) => {
+    const pack = PACKS[language];
+    const { markers, phraseMarkers } = compiled[language];
+    let points = pack.letters && pack.letters.test(lower) ? 4 : 0;
+    for (const word of words) if (markers.has(word)) points += 1;
+    for (const phrase of phraseMarkers) if (phrase.test(folded)) points += 2;
+    return [language, points];
+  })) as Record<CoachLanguage, number>;
+  // Hungarian "és" (and) folds to the Spanish "es" (is). Written with its
+  // accent it is Hungarian only, so it stops counting for Spanish.
+  if (/(?<![\p{L}\p{M}])és(?![\p{L}\p{M}])/u.test(lower) && compiled.es.markers.has("es")) score.es -= 1;
+  return score;
+};
 
 export type LanguageGuess = {
   language: CoachLanguage;
@@ -69,32 +104,32 @@ export type LanguageGuess = {
   confident: boolean;
 };
 
+const leadersOf = (score: Record<CoachLanguage, number>, among: readonly CoachLanguage[] = LANGUAGES) => {
+  const best = Math.max(...among.map((language) => score[language]));
+  return { best, leaders: among.filter((language) => score[language] === best) };
+};
+
 /**
- * The language a text is written in. Letters only one language uses count
- * most; otherwise the commonest small words decide. A tie or no clue at all
- * is reported as not confident, and the language is then the first of the
- * leaders in LANGUAGES order, so English when English is among them.
+ * The language a text is written in. A tie or no clue at all is reported as
+ * not confident, and the language is then the first of the leaders in
+ * LANGUAGES order, so English when English is among them.
  */
 export const guessCoachLanguage = (text: string): LanguageGuess => {
-  const lower = text.toLowerCase();
-  const words = foldForMatching(text).split(/[^a-z']+/).filter(Boolean);
-  const score = Object.fromEntries(LANGUAGES.map((language) => {
-    const letters = PACKS[language].letters;
-    let points = letters && letters.test(lower) ? 4 : 0;
-    for (const word of words) if (compiled[language].markers.has(word)) points += 1;
-    return [language, points];
-  })) as Record<CoachLanguage, number>;
-
-  const best = Math.max(...LANGUAGES.map((language) => score[language]));
-  const leaders = LANGUAGES.filter((language) => score[language] === best);
+  const { best, leaders } = leadersOf(scoreCoachLanguages(text));
   return { language: leaders[0] ?? "en", confident: best > 0 && leaders.length === 1 };
 };
 
 export const detectCoachLanguage = (text: string): CoachLanguage => guessCoachLanguage(text).language;
 
-/** A pack's ambiguous words apply when the text is in its language, or when no language stands out. */
-const ambiguousWordsApply = (guess: LanguageGuess, language: CoachLanguage) =>
-  !guess.confident || guess.language === language;
+/**
+ * Whose ambiguous words apply to a text: its language when one stands out;
+ * the tied languages on a tie, so a Romanian/Spanish tie never opens the
+ * Portuguese "dor"; every language only when there is no clue at all.
+ */
+const ambiguousLanguages = (text: string): Set<CoachLanguage> => {
+  const { best, leaders } = leadersOf(scoreCoachLanguages(text));
+  return new Set(best > 0 ? leaders : LANGUAGES);
+};
 
 export type HealthAssessment = {
   concern: boolean;
@@ -105,16 +140,27 @@ export type HealthAssessment = {
 /** Health, injury or lameness language in any language Ralf handles. */
 export const assessHealthConcern = (message: string): HealthAssessment => {
   const folded = foldForMatching(message);
+  const lower = lowerComposed(message);
+  const score = scoreCoachLanguages(message);
   const guess = guessCoachLanguage(message);
+  const ambiguous = ambiguousLanguages(message);
   const hits = LANGUAGES.filter((language) => {
-    const { health, healthWhenDetected } = compiled[language];
-    return Boolean(health?.test(folded)) ||
-      (ambiguousWordsApply(guess, language) && Boolean(healthWhenDetected?.test(folded)));
+    const { health, healthAccented, healthWhenDetected } = compiled[language];
+    return Boolean(health?.test(folded)) || Boolean(healthAccented?.test(lower)) ||
+      (ambiguous.has(language) && Boolean(healthWhenDetected?.test(folded)));
   });
   const notEnglish = hits.filter((language) => language !== "en");
-  // With no clear language, a worry written in exactly one language's words
-  // says which language the rider reads.
-  const language = !guess.confident && notEnglish.length === 1 ? notEnglish[0] ?? guess.language : guess.language;
+
+  // The reply goes in the rider's language. When that is unclear, or English
+  // won only on small shared words while no English health word matched, the
+  // languages whose own words matched decide, by their scores.
+  let language = guess.language;
+  const englishByDefault = guess.language === "en" && !hits.includes("en");
+  if (notEnglish.length && (!guess.confident || englishByDefault)) {
+    const { best, leaders } = leadersOf(score, notEnglish);
+    if (leaders.length === 1 || best > 0) language = leaders[0] ?? language;
+    else if (notEnglish.length === 1) language = notEnglish[0] ?? language;
+  }
   return { concern: hits.length > 0, language };
 };
 
@@ -131,14 +177,12 @@ export const healthEscalationReply = (language: CoachLanguage): string => PACKS[
  */
 export const crossesSafetyLine = (reply: string, riderMessage = ""): boolean => {
   const folded = foldForMatching(reply);
-  const replyGuess = guessCoachLanguage(reply);
-  const riderGuess = guessCoachLanguage(riderMessage);
+  const replyLanguages = ambiguousLanguages(reply);
+  const riderLanguages = riderMessage.trim() ? ambiguousLanguages(riderMessage) : new Set<CoachLanguage>();
   return LANGUAGES.some((language) => {
     const { unsafeOutput, unsafeOutputWhenDetected } = compiled[language];
     if (unsafeOutput?.test(folded)) return true;
-    const applies = (replyGuess.confident && replyGuess.language === language) ||
-      (riderGuess.confident && riderGuess.language === language) ||
-      (!replyGuess.confident && !riderGuess.confident);
+    const applies = replyLanguages.has(language) || riderLanguages.has(language);
     return applies && Boolean(unsafeOutputWhenDetected?.test(folded));
   });
 };

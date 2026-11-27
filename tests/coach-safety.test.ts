@@ -125,6 +125,51 @@ assert.equal(providerReviewLanguage("O diagnóstico provável é uma tendinite n
 assert.equal(providerReviewLanguage("Ok.", "Calul meu poate sări mâine?"), "ro");
 assert.match(providerReviewReply("pt"), /^Não posso fazer diagnósticos/);
 
+// Words two languages share only count where the message is in that
+// language: a Romanian "mi-e dor" (I miss) is not the Portuguese "dor" (pain),
+// a Spanish "lame" (licks) and a Romanian "lame" (blades) are not the English
+// "lame", and on a tie only the tied languages' ambiguous words apply.
+for (const message of [
+  "Mi-e dor de sarituri",
+  "Mi-a fost dor de galop",
+  "Imi e dor de el",
+  "Mi yegua lame el bocado todo el rato, ¿está relajada?",
+  "Ce lame folosesc la masina de tuns calul?",
+  "Estoy dolorida de la clase de ayer, ¿monto hoy igual?",
+  "Tegnap laza volt, ma feszült a lovam",
+  "Milyen fajta ló jó díjugratásra?",
+]) {
+  assert.equal(mentionsHealthConcern(message), false, message);
+}
+assert.equal(mentionsHealthConcern("My horse is lame"), true);
+assert.equal(mentionsHealthConcern("lame?"), true);
+
+// The reply language comes from the languages whose words matched when the
+// message itself is unclear or reads as English only on small shared words.
+const replyLanguage: Array<[string, CoachLanguage]> = [
+  ["Está sangrando por la nariz", "es"],
+  ["Sangra por la nariz", "es"],
+  ["Calul are temperatura 39", "ro"],
+  ["Calul are colica", "ro"],
+  ["Are 39,8 grade, e normal?", "ro"],
+  ["Ma is sántít", "hu"],
+  ["Tegnap este láza volt, ma lovagolhatok?", "hu"],
+  ["Fáj a lába, lovagolhatok?", "hu"],
+  ["ela tá manca da mão direita", "pt"],
+  ["Are swollen legs normal?", "en"],
+];
+for (const [message, language] of replyLanguage) {
+  assert.deepEqual(assessHealthConcern(message), { concern: true, language }, message);
+}
+
+// A Spanish training reply is not a Portuguese clearance.
+assert.equal(
+  crossesSafetyLine("Un caballo apto para competir en 1,10 necesita un buen galope y transiciones limpias.", "¿Qué necesita mi caballo para competir en 1,10?"),
+  false,
+);
+assert.equal(crossesSafetyLine("Sim, é seguro montar hoje se ele trotar regular.", "Posso montar hoje?"), true);
+assert.equal(crossesSafetyLine("Da, este sigur să călărești mâine.", "Pot să călăresc mâine?"), true);
+
 // coach-chat wires all of it in, and the English-only patterns are gone.
 const coachChat = readFileSync(join(process.cwd(), "supabase/functions/coach-chat/index.ts"), "utf8");
 assert.ok(coachChat.includes("assessHealthConcern(input.message)"));

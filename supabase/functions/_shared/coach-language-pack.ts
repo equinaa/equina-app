@@ -29,8 +29,21 @@ export type CoachLanguagePack = {
    * count; one shared with English ("are", "do", "mare") misleads it.
    */
   markers: readonly string[];
+  /**
+   * Multi-word or hyphenated clues, folded regex fragments ("por la", "mi-e",
+   * "se pare"). Each one found counts 2: a phrase is stronger evidence than
+   * one short word.
+   */
+  phraseMarkers?: readonly string[];
   /** Letters only this language writes, tested on the lower-case, unfolded text. */
   letters?: RegExp;
+  /**
+   * Health words whose accents carry the meaning, written with their accents
+   * and matched on the unfolded text: Hungarian "sánta" (lame) is not the name
+   * Santa, "fáj" (hurts) is not "faj" (breed). Always on. Phones type the
+   * accents by default; the folded lists stay the fallback.
+   */
+  healthAccented?: readonly string[];
   /** The fixed reply when the rider's message raises a health worry. */
   healthReply: string;
   /** The fixed reply that replaces an AI answer crossing the safety line. */

@@ -7,11 +7,13 @@ import type { CoachLanguagePack } from "./coach-language-pack.ts";
  */
 export const english: CoachLanguagePack = {
   health: [
-    "colic", "lame", "lameness", "swollen", "swelling", "injury", "injured",
+    "colic", "lameness", "swollen", "swelling", "injury", "injured",
     "medication", "dose", "fever", "temperature", "bleeding", "cannot stand",
     "won't eat", "not eating", "pain",
   ],
-  healthWhenDetected: [],
+  // Spanish "lame" is "licks" ("lame el bocado") and Romanian "lame" is
+  // "blades" (clipper blades), so the bare word waits for an English message.
+  healthWhenDetected: ["lame"],
   unsafeOutput: [
     "diagnos(?:e|is)", "prescri(?:be|ption)", "safe to ride", "clear(?:ed)? to work", "guaranteed treatment",
   ],
