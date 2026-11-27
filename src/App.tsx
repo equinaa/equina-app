@@ -3713,17 +3713,24 @@ function EquinaApp() {
 
 // Ralf in a tab's header: a word, not just an icon, because riders look for
 // him by name.
+const ralfMedal = require("../assets/ralf/ralf-medal.png");
+
+/** Ralf as a medal, the app icon's treatment with his sparkle, a green dot for online, and his name. */
 function RalfButton({ onPress }: { onPress: () => void }) {
   return (
     <MotionPressable
       testID="ralf-button"
       accessibilityRole="button"
-      accessibilityLabel={`Ask ${equinaCoach.name}`}
+      accessibilityLabel={`Ask ${equinaCoach.name}, online`}
       hitSlop={4}
       onPress={onPress}
       style={styles.ralfButton}
     >
-      <Sparkles size={20} color={equinaTheme.colors.brass} strokeWidth={1.9} />
+      <View style={styles.ralfMedal}>
+        <Image source={ralfMedal} style={styles.ralfMedalImage} accessibilityIgnoresInvertColors />
+        <View style={styles.ralfOnline} />
+      </View>
+      <Text style={styles.ralfButtonText}>{equinaCoach.name}</Text>
     </MotionPressable>
   );
 }
@@ -8704,15 +8711,40 @@ const styles = StyleSheet.create({
     fontWeight: "600"
   },
   ralfButton: {
-    // Ralf as an avatar: a round brass-ringed mark, the same size as the rider's.
-    width: 44,
-    height: 44,
+    minHeight: 44,
+    paddingLeft: 4,
+    paddingRight: 14,
     borderRadius: 22,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(196,160,90,0.45)",
+    gap: 8,
     backgroundColor: equinaTheme.material.quiet
+  },
+  ralfMedal: {
+    width: 36,
+    height: 36
+  },
+  ralfMedalImage: {
+    width: 36,
+    height: 36
+  },
+  ralfOnline: {
+    // Online: Ralf answers any time.
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    backgroundColor: "#3FBF7F",
+    borderWidth: 2,
+    borderColor: equinaTheme.surfaces.frame
+  },
+  ralfButtonText: {
+    color: equinaTheme.text.primary,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "600"
   },
   headerActions: {
     flexDirection: "row",
