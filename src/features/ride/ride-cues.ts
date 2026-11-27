@@ -8,27 +8,46 @@ import type { RideAlert } from "./ride-plan";
 /**
  * How the phone tells a rider the phase changed: a chime and a buzz. The rider
  * is on a horse with the phone in a pocket, so nothing here asks them to look.
- * Nothing is said out loud; the screen names the phase.
+ * Nothing is said out loud; the screen names the phase. A new phase and the
+ * end of the last one each have their own chime, so the end is heard as the
+ * end without looking.
  *
  * Sound is a native module a build from before the ride setup does not have.
  * It loads when a ride opens; without it the ride still buzzes. With the phone
  * locked, JavaScript stops: notifications scheduled for each phase change take
- * over (`scheduleRideAlerts`). No notification handler is set, so while the app
- * is open they stay silent and the chime plays instead.
+ * over (`scheduleRideAlerts`), with the same two chimes as their sound. No
+ * notification handler is set, so while the app is open they stay silent and
+ * the chime plays instead.
  */
 
 type AudioModule = typeof import("expo-audio");
 
+type CueKind = "phase" | "done";
+
 let audio: AudioModule | null = null;
-let chime: AudioPlayer | null = null;
+let chimes: Record<CueKind, AudioPlayer> | null = null;
 // A browser plays a page's sound only once the rider's own tap has played it:
-// this is the chime that was, if any. A page reloaded mid-ride makes a new
-// one, silent until a tap plays it (`unlockRideCues`).
-let tappedChime: AudioPlayer | null = null;
-// Just past the 0.62 s chime: the music the chime turned down comes back here.
-const chimeOnlyMs = 800;
+// these are the chimes that were, if any. A page reloaded mid-ride makes new
+// ones, silent until a tap plays them (`unlockRideCues`).
+let tappedChimes: Record<CueKind, AudioPlayer> | null = null;
+// Just past the longer chime (0.81 s, the end): the music the chime turned
+// down comes back here.
+const chimeOnlyMs = 1000;
 let unduckTimer: ReturnType<typeof setTimeout> | null = null;
-const alertChannel = "ride-phases";
+// The files ship inside the app (app.json, expo-notifications `sounds`), so a
+// locked phone plays them too. Their names are what a notification asks for,
+// and Android takes only lowercase letters, digits and underscores in them.
+const chimeSounds = {
+  phase: { file: "ride_phase.wav", asset: require("../../../assets/sounds/ride_phase.wav") },
+  done: { file: "ride_done.wav", asset: require("../../../assets/sounds/ride_done.wav") }
+} as const;
+// Android fixes a channel's sound when it is first made, and the first
+// channel played the system sound. New ids carry the chimes; the old one goes.
+const alertChannels: Record<CueKind, { id: string; name: string }> = {
+  phase: { id: "ride-phase-chime", name: "Ride phases" },
+  done: { id: "ride-done-chime", name: "Ride finished" }
+};
+const retiredAlertChannel = "ride-phases";
 const alertRoute = "ride-phase";
 
 export async function prepareRideCues() {
@@ -39,13 +58,16 @@ export async function prepareRideCues() {
     // by turning it down for a moment instead of stopping it.
     await audio.setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "duckOthers" }).catch(() => undefined);
   }
-  if (!chime) {
+  if (!chimes) {
     try {
       // Kept from closing the audio session on its own when it ends: unduck
       // and releaseRideCues close it, so the music comes back in one place.
-      chime = audio.createAudioPlayer(require("../../../assets/sounds/ride-phase.wav"), { keepAudioSessionActive: true });
+      chimes = {
+        phase: audio.createAudioPlayer(chimeSounds.phase.asset, { keepAudioSessionActive: true }),
+        done: audio.createAudioPlayer(chimeSounds.done.asset, { keepAudioSessionActive: true })
+      };
     } catch {
-      chime = null;
+      chimes = null;
     }
   }
 }
@@ -53,9 +75,10 @@ export async function prepareRideCues() {
 export function releaseRideCues() {
   if (unduckTimer) clearTimeout(unduckTimer);
   unduckTimer = null;
-  chime?.remove();
-  chime = null;
-  tappedChime = null;
+  chimes?.phase.remove();
+  chimes?.done.remove();
+  chimes = null;
+  tappedChimes = null;
   if (audio && Platform.OS !== "web") {
     // Back to what iOS gives an app that has not asked for anything.
     if (Platform.OS === "ios") void audio.setIsAudioActiveAsync(false).catch(() => undefined);
@@ -63,7 +86,7 @@ export function releaseRideCues() {
   }
 }
 
-const buzz = (kind: "phase" | "done") => {
+const buzz = (kind: CueKind) => {
   if (Platform.OS === "web") {
     // Android browsers vibrate; Safari has no vibration and skips it.
     const navigatorWithVibrate = globalThis.navigator as { vibrate?: (pattern: number[]) => boolean } | undefined;
@@ -83,12 +106,36 @@ const buzz = (kind: "phase" | "done") => {
   }, 420);
 };
 
-const ring = (tapped: boolean) => {
-  if (!chime) return;
+// A browser lets a page play each sound only after a tap has played that same
+// sound, so the tap that rings one chime also starts the other one silently.
+const prime = (player: AudioPlayer) => {
   try {
+    player.volume = 0;
+    player.play();
+    setTimeout(() => {
+      try {
+        player.pause();
+        player.seekTo(0).catch(() => undefined);
+      } finally {
+        player.volume = 1;
+      }
+    }, 60);
+  } catch {
+    // Not primed: that chime stays silent in this tab until the next tap.
+  }
+};
+
+const ring = (kind: CueKind, tapped: boolean) => {
+  if (!chimes) return;
+  const chime = chimes[kind];
+  try {
+    chime.volume = 1;
     chime.seekTo(0).catch(() => undefined);
     chime.play();
-    if (tapped) tappedChime = chime;
+    if (tapped) {
+      if (Platform.OS === "web" && tappedChimes !== chimes) prime(chimes[kind === "phase" ? "done" : "phase"]);
+      tappedChimes = chimes;
+    }
   } catch {
     // A chime that cannot play leaves the buzz.
   }
@@ -106,9 +153,9 @@ function unduck() {
  * it -- Start training, Skip phase -- which is what lets a browser play the
  * chime at all, then and at every phase change after it.
  */
-export function cuePhaseChange(kind: "phase" | "done", tapped = false) {
+export function cuePhaseChange(kind: CueKind, tapped = false) {
   buzz(kind);
-  ring(tapped);
+  ring(kind, tapped);
   // Only the latest chime gives the music back: closing the session pauses
   // every player, so an earlier cue's timer would cut a newer chime short.
   if (unduckTimer) clearTimeout(unduckTimer);
@@ -119,7 +166,7 @@ export function cuePhaseChange(kind: "phase" | "done", tapped = false) {
 }
 
 /** Whether the phase changes ahead will be heard without a tap first. Always, on a phone. */
-export const rideCuesUnlocked = () => Platform.OS !== "web" || (chime !== null && chime === tappedChime);
+export const rideCuesUnlocked = () => Platform.OS !== "web" || (chimes !== null && chimes === tappedChimes);
 
 /**
  * The rider's tap on "Turn the chime on", for a ride whose page was reloaded
@@ -129,7 +176,7 @@ export const rideCuesUnlocked = () => Platform.OS !== "web" || (chime !== null &
  */
 export function unlockRideCues() {
   if (Platform.OS !== "web") return true;
-  ring(true);
+  ring("phase", true);
   return rideCuesUnlocked();
 }
 
@@ -151,22 +198,26 @@ export async function rideAlertsAllowed(ask: boolean) {
 export async function scheduleRideAlerts(alerts: RideAlert[]): Promise<string[]> {
   if (Platform.OS === "web" || alerts.length === 0 || !(await rideAlertsAllowed(false))) return [];
   if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync(alertChannel, {
-      name: "Ride phases",
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 300, 140, 300],
-      sound: "default"
-    }).catch(() => undefined);
+    await Notifications.deleteNotificationChannelAsync(retiredAlertChannel).catch(() => undefined);
+    for (const kind of ["phase", "done"] as const) {
+      await Notifications.setNotificationChannelAsync(alertChannels[kind].id, {
+        name: alertChannels[kind].name,
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: kind === "done" ? [0, 250, 120, 250, 120, 450] : [0, 300, 140, 300],
+        sound: chimeSounds[kind].file
+      }).catch(() => undefined);
+    }
   }
   const ids: string[] = [];
   for (const alert of alerts) {
+    const kind: CueKind = alert.phaseIndex === null ? "done" : "phase";
     try {
       ids.push(await Notifications.scheduleNotificationAsync({
-        content: { title: alert.title, body: alert.body, sound: true, data: { route: alertRoute } },
+        content: { title: alert.title, body: alert.body, sound: chimeSounds[kind].file, data: { route: alertRoute } },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
           seconds: alert.inSeconds,
-          channelId: alertChannel
+          channelId: alertChannels[kind].id
         }
       }));
     } catch {

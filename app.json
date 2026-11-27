@@ -36,7 +36,11 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/notification-icon.png"
+          "icon": "./assets/notification-icon.png",
+          "sounds": [
+            "./assets/sounds/ride_phase.wav",
+            "./assets/sounds/ride_done.wav"
+          ]
         }
       ],
       "expo-web-browser",
