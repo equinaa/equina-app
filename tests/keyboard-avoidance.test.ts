@@ -243,6 +243,7 @@ const hiddenEvent: KeyboardCoordinates = { screenX: 0, screenY: screen - 48 - 24
   assert.equal(keyboard.listeningTo("keyboardWillShow"), 1);
   assert.equal(keyboard.listeningTo("keyboardWillHide"), 1);
   assert.equal(keyboard.listeningTo("keyboardDidShow"), 0, "iOS does not wait for the keyboard to finish moving.");
+  assert.equal(keyboard.listeningTo("keyboardDidHide"), 1, "keyboardDidHide only confirms the keyboard is gone.");
   const opening: FakeEvent = { endCoordinates: { screenX: 0, screenY: 566, width: 402, height: 308 }, duration: 250, easing: "keyboard" };
   keyboard.fire("keyboardWillShow", opening);
   ralf.answer();
@@ -271,7 +272,23 @@ const hiddenEvent: KeyboardCoordinates = { screenX: 0, screenY: screen - 48 - 24
   assert.equal(keyboardLayoutAnimation({ endCoordinates: { screenY: 565 }, duration: 0, easing: "keyboard" }), null);
   assert.equal(keyboardLayoutAnimation(null), null);
   assert.deepEqual(androidKeyboardEvents, { show: "keyboardDidShow", hide: "keyboardDidHide" });
-  assert.deepEqual(iosKeyboardEvents, { show: "keyboardWillShow", hide: "keyboardWillHide" });
+  assert.deepEqual(iosKeyboardEvents, { show: "keyboardWillShow", hide: "keyboardWillHide", closed: "keyboardDidHide" });
+}
+
+{
+  // iOS: a sheet that mounts after keyboardWillHide but before keyboardDidHide
+  // still finds the keyboard "visible" (React Native updates isVisible on the
+  // Did events) and is padded for it; keyboardDidHide takes that padding away.
+  const keyboard = fakeKeyboard();
+  keyboard.show({ screenX: 0, screenY: 566, width: 402, height: 308 });
+  const sheet = harness({ y: 0, height: 874 });
+  const stop = followKeyboard(keyboard.source, sheet.avoider, iosKeyboardEvents);
+  sheet.answer();
+  assert.equal(sheet.padding, 308);
+  keyboard.hide({ screenX: 0, screenY: 874, width: 402, height: 0 });
+  assert.equal(sheet.padding, 0, "keyboardDidHide clears a padding no keyboardWillHide reached.");
+  stop();
+  assert.equal(keyboard.listening, 0);
 }
 
 // Structure: every keyboard-avoiding root goes through the container.
@@ -363,6 +380,10 @@ assert.match(onboardingSource, /onLayout=\{keepFocusedFieldInView\}/);
 assert.match(onboardingSource, /onContentSizeChange=\{keepFocusedFieldInView\}/);
 assert.match(onboardingSource, /if \(fieldFocusedNow\.current\) scrollRef\.current\?\.scrollToEnd\(/);
 assert.match(onboardingSource, /fieldFocusedNow\.current = true;\s+setFieldFocused\(true\);/);
+// The ref follows the state back to false; and once the keyboard is gone no
+// field is waiting to be revealed, even one that unmounted without a blur.
+assert.match(onboardingSource, /useEffect\(\(\) => \{\s+fieldFocusedNow\.current = fieldFocused;\s+\}, \[fieldFocused\]\);/);
+assert.match(onboardingSource, /Keyboard\.addListener\("keyboardDidHide", \(\) => \{\s+fieldFocusedNow\.current = false;/);
 assert.match(onboardingSource, /testID="onboarding-name"[\s\S]{0,400}onSubmitEditing=\{handleNext\}/);
 
 console.log("Keyboard avoidance (iOS and Android) passed.");

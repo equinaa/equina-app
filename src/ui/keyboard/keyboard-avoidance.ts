@@ -114,8 +114,12 @@ export type KeyboardEventLike = {
 
 export type KeyboardEventName = "keyboardWillShow" | "keyboardWillHide" | "keyboardDidShow" | "keyboardDidHide";
 
-/** Which events open and close the keyboard for the avoider. */
-export type KeyboardEvents = { show: KeyboardEventName; hide: KeyboardEventName };
+/**
+ * Which events open and close the keyboard for the avoider. `closed`, when
+ * given, is a later event that confirms the keyboard is gone: it clears the
+ * padding again without animating.
+ */
+export type KeyboardEvents = { show: KeyboardEventName; hide: KeyboardEventName; closed?: KeyboardEventName };
 
 /**
  * iOS announces the keyboard before it moves, with its final frame, so the
@@ -124,7 +128,15 @@ export type KeyboardEvents = { show: KeyboardEventName; hide: KeyboardEventName 
  * KeyboardAvoidingView uses on iOS (not keyboardWillChangeFrame, which an
  * undocked or floating keyboard sends before keyboardWillHide).
  */
-export const iosKeyboardEvents: KeyboardEvents = { show: "keyboardWillShow", hide: "keyboardWillHide" };
+export const iosKeyboardEvents: KeyboardEvents = {
+  show: "keyboardWillShow",
+  hide: "keyboardWillHide",
+  // React Native's Keyboard.isVisible() only turns false on keyboardDidHide,
+  // so a view mounted while the keyboard is closing (a sheet opened right
+  // after a field let go of it) is padded for a keyboard that is leaving.
+  // keyboardDidHide clears that padding.
+  closed: "keyboardDidHide"
+};
 
 /**
  * In React Native 0.83 on Android (ReactRootView.checkForKeyboardEvents),
@@ -161,6 +173,9 @@ export function followKeyboard(
     beforeChange?.(event);
     avoider.hide();
   });
+  const closed = events.closed && events.closed !== events.hide
+    ? keyboard.addListener(events.closed, () => avoider.hide())
+    : undefined;
   // Mounted with the keyboard already open: React Native keeps the last
   // keyboardDidShow's coordinates until the keyboard closes.
   const open = keyboard.isVisible() ? keyboard.metrics() : undefined;
@@ -168,6 +183,7 @@ export function followKeyboard(
   return () => {
     shown.remove();
     hidden.remove();
+    closed?.remove();
   };
 }
 

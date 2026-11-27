@@ -198,6 +198,14 @@ export function OnboardingScreen({
   useEffect(() => {
     fieldFocusedNow.current = fieldFocused;
   }, [fieldFocused]);
+  // A field that unmounts while focused (the horse editor, on "Not yet") may
+  // never send its blur; once the keyboard is gone, nothing is left to reveal.
+  useEffect(() => {
+    const closed = Keyboard.addListener("keyboardDidHide", () => {
+      fieldFocusedNow.current = false;
+    });
+    return () => closed.remove();
+  }, []);
   const [accountSheetVisible, setAccountSheetVisible] = useState(false);
   const [accountMethod, setAccountMethod] = useState<AccountMethod>("choice");
   const [password, setPassword] = useState("");
