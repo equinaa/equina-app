@@ -5,6 +5,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import type { AudioPlayer } from "expo-audio";
 import type { RideAlert } from "./ride-plan";
 import { notificationRoutes } from "../notifications/notification-routes";
+import { applyRideAudioMode, registerRideAudioMode } from "./ride-audio-session";
 
 /**
  * How the phone tells a rider the phase changed: a chime and a buzz. The rider
@@ -60,6 +61,7 @@ export async function prepareRideCues() {
     // by turning it down for a moment instead of stopping it.
     await audio.setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "duckOthers" }).catch(() => undefined);
   }
+  if (Platform.OS !== "web") registerRideAudioMode(rideAudioMode);
   if (!chimes) {
     try {
       // Kept from closing the audio session on its own when it ends: unduck
@@ -74,7 +76,21 @@ export async function prepareRideCues() {
   }
 }
 
+/**
+ * The ride's audio mode, set again before each chime and as Ralf's mic lets
+ * go (ride-audio-session.ts): a lesson video changes the app's one audio
+ * session (it mixes under the music instead of turning it down), the mic
+ * leaves its recording mode behind (out through earbuds' call audio), and
+ * playing a chime never sets it back. Only while a ride's chimes are loaded,
+ * never while the mic listens, and never in a browser.
+ */
+const rideAudioMode = async () => {
+  if (!audio || !chimes || Platform.OS === "web") return;
+  await audio.setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "duckOthers" });
+};
+
 export function releaseRideCues() {
+  registerRideAudioMode(null);
   if (unduckTimer) clearTimeout(unduckTimer);
   unduckTimer = null;
   chimes?.phase.remove();
@@ -157,9 +173,24 @@ function unduck() {
  */
 export function cuePhaseChange(kind: CueKind, tapped = false) {
   buzz(kind);
-  ring(kind, tapped);
-  // Only the latest chime gives the music back: closing the session pauses
-  // every player, so an earlier cue's timer would cut a newer chime short.
+  // A browser plays the chime only inside the tap itself: at once.
+  if (Platform.OS === "web") {
+    ring(kind, tapped);
+    giveMusicBackLater();
+    return;
+  }
+  // On a phone the ride's mode is in place before the chime starts the session.
+  void applyRideAudioMode()
+    .catch(() => undefined)
+    .finally(() => {
+      ring(kind, tapped);
+      giveMusicBackLater();
+    });
+}
+
+// Only the latest chime gives the music back: closing the session pauses
+// every player, so an earlier cue's timer would cut a newer chime short.
+function giveMusicBackLater() {
   if (unduckTimer) clearTimeout(unduckTimer);
   unduckTimer = setTimeout(() => {
     unduckTimer = null;

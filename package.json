@@ -21,12 +21,19 @@
     "autolinking": {
       "exclude": [
         "@bacons/apple-targets"
-      ]
+      ],
+      "android": {
+        "exclude": [
+          "@bacons/apple-targets",
+          "react-native-nitro-modules"
+        ]
+      }
     }
   },
   "dependencies": {
     "@bacons/apple-targets": "5.0.0",
     "@expo/metro-runtime": "~55.0.12",
+    "@kingstinct/react-native-healthkit": "16.2.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "11.5.2",
     "@supabase/supabase-js": "^2.110.7",
@@ -55,6 +62,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.10",
+    "react-native-nitro-modules": "0.35.10",
     "react-native-purchases": "10.11.0",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-svg": "15.15.3",

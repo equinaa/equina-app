@@ -199,6 +199,27 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   const secureStore = options("expo-secure-store");
   assert.equal(secureStore.faceIDPermission, "Equina does not use Face ID.", "Face ID gets the same plain sentence as the camera.");
   assert.match(String(picker.photosPermission), /profile.*horses.*Club posts/, "The photo library is opened for all three; a record's file comes from the document picker.");
+  // Apple Health (2026-11-28): Apple shows these two strings in its own
+  // sheet, and App Review reads them against what the app does. Read: heart
+  // rate, active energy and workouts (all three are asked for) for each
+  // ride's time, kept on the phone unless the rider lets Ralf use them for a
+  // question, and never stored by Equina. Save: the rides the rider times,
+  // as Equestrian Sports workouts (never one added by hand). Without them the plugin writes "wants to read your health
+  // data", which says neither.
+  const health = options("@kingstinct/react-native-healthkit");
+  for (const purpose of [health.NSHealthShareUsageDescription, health.NSHealthUpdateUsageDescription]) {
+    assert.equal(typeof purpose, "string", "A purpose string is a sentence, never true or false.");
+    assert.match(String(purpose), /^[A-Z][^!]+\.$/, "Plain sentences, no exclamation mark.");
+    assert.match(String(purpose), /Apple Health/, "Apple Health by its name.");
+    assert.doesNotMatch(String(purpose), /HealthKit/, "Never the framework's name.");
+    assert.doesNotMatch(String(purpose), /\b(anthropic|claude|openai|chatgpt|gemini)\b/i, "Never the AI provider's name (tests/ralf-notice.test.ts).");
+  }
+  assert.equal(
+    health.NSHealthShareUsageDescription,
+    "Equina reads your heart rate, active energy and workouts from Apple Health for the time of each ride, to show your effort. It stays on your iPhone unless you share it with Ralf."
+  );
+  assert.equal(health.NSHealthUpdateUsageDescription, "Equina saves the rides you time to Apple Health as Equestrian Sports workouts.");
+  assert.equal(health.background, false, "No background delivery entitlement: nothing is read while Equina is closed.");
 
   // With the strings in place the image picker plugin no longer removes these itself.
   for (const permission of ["CAMERA", "SYSTEM_ALERT_WINDOW"]) {

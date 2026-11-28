@@ -62,6 +62,7 @@ export function RalfScreen({
   enabled,
   context,
   queuedPrompt,
+  queuedRideEffort,
   onQueuedPromptConsumed,
   suggestions,
   focusOptions,
@@ -75,6 +76,12 @@ export function RalfScreen({
   context: CoachConversationContext;
   /** A question asked from elsewhere ("Ask Ralf about this lesson"), sent on open. */
   queuedPrompt: string;
+  /**
+   * A ride's heart-rate line the rider allowed to go with the queued
+   * question. It is sent beside the question, never inside it, so the chat
+   * shows and keeps only the question.
+   */
+  queuedRideEffort?: string;
   onQueuedPromptConsumed: () => void;
   suggestions: readonly string[];
   /** The rider's discipline's focuses, the same list as their training profile. */
@@ -98,7 +105,7 @@ export function RalfScreen({
   useEffect(() => {
     if (!queuedPrompt) return;
     onQueuedPromptConsumed();
-    void controller.send(queuedPrompt);
+    void controller.send(queuedPrompt, queuedRideEffort ? { rideEffort: queuedRideEffort } : {});
   }, [queuedPrompt]);
 
   // A conversation keeps the horse it was started about, and the server reads

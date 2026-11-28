@@ -95,6 +95,9 @@ export function useCoachConversation({
   const contextRef = useRef(context);
   contextRef.current = context;
   const resumeLatestRef = useRef(resumeLatest);
+  // A question's heart-rate line, by the question's nonce, in memory only:
+  // a retry of that question sends it again, and nothing writes it anywhere.
+  const rideEffortsRef = useRef(new Map<string, string>());
 
   useEffect(() => {
     if (mode !== "demo" || !resumeLatestRef.current) return;
@@ -159,10 +162,18 @@ export function useCoachConversation({
     });
   }, [activeConversationId, backend, enabled, mode]);
 
-  const send = useCallback(async (raw: string, reuseNonce?: string) => {
+  /**
+   * Sends one question. `rideEffort` is a ride's heart-rate line the rider
+   * allowed to go with it: it is handed to coach-chat beside the message,
+   * never inside it, so the bubble, the demo's saved chat and the server's
+   * history hold the question alone.
+   */
+  const send = useCallback(async (raw: string, options: { reuseNonce?: string; rideEffort?: string } = {}) => {
     const text = raw.trim();
     if (!text || sending) return false;
-    const nonce = reuseNonce ?? Crypto.randomUUID();
+    const nonce = options.reuseNonce ?? Crypto.randomUUID();
+    const rideEffort = options.rideEffort?.trim() || undefined;
+    if (rideEffort) rideEffortsRef.current.set(nonce, rideEffort);
     const now = new Date().toISOString();
     const optimistic: CoachDisplayMessage = {
       id: `pending-${nonce}`,
@@ -195,6 +206,7 @@ export function useCoachConversation({
         { ...optimistic, status: "complete" },
         assistant
       ]));
+      rideEffortsRef.current.delete(nonce);
       setSending(false);
       return true;
     }
@@ -218,8 +230,10 @@ export function useCoachConversation({
           focus: contextRef.current.focus,
           load: contextRef.current.load,
           style: contextRef.current.style
-        }
+        },
+        ...(rideEffort ? { rideEffort } : {})
       });
+      rideEffortsRef.current.delete(nonce);
       setActiveConversationId(result.conversation.id);
       setConversations((current) => {
         const without = current.filter((entry) => entry.id !== result.conversation.id);
@@ -254,7 +268,8 @@ export function useCoachConversation({
     setMessages((current) => current.filter((entry) =>
       !(entry.clientNonce === message.clientNonce && entry.status === "failed")
     ));
-    return await send(message.text, message.clientNonce);
+    const rideEffort = rideEffortsRef.current.get(message.clientNonce);
+    return await send(message.text, { reuseNonce: message.clientNonce, ...(rideEffort ? { rideEffort } : {}) });
   }, [send]);
 
   const startNew = useCallback(() => {
