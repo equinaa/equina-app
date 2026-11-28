@@ -330,6 +330,14 @@ const notice = {
   assert.deepEqual(tapTarget(dayless, withItems([])), {
     screen: "calendar", day: today, notice: { ...words, detail: "This scheduled activity was removed.", day: today }
   }, "Missing with no day at all: today.");
+  // A reminder older than the list's window: its absence proves nothing.
+  const oldTap = tapOf(plannedActivityData({ id: "p1", day: "2026-10-01" }), words);
+  assert.deepEqual(tapTarget(oldTap, ctx({ planned: { items: [], complete: true, since: "2026-10-30" } })), {
+    screen: "calendar", day: "2026-10-01", notice: { ...words, day: "2026-10-01" }
+  }, "Older than the loaded window: its words only, never 'removed'.");
+  const inside = tapTarget(tomorrowTap, ctx({ planned: { items: [], complete: true, since: "2026-10-30" } }));
+  assert.equal(inside.screen === "calendar" ? inside.notice?.detail : undefined,
+    "This scheduled activity was removed.", "Inside the window, missing still means removed.");
   assert.deepEqual(tapTarget(tap, withItems([], false)), {
     screen: "calendar", day: today, notice: { ...words, day: today }
   }, "A failed read cannot say it was removed.");
@@ -413,7 +421,7 @@ const notice = {
   const hookCall = app.indexOf("useNotificationTaps({");
   assert.ok(hookCall > 0 && hookCall < app.indexOf('if (equinaSession.phase === "restoring")'), "Above the early returns, where hooks run on every render.");
   assert.doesNotMatch(app, /onOpenConversation/);
-  assert.match(app, /const tapGateOpen =\s+equinaSession\.phase === "authenticated" &&\s+accountCreated &&\s+!betaDoor &&\s+!equinaSession\.recoveryRequired &&\s+activeRideChecked;/);
+  assert.match(app, /const tapGateOpen =\s+equinaSession\.phase === "authenticated" &&\s+accountCreated &&\s+!betaDoor &&\s+!equinaSession\.recoveryRequired &&\s+activeRideChecked &&/);
   assert.match(app, /\? \(trainingPlan\.loaded \|\| trainingPlan\.failed\) && horseRecords\.horsesLoaded\s+: tapNeed === "planned"\s+\? plannedActivities\.loaded/);
   assert.match(app, /setTimeout\(\(\) => setTapWaitOver\(true\), 8000\)/, "Offline, the tap is placed after 8 seconds.");
   assert.match(app, /if \(equinaSession\.phase === "demo"\) \{\s+setPendingTap\(null\);\s+return;\s+\}/);
@@ -465,3 +473,12 @@ if (machineZone === undefined) delete process.env.TZ;
 else process.env.TZ = machineZone;
 
 console.log("Notification taps passed.");
+
+{
+  // A tap waits while a new horse is still saving: iOS will not present a
+  // sheet over the open horse creator, so the tap is placed once it settles.
+  const app = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
+  assert.match(app, /activeRideChecked &&[\s\S]{0,200}horseRecords\.saving !== "horse:create";/);
+  assert.match(app, /setHorseSwitcherOpen\(false\);\s+setHorseCreatorOpen\(false\);/);
+  assert.match(app, /since: firstLoggableDay\(localToday\(\)\)/);
+}

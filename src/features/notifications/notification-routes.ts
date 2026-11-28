@@ -104,7 +104,12 @@ export type TapContext = {
    */
   planOn: ((day: string) => { planned: readonly TrainingPlanDay[]; due: readonly TrainingPlanDay[] }) | null;
   /** The scheduled activities as loaded; `complete` is false when the last read failed. Null while unknown. */
-  planned: { items: readonly PlannedActivity[]; complete: boolean } | null;
+  planned: {
+    items: readonly PlannedActivity[];
+    complete: boolean;
+    /** The first day the list covers: older activities are not in it, so their absence proves nothing. */
+    since?: string;
+  } | null;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -288,7 +293,9 @@ function plannedActivityTarget(tap: Extract<NotificationTap, { route: "planned-a
   // Only a list read whole can say it is gone; a failed read says nothing.
   return calendarOr(ctx, day, noticeOf(tap, "Scheduled activity", {
     day,
-    ...(ctx.planned?.complete ? { detail: "This scheduled activity was removed." } : {})
+    ...(ctx.planned?.complete && (!ctx.planned.since || day >= ctx.planned.since)
+      ? { detail: "This scheduled activity was removed." }
+      : {})
   }));
 }
 

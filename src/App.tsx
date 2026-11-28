@@ -160,7 +160,7 @@ import { useClub } from "./features/club/useClub";
 import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
 import { localDayOf, localToday, startOfPreviousMonth } from "./domain/local-day";
-import { activitiesByDay } from "./domain/activity-calendar";
+import { activitiesByDay, firstLoggableDay } from "./domain/activity-calendar";
 import { ActivityCalendarScreen } from "./features/calendar/ActivityCalendarScreen";
 import { HomeWeekStrip } from "./features/calendar/HomeWeekStrip";
 import { RalfMedal } from "./features/coach/RalfMedal";
@@ -2074,7 +2074,7 @@ function EquinaApp() {
     closeCalendar();
     setRideJournalOpen(false);
     setHorseSwitcherOpen(false);
-    if (horseRecords.saving !== "horse:create") setHorseCreatorOpen(false);
+    setHorseCreatorOpen(false);
     setStreakOpen(false);
     setTrainingPlanOpen(false);
     setTimeOffHorseId("");
@@ -2131,7 +2131,10 @@ function EquinaApp() {
     accountCreated &&
     !betaDoor &&
     !equinaSession.recoveryRequired &&
-    activeRideChecked;
+    activeRideChecked &&
+    // A horse still saving keeps its sheet up: iOS will not present another
+    // sheet over it, so the tap waits until the save settles.
+    horseRecords.saving !== "horse:create";
   // What the tap's route needs read first. A failed read counts as read: the
   // notification's own words are shown either way.
   const tapNeed = pendingTap ? tapNeeds(pendingTap) : null;
@@ -2166,7 +2169,7 @@ function EquinaApp() {
         calendar: ridePersistence,
         planOn: ridePersistence && trainingPlan.loaded && horseRecords.horsesListed ? trainingPlan.rideDay : null,
         planned: ridePersistence && plannedActivities.loaded
-          ? { items: plannedActivities.items, complete: !plannedActivities.error }
+          ? { items: plannedActivities.items, complete: !plannedActivities.error, since: firstLoggableDay(localToday()) }
           : null
       }),
       tap.key
