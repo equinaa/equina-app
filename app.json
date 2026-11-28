@@ -22,7 +22,7 @@
         {
           "photosPermission": "Equina uses the photos you choose for your profile, your horses and Club posts.",
           "cameraPermission": "Equina does not use the camera.",
-          "microphonePermission": "Equina does not use the microphone."
+          "microphonePermission": "Equina uses the microphone only while you hold the mic to ask Ralf a question. What you say becomes text on your phone."
         }
       ],
       "expo-video",
@@ -47,9 +47,16 @@
       "expo-apple-authentication",
       "./plugins/with-storekit-configuration.cjs",
       [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Equina uses the microphone only while you hold the mic to ask Ralf a question. What you say becomes text on your phone.",
+          "speechRecognitionPermission": "Equina turns what you say to Ralf into text, on your phone, while you hold the mic."
+        }
+      ],
+      [
         "expo-audio",
         {
-          "microphonePermission": "Equina does not use the microphone.",
+          "microphonePermission": "Equina uses the microphone only while you hold the mic to ask Ralf a question. What you say becomes text on your phone.",
           "recordAudioAndroid": false,
           "enableBackgroundPlayback": false
         }
@@ -89,7 +96,6 @@
       ],
       "blockedPermissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },

@@ -175,21 +175,23 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     "Without the export compliance answer, every TestFlight build waits on Missing Compliance."
   );
 
-  // The binary links the camera and microphone APIs through expo-image-picker
-  // and expo-audio, although the app never asks for either. Apple refuses an
-  // upload whose Info.plist has no purpose string for them (ITMS-90683), and
-  // `false` in these options deletes the string.
+  // The binary links the camera API through expo-image-picker, although the
+  // app never asks for it. Apple refuses an upload whose Info.plist has no
+  // purpose string for it (ITMS-90683), and `false` in these options deletes
+  // the string. The microphone is used, to ask Ralf by voice: three plugins
+  // write its string, and the order of the plugins decides which one stays,
+  // so they all say the same.
   const picker = options("expo-image-picker");
   const audio = options("expo-audio");
-  for (const purpose of [picker.photosPermission, picker.cameraPermission, picker.microphonePermission, audio.microphonePermission]) {
+  const speech = options("expo-speech-recognition");
+  for (const purpose of [picker.photosPermission, picker.cameraPermission, picker.microphonePermission, audio.microphonePermission, speech.microphonePermission, speech.speechRecognitionPermission]) {
     assert.equal(typeof purpose, "string", "A purpose string is a sentence, never false.");
     assert.match(String(purpose), /^[A-Z][^!]+\.$/, "One plain sentence, no exclamation mark.");
   }
-  assert.equal(
-    audio.microphonePermission,
-    picker.microphonePermission,
-    "Both plugins write the microphone string and the order of the plugins decides which one stays, so they say the same."
-  );
+  assert.equal(audio.microphonePermission, picker.microphonePermission, "The plugins write one microphone string.");
+  assert.equal(speech.microphonePermission, picker.microphonePermission, "The plugins write one microphone string.");
+  assert.match(String(speech.microphonePermission), /hold the mic to ask Ralf/, "The microphone is asked for the one thing it is used for.");
+  assert.match(String(speech.speechRecognitionPermission), /on your phone/, "Speech becomes text on the phone.");
   // expo-secure-store links the Face ID API, which the app never calls (no
   // requireAuthentication), and would otherwise write Expo's generic request.
   const secureStore = options("expo-secure-store");
@@ -197,7 +199,7 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   assert.match(String(picker.photosPermission), /profile.*horses.*Club posts/, "The photo library is opened for all three; a record's file comes from the document picker.");
 
   // With the strings in place the image picker plugin no longer removes these itself.
-  for (const permission of ["CAMERA", "RECORD_AUDIO", "SYSTEM_ALERT_WINDOW"]) {
+  for (const permission of ["CAMERA", "SYSTEM_ALERT_WINDOW"]) {
     assert.ok(
       android?.blockedPermissions?.includes(`android.permission.${permission}`),
       `${permission} stays out of the Android manifest.`
