@@ -544,7 +544,7 @@ export const RALF_EFFORT_CONSENT = {
   message:
     "When you ask Ralf about a ride, Equina can add your heart rate and calories from it: the average, the highest and each phase's average, never the full line. " +
     "These numbers are sent with that one question to the AI service that writes Ralf's answers. " +
-    "Equina does not save them: Ralf is asked not to repeat them, and Equina takes out any his reply holds before saving it. " +
+    "Equina does not save them: Ralf is asked not to repeat them, and Equina removes any that appear in his reply before saving it. " +
     "Ralf talks about training effort, not medical matters. You can change this anytime in Account, Privacy and Ralf.",
   allow: "Allow",
   // Kept as the answer, so the question is not asked again: "Don't allow"

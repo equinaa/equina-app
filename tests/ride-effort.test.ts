@@ -493,7 +493,7 @@ for (const training of rideTrainingTypes) {
   assert.match(RALF_EFFORT_CONSENT.message, /These numbers are sent with that one question to the AI service that writes Ralf's answers\./);
   // Equina keeps none of them: coach-chat saves the question alone, and
   // takes them out of the reply before it saves that.
-  assert.match(RALF_EFFORT_CONSENT.message, /Equina does not save them: Ralf is asked not to repeat them, and Equina takes out any his reply holds before saving it\./);
+  assert.match(RALF_EFFORT_CONSENT.message, /Equina does not save them: Ralf is asked not to repeat them, and Equina removes any that appear in his reply before saving it\./);
   assert.doesNotMatch(RALF_EFFORT_CONSENT.message, /reply does not repeat them/, "Never a promise about what the model writes.");
   assert.equal(RALF_EFFORT_SWITCH_DETAIL, "From Apple Health, only in the rides you ask about. Sent to the AI service that writes Ralf's answers.");
   assert.match(RALF_EFFORT_CONSENT.message, /never the full line/);
