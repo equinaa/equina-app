@@ -34,9 +34,10 @@ export function useRideLiveActivity(rideActive: boolean, ridePlan: RidePlan | nu
   // on another tab, so the time itself has to ask for a new look.
   const [look, setLook] = useState(0);
   // The activity of the ride now: its id once shown, and whether the rider
-  // or iOS has ended it (then it is left ended for this ride). The ended
-  // ride is also kept on the phone (ride-activity-calls.ts), so a relaunch
-  // mid-ride does not bring back what the rider swiped away.
+  // or iOS has ended it (then it is left ended for this ride). The ride that
+  // has had one is also kept on the phone (ride-activity-calls.ts), so a
+  // relaunch mid-ride does not bring back what the rider swiped away, even
+  // while the app was suspended.
   const shown = useRef<{ rideId: string; id: string | null; gone: boolean } | null>(null);
   const sent = useRef("");
   const rideRef = useRef(rideId);

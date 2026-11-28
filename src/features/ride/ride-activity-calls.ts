@@ -30,12 +30,14 @@ export type ShownRideActivity = {
 };
 
 /**
- * The ride whose activity the rider swiped away, or iOS ended, kept on the
- * phone rather than in memory: iOS often closes a suspended app during a long
- * locked ride, and the activity the rider removed must not come back when the
- * ride does. One ride at a time, so one id.
+ * The ride that has had an activity, kept on the phone rather than in memory,
+ * from the moment one is shown. iOS often closes a suspended app during a
+ * long locked ride, and the rider can swipe the activity away while the app
+ * is suspended, with no code running to notice: on the relaunch, a ride kept
+ * here with no activity showing had one removed, and it must not come back.
+ * One ride at a time, so one id.
  */
-export const rideActivityDismissedKey = "equina.ride-activity-dismissed.v1";
+export const rideActivityShownKey = "equina.ride-activity-shown.v1";
 
 export function createRideActivityCalls(nativeModule: () => NativeRideActivity | null, storage: RideActivityStorage) {
   /** iOS 16.2 or later, with Live Activities on for Equina. Asked each time: the rider can turn them off. */
@@ -61,23 +63,23 @@ export function createRideActivityCalls(nativeModule: () => NativeRideActivity |
 
   // Storage that fails costs only this: an activity swiped away may come
   // back after a relaunch. It never stops the call it is part of.
-  const dismissedRide = async () => {
+  const shownRide = async () => {
     try {
-      return await storage.getItem(rideActivityDismissedKey);
+      return await storage.getItem(rideActivityShownKey);
     } catch {
       return null;
     }
   };
-  const keepDismissed = async (rideId: string) => {
+  const keepShown = async (rideId: string) => {
     try {
-      await storage.setItem(rideActivityDismissedKey, rideId);
+      await storage.setItem(rideActivityShownKey, rideId);
     } catch {
       // Left in memory only (useRideLiveActivity), as before.
     }
   };
-  const forgetDismissed = async () => {
+  const forgetShown = async () => {
     try {
-      await storage.removeItem(rideActivityDismissedKey);
+      await storage.removeItem(rideActivityShownKey);
     } catch {
       // A later ride has its own id, so an old one left here never matches it.
     }
@@ -88,8 +90,8 @@ export function createRideActivityCalls(nativeModule: () => NativeRideActivity |
    * one -- a ride just started, or brought back after the app was closed --
    * the activities still showing are looked at first: the ride's own is taken
    * back (iOS keeps an activity through a force quit), any other is ended, and
-   * only then is one started, unless the rider had already swiped this ride's
-   * away.
+   * only then is one started, unless this ride has had one already: then it
+   * was swiped away or ended, and stays so.
    */
   const show = (attributes: RideActivityAttributes, content: RideActivityContent, knownId: string | null) =>
     inTurn<ShownRideActivity>(async (module) => {
@@ -97,7 +99,7 @@ export function createRideActivityCalls(nativeModule: () => NativeRideActivity |
       if (knownId) {
         const updated = await module.update(knownId, state, content.staleDateMs);
         if (updated) return { id: knownId, gone: false };
-        await keepDismissed(attributes.rideId);
+        await keepShown(attributes.rideId);
         return { id: null, gone: true };
       }
       let id: string | null = null;
@@ -107,17 +109,22 @@ export function createRideActivityCalls(nativeModule: () => NativeRideActivity |
       }
       if (id) {
         await module.update(id, state, content.staleDateMs);
+        await keepShown(attributes.rideId);
         return { id, gone: false };
       }
-      if ((await dismissedRide()) === attributes.rideId) return { id: null, gone: true };
+      // This ride had an activity and none is showing, because the rider
+      // swiped it away or iOS ended it, possibly while the app was suspended.
+      if ((await shownRide()) === attributes.rideId) return { id: null, gone: true };
       if (!supported(module)) return { id: null, gone: false };
-      return { id: await module.start(JSON.stringify(attributes), state, content.staleDateMs), gone: false };
+      const started = await module.start(JSON.stringify(attributes), state, content.staleDateMs);
+      await keepShown(attributes.rideId);
+      return { id: started, gone: false };
     }, { id: null, gone: false });
 
   /** Ends every ride activity at once: the ride is over, or nobody is riding. */
   const endAll = () =>
     inTurn(async (module) => {
-      await forgetDismissed();
+      await forgetShown();
       await module.endAll();
     }, undefined);
 

@@ -23,7 +23,7 @@ import {
 } from "../src/features/ride/ride-live-activity";
 import {
   createRideActivityCalls,
-  rideActivityDismissedKey,
+  rideActivityShownKey,
   type NativeRideActivity,
   type RideActivityStorage
 } from "../src/features/ride/ride-activity-calls";
@@ -251,14 +251,14 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   const first = createRideActivityCalls(() => device.module, storageOf(items));
   const shown = await first.show(attributes, rideActivityContent(plan, started, t0 + minute), null);
   assert.deepEqual(shown, { id: "activity-1", gone: false }, "The ride starts its activity.");
-  assert.equal(items.size, 0, "Nothing is kept while it shows.");
+  assert.deepEqual([...items], [[rideActivityShownKey, String(t0)]], "The ride that has an activity is kept on the phone, under its id, once it shows.");
+  assert.equal(rideActivityShownKey, "equina.ride-activity-shown.v1");
 
   // The rider swipes it off the lock screen: the next update finds it gone.
   device.showing.length = 0;
   const gone = await first.show(attributes, rideActivityContent(plan, started, t0 + 12 * minute), "activity-1");
   assert.deepEqual(gone, { id: null, gone: true });
-  assert.equal(items.get(rideActivityDismissedKey), String(t0), "The dismissal is kept on the phone, under the ride's id.");
-  assert.equal(rideActivityDismissedKey, "equina.ride-activity-dismissed.v1");
+  assert.equal(items.get(rideActivityShownKey), String(t0), "Still kept on the phone, under the ride's id.");
 
   // iOS closes the app mid-ride and the rider opens it again: a new launch,
   // nothing in memory, and the ride brought back from the phone.
@@ -271,19 +271,20 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   assert.deepEqual(device.calls, [], "No activity is started for it.");
   assert.equal(device.showing.length, 0);
 
-  // The ride ends: the dismissal goes with it, and the next ride shows again.
+  // The ride ends: the kept ride goes with it, and the next ride shows again.
   await relaunch.endAll();
-  assert.equal(items.has(rideActivityDismissedKey), false, "Cleared when the ride's activities are ended.");
+  assert.equal(items.has(rideActivityShownKey), false, "Cleared when the ride's activities are ended.");
   const nextRun = startRun(readyRun(), t0 + 3 * 60 * minute);
   const next = await relaunch.show(rideActivityAttributes(plan, nextRun)!, rideActivityContent(plan, nextRun, t0 + 3 * 60 * minute), null);
   assert.deepEqual(next, { id: "activity-2", gone: false });
 
-  // A dismissal left by another ride (its end never reached the storage)
-  // does not hide this one.
+  // A ride left there by another ride (its end never reached the storage)
+  // does not hide this one, which takes its place.
   const other = phone();
-  const stale = new Map([[rideActivityDismissedKey, "1700000000000"]]);
+  const stale = new Map([[rideActivityShownKey, "1700000000000"]]);
   const otherRide = await createRideActivityCalls(() => other.module, storageOf(stale)).show(attributes, rideActivityContent(plan, started, t0), null);
   assert.deepEqual(otherRide, { id: "activity-1", gone: false });
+  assert.equal(stale.get(rideActivityShownKey), String(t0));
 
   // Relaunched with the activity still on the lock screen: taken back, not started again.
   const kept = phone();
@@ -293,8 +294,36 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   const retaken = await createRideActivityCalls(() => kept.module, storageOf(keptItems)).show(attributes, rideActivityContent(plan, restored, t0 + 20 * minute), null);
   assert.deepEqual(retaken, { id: "activity-1", gone: false });
   assert.deepEqual(kept.calls, ["update activity-1"]);
+  assert.equal(keptItems.get(rideActivityShownKey), String(t0), "A ride taken back is kept as one that has an activity.");
+  // Kept even when the storage lost it: taking the activity back writes it again.
+  const relost = phone();
+  const relostItems = new Map<string, string>();
+  await createRideActivityCalls(() => relost.module, storageOf(relostItems)).show(attributes, rideActivityContent(plan, started, t0), null);
+  relostItems.clear();
+  await createRideActivityCalls(() => relost.module, storageOf(relostItems)).show(attributes, rideActivityContent(plan, restored, t0 + 20 * minute), null);
+  assert.equal(relostItems.get(rideActivityShownKey), String(t0));
 
-  // Storage that fails never stops the activity, nor loses the dismissal in memory.
+  // Swiped away while the app was suspended, then iOS closed the app: no code
+  // ran to see it go, and no update ever failed. On the relaunch the ride is
+  // kept as one that had an activity and none is showing, so it stays away.
+  const suspended = phone();
+  const suspendedItems = new Map<string, string>();
+  assert.deepEqual(
+    await createRideActivityCalls(() => suspended.module, storageOf(suspendedItems)).show(attributes, rideActivityContent(plan, started, t0), null),
+    { id: "activity-1", gone: false }
+  );
+  suspended.showing.length = 0;
+  suspended.calls.length = 0;
+  const afterSwipe = await createRideActivityCalls(() => suspended.module, storageOf(suspendedItems)).show(
+    rideActivityAttributes(plan, restored)!,
+    rideActivityContent(plan, restored, t0 + 20 * minute),
+    null
+  );
+  assert.deepEqual(afterSwipe, { id: null, gone: true }, "The activity swiped away while the app slept does not come back.");
+  assert.deepEqual(suspended.calls, [], "Nothing is started, updated or ended for it.");
+  assert.equal(suspended.showing.length, 0);
+
+  // Storage that fails never stops the activity, nor loses in memory that it is gone.
   const broken: RideActivityStorage = {
     getItem: async () => {
       throw new Error("no storage");
@@ -312,7 +341,7 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   fragile.showing.length = 0;
   assert.deepEqual(await calls.show(attributes, rideActivityContent(plan, started, t0 + 12 * minute), "activity-1"), { id: null, gone: true });
   await calls.endAll();
-  assert.deepEqual(fragile.calls.slice(-1), ["endAll"], "Ended even when the dismissal cannot be cleared.");
+  assert.deepEqual(fragile.calls.slice(-1), ["endAll"], "Ended even when the kept ride cannot be cleared.");
 
   // No module (Android, web, an older build): nothing is asked of the storage either.
   const untouched = new Map<string, string>();
@@ -431,7 +460,7 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   assert.match(native, /requireOptionalNativeModule<NativeRideActivity>\("RideActivity"\)/, "Asked of Expo, so a missing module is null.");
   assert.match(native, /if \(Platform\.OS !== "ios"\) return \(loaded = null\);/, "Web and Android never look.");
   assert.doesNotMatch(native, /\brequire\(|requireNativeModule\(/, "Never required: Metro reports a failed require as fatal.");
-  assert.match(native, /createRideActivityCalls\(rideActivityModule, AsyncStorage\)/, "On the phone, a dismissal is kept in AsyncStorage.");
+  assert.match(native, /createRideActivityCalls\(rideActivityModule, AsyncStorage\)/, "On the phone, the ride that has had an activity is kept in AsyncStorage.");
   const calls = read("src/features/ride/ride-activity-calls.ts");
   assert.doesNotMatch(calls, /from "(expo|react-native)"/, "The calls take the module and the storage, so they run under node.");
   assert.match(calls, /if \(!module\) return Promise\.resolve\(fallback\);/, "Without it, every call resolves to nothing.");
