@@ -246,6 +246,18 @@ export function useTrainingPlan({
     }
   }, [backend, enabled]);
 
+  /**
+   * One day as the reminders read it, for a tapped one: what the rider's own
+   * horses have planned on it, and what of that is still to ride. Read from
+   * the plan as it is now, which may have changed since the reminder went.
+   */
+  const rideDay = (day: string) => {
+    const horses = new Set(activeHorseIds ?? []);
+    const plannedWith = (rides: readonly RideEnd[]) =>
+      upcomingPlannedDays(versions, rides, day, 1, timeOff, horses)[0]?.planned ?? [];
+    return { planned: plannedWith([]), due: plannedWith(completions) };
+  };
+
   const removeTimeOff = useCallback(async (id: string) => {
     if (!backend || !enabled) throw new Error("Ride logging is not enabled for this account.");
     try {
@@ -264,6 +276,7 @@ export function useTrainingPlan({
     removeTimeOff,
     currentPlan,
     streak,
+    rideDay,
     loaded,
     failed,
     saving,

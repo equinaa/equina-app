@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import type { TrainingPlanDay } from "../../backend";
+import { notificationRoutes, trainingDayData } from "../notifications/notification-routes";
 import { rideAlertsAllowed } from "./ride-cues";
 
 /**
@@ -18,7 +19,7 @@ import { rideAlertsAllowed } from "./ride-cues";
 
 export const reminderHour = 8;
 export const reminderWindowDays = 21;
-const reminderRoute = "training-day";
+const reminderRoute = notificationRoutes.trainingDay;
 const reminderChannel = "training-days";
 
 export type TrainingReminder = { day: string; planned: TrainingPlanDay[]; title: string; body: string };
@@ -89,7 +90,9 @@ export function syncTrainingReminders(reminders: TrainingReminder[], ask: boolea
       if (at.getTime() <= now) continue;
       try {
         await Notifications.scheduleNotificationAsync({
-          content: { title: reminder.title, body: reminder.body, data: { route: reminderRoute, day: reminder.day } },
+          // The day and the rides it names, so a tap opens that ride even
+          // before the plan has loaded (notification-routes.ts).
+          content: { title: reminder.title, body: reminder.body, data: trainingDayData(reminder.day, reminder.planned) },
           trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId: reminderChannel }
         });
       } catch {

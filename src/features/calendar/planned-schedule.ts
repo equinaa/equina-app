@@ -3,7 +3,8 @@ import type { PlannedActivity } from "../../backend";
 /** How far ahead reminders are set, like the training-day reminders. */
 export const plannedReminderWindowDays = 21;
 
-export type PlannedReminder = { id: string; at: Date; title: string; body: string };
+/** `day` is the activity's local day, which a tap opens the calendar on. */
+export type PlannedReminder = { id: string; day: string; at: Date; title: string; body: string };
 
 /** The local start of a scheduled activity. */
 export const plannedStart = (activity: Pick<PlannedActivity, "day" | "startMinutes">) => {
@@ -21,4 +22,4 @@ export const plannedReminders = (
     .filter((activity) => activity.status === "planned")
     .map((activity) => ({ activity, at: plannedStart(activity) }))
     .filter(({ at }) => at.getTime() > now && at.getTime() <= now + plannedReminderWindowDays * 24 * 60 * 60 * 1000)
-    .map(({ activity, at }) => ({ id: activity.id, at, ...describe(activity) }));
+    .map(({ activity, at }) => ({ id: activity.id, day: activity.day, at, ...describe(activity) }));

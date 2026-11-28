@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import type { PlannedReminder } from "./planned-schedule";
+import { notificationRoutes, plannedActivityData } from "../notifications/notification-routes";
 import { rideAlertsAllowed } from "../ride/ride-cues";
 
 export { plannedReminders, plannedStart, type PlannedReminder } from "./planned-schedule";
@@ -12,7 +13,7 @@ export { plannedReminders, plannedStart, type PlannedReminder } from "./planned-
  * ahead at most, like the training-day reminders. Phones only.
  */
 
-const route = "planned-activity";
+const route = notificationRoutes.plannedActivity;
 const channel = "scheduled-activities";
 
 // One rebuild at a time, the newest winning, as in training-reminders.ts.
@@ -54,7 +55,9 @@ export function syncPlannedReminders(reminders: PlannedReminder[], ask: boolean)
       if (mine !== generation) return;
       try {
         await Notifications.scheduleNotificationAsync({
-          content: { title: reminder.title, body: reminder.body, data: { route, id: reminder.id } },
+          // Its day too: a tap opens the calendar there even once the
+          // activity is gone from the list.
+          content: { title: reminder.title, body: reminder.body, data: plannedActivityData(reminder) },
           trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: reminder.at, channelId: channel }
         });
       } catch {
