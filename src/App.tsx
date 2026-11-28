@@ -206,6 +206,8 @@ import { useRideSetupMemory } from "./features/ride/useRideSetupMemory";
 import { clearActiveRide, useActiveRide } from "./features/ride/useActiveRide";
 import { restoreRun, rideAlertsOrphanedIn, type ActiveRide } from "./features/ride/active-ride";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
+import { useRideCues } from "./features/ride/useRideCues";
+import { forgetRideTimeline, saveRideTimeline } from "./features/ride/ride-timeline";
 import {
   careLoggedOn,
   disciplineFromHorse,
@@ -226,6 +228,7 @@ import {
   activityStartedAt,
   cleanPhases,
   defaultTrainingType,
+  phaseWindows,
   phasesFor,
   plannedMinutes,
   readyRun,
@@ -1219,7 +1222,7 @@ function EquinaApp() {
   // phone, which may still be running by the clock. They stay until the
   // session says whether that ride comes back: offline or still restoring,
   // nothing is known yet, and they are what a locked phone hears. A ride
-  // brought back replaces them with its own -- the ride screen cancels these
+  // brought back replaces them with its own -- useRideCues cancels these
   // first, so none is doubled. With no account a ride can come back to, or
   // none to bring back, they go.
   useEffect(() => {
@@ -1248,6 +1251,11 @@ function EquinaApp() {
       setActiveRideChecked(true);
     }
   );
+  // The ride's chimes and the alerts for a locked phone, here rather than on
+  // the ride screen: the tab dock stays up mid-ride, and another tab unmounts
+  // that screen. They start with the ride, follow its pauses and skips, and
+  // stop with it -- Finish, End ride without saving, or signing out.
+  useRideCues(rideActive, ridePlan, rideRun);
   // Every horse the rider has, not only the one selected in the Stable: a
   // rider with two horses picks today's on the setup sheet.
   const rideHorses: RideSetupHorse[] = horseRecords.horses.some((record) => !record.archivedAt)
@@ -1874,7 +1882,7 @@ function EquinaApp() {
     refresh("Ride started.");
   };
 
-  const finishRide = (session: RideCompletion) => {
+  const finishRide = (session: RideCompletion, finishedRun: RideRun) => {
     setRideActive(false);
     setRideRun(null);
     activeRide.clear();
@@ -1893,6 +1901,14 @@ function EquinaApp() {
       );
       return;
     }
+
+    // When each phase was ridden, on the wall clock, kept on this phone only:
+    // heart-rate samples are split by it, and the journal never receives it.
+    // Only on an iPhone, the one place Apple Health reads it: a browser on a
+    // shared computer keeps nothing of the ride.
+    const timeline = ridePlan ? phaseWindows(finishedRun, ridePlan.phases) : null;
+    const riderId = equinaSession.session?.user.id;
+    if (timeline && riderId && Platform.OS === "ios") void saveRideTimeline(riderId, session.startedAt, timeline);
 
     // The recap is shown immediately from local state and reconciled once the
     // write lands, so a slow network never blocks the rider's own summary.
@@ -2014,6 +2030,8 @@ function EquinaApp() {
     setDeletingRideId(id);
     try {
       await rideJournal.deleteRide(id);
+      // Its windows on this phone go with it.
+      if (deleted) void forgetRideTimeline(deleted.riderId, deleted.startedAt);
       // The ride finished this session is also held locally; once it is
       // deleted, Home must not keep calling it the last ride.
       if (deleted && localLastRide && Date.parse(localLastRide.completedAt) === Date.parse(deleted.completedAt)) {

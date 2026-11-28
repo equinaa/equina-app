@@ -117,7 +117,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
   assert.match(hook, /try \{\s+loaded = \(require\("expo-speech-recognition"\) as SpeechPackage\)\.ExpoSpeechRecognitionModule;\s+\} catch \{\s+loaded = null;/);
   // Let go before the permission answer: it does not start after all; let go
   // before the native session began: stopped as soon as it does.
-  assert.match(hook, /const settle = \(next\?: string\) => \{\s+busy\.current = false;\s+setListening\(false\);\s+if \(next\) say\(next\);/);
+  assert.match(hook, /const settle = \(next\?: string\) => \{\s+busy\.current = false;\s+setListening\(false\);\s+setRideMicListening\(false\);\s+if \(next\) say\(next\);/);
   assert.match(hook, /if \(released\.current\) return settle\(READY_HINT\);/);
   assert.match(hook, /module\.addListener\("start", \(\) => \{\s+if \(released\.current\) module\.stop\(\);/);
   // One session at a time: a press while the last one finishes is ignored, so its late words never land twice.
@@ -132,7 +132,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
   );
   assert.match(
     hook,
-    /const lang = await speechLanguage\(module\);\s+\/\/[^\n]*\n\s+if \(released\.current\) return settle\(shown\.current \? undefined : RETRY_HINT\);\s+if \(!lang\) \{\s+settle\(noLanguageHint\(Platform\.OS\)\);\s+setSupported\(false\);\s+return;\s+\}\s+module\.start\(\{\s+lang,/,
+    /const lang = await speechLanguage\(module\);\s+\/\/[^\n]*\n\s+if \(released\.current\) return settle\(shown\.current \? undefined : RETRY_HINT\);\s+if \(!lang\) \{\s+settle\(noLanguageHint\(Platform\.OS\)\);\s+setSupported\(false\);\s+return;\s+\}\s+\/\/[^\n]*\n\s+setRideMicListening\(true\);\s+module\.start\(\{\s+lang,/,
     "No language the phone can hear: say so, and do not start.",
   );
   assert.doesNotMatch(hook, /lang: deviceSpeechLocale\(\)/);

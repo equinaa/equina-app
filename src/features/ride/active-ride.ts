@@ -6,6 +6,8 @@ import {
   rideElapsedMs,
   ridePhaseLimits,
   syncRun,
+  wallClockAt,
+  type RideMark,
   type RidePhasePlan,
   type RidePlan,
   type RideRun,
@@ -64,6 +66,35 @@ const parsePlan = (value: unknown): RidePlan | null => {
   };
 };
 
+// Far more than a ride makes: a start, the phases, an end and a few hundred pauses.
+const maxMarks = 1000;
+
+/**
+ * The timeline, or undefined when there is none to trust: it begins at the
+ * ride's start, runs oldest first and names only the plan's phases. A broken
+ * one costs the ride its timeline, not the ride itself.
+ */
+const parseMarks = (value: unknown, phaseCount: number, startedAt: number): RideMark[] | undefined => {
+  if (!Array.isArray(value) || value.length === 0 || value.length > maxMarks) return undefined;
+  const marks: RideMark[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return undefined;
+    const { kind, at, index } = item as Record<string, unknown>;
+    if (!finite(at) || at < (marks[marks.length - 1]?.at ?? startedAt)) return undefined;
+    if (kind === "phase") {
+      if (!finite(index) || !Number.isInteger(index) || index < 1 || index >= phaseCount) return undefined;
+      marks.push({ kind, at, index });
+    } else if (kind === "start" || kind === "pause" || kind === "resume" || kind === "end") {
+      marks.push({ kind, at });
+    } else {
+      return undefined;
+    }
+  }
+  if (marks[0]?.kind !== "start" || marks[0].at !== startedAt) return undefined;
+  if (marks.slice(1).some((mark) => mark.kind === "start")) return undefined;
+  return marks;
+};
+
 const parseRun = (value: unknown, phaseCount: number): RideRun | null => {
   if (!value || typeof value !== "object") return null;
   const run = value as Record<string, unknown>;
@@ -76,6 +107,8 @@ const parseRun = (value: unknown, phaseCount: number): RideRun | null => {
   if (!phaseStarts.every((start) => finite(start) && start >= 0)) return null;
   if (typeof phasesDone !== "boolean") return null;
   if (endedAt !== undefined && (!finite(endedAt) || endedAt < startedAt)) return null;
+  // Kept by an app from before the timeline, a ride has no marks and still comes back.
+  const marks = run.marks === undefined ? undefined : parseMarks(run.marks, phaseCount, startedAt);
   return {
     startedAt,
     bankedMs,
@@ -83,7 +116,8 @@ const parseRun = (value: unknown, phaseCount: number): RideRun | null => {
     phaseIndex,
     phaseStarts: [...phaseStarts],
     phasesDone,
-    ...(endedAt === undefined ? {} : { endedAt })
+    ...(endedAt === undefined ? {} : { endedAt }),
+    ...(marks ? { marks } : {})
   };
 };
 
@@ -118,17 +152,25 @@ export const restoreRun = (run: RideRun, phases: RidePhasePlan[], now: number, s
   const totalMs = plannedMinutes(phases) * 60_000;
   if (rideElapsedMs(synced, now) <= totalMs) return synced;
   // The clock reached the total that far into its last stretch, or, paused,
-  // that long before the pause.
-  const endedAt = synced.runningSince === null
-    ? Math.min(savedAt, now) - (synced.bankedMs - totalMs)
-    : synced.runningSince + Math.max(0, totalMs - synced.bankedMs);
+  // that long before the pause. With a timeline, its stretches say exactly
+  // when, a break included.
+  const reachedTotal = synced.marks
+    ? wallClockAt(synced, totalMs)
+    : synced.runningSince === null
+      ? Math.min(savedAt, now) - (synced.bankedMs - totalMs)
+      : synced.runningSince + Math.max(0, totalMs - synced.bankedMs);
+  // Never before the start, whatever the phone's clock said at the write.
+  const endedAt = Math.max(synced.startedAt ?? 0, reachedTotal);
   return {
     ...synced,
     bankedMs: totalMs,
     runningSince: null,
     phasesDone: true,
-    // Never before the start, whatever the phone's clock said at the write.
-    endedAt: Math.max(synced.startedAt ?? 0, endedAt)
+    endedAt,
+    // Whatever the timeline says after that moment was the phone in a pocket.
+    ...(synced.marks
+      ? { marks: [...synced.marks.filter((mark) => mark.at <= endedAt), { kind: "end", at: endedAt } satisfies RideMark] }
+      : {})
   };
 };
 

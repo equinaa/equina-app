@@ -134,6 +134,30 @@ export const cleanPhases = (phases: RidePhasePlan[]): RidePhasePlan[] =>
 // The clock ---------------------------------------------------------------
 
 /**
+ * A moment the ride's clock changed, on the wall clock (epoch ms). Ride time
+ * leaves the pauses out, so it cannot say when a phase was ridden; heart-rate
+ * samples and the lock screen go by the wall clock, and these say it. `phase`
+ * is a phase beginning (`index`), by the clock or by a skip; `end` is the
+ * Finish, or the planned time running out on a ride brought back after it.
+ */
+export type RideMark =
+  | { kind: "start"; at: number }
+  | { kind: "pause"; at: number }
+  | { kind: "resume"; at: number }
+  | { kind: "phase"; at: number; index: number }
+  | { kind: "end"; at: number };
+
+/** A stretch of the wall clock, in epoch ms, end after start. */
+export type RideWindow = { start: number; end: number };
+
+/**
+ * When one phase was ridden: the stretches the clock ran while it was the
+ * current phase. A pause splits a phase into two windows; a phase skipped the
+ * moment it began has none.
+ */
+export type RidePhaseWindows = { phaseIndex: number; windows: RideWindow[] };
+
+/**
  * Ride time is kept as timestamps, never as ticks: a phone that sleeps in a
  * pocket stops JavaScript timers, and counting ticks would lose that time.
  * On waking, `syncRun` moves the ride on to wherever the clock now is.
@@ -156,9 +180,62 @@ export type RideRun = {
    * the rider finally taps Finish.
    */
   endedAt?: number;
+  /**
+   * Every change of the clock since the start, oldest first. Absent on a run
+   * kept by an app from before the timeline, and such a run is given none
+   * later: a timeline that misses its start would place every phase wrong.
+   */
+  marks?: RideMark[];
 };
 
 const minuteMs = 60_000;
+
+const lastMarkAt = (marks: RideMark[]) => marks[marks.length - 1]?.at ?? Number.NEGATIVE_INFINITY;
+
+// A tap's mark goes last. A phone clock set back mid-ride would date it before
+// the mark it follows, so it takes that one's time instead.
+const tapped = (run: RideRun, mark: RideMark): Pick<RideRun, "marks"> =>
+  run.marks ? { marks: [...run.marks, { ...mark, at: Math.max(mark.at, lastMarkAt(run.marks)) }] } : {};
+
+// A phase the clock began is dated when its time came, not when the phone
+// noticed, which can be after a pause tapped just then: it goes in its place.
+const inPlace = (marks: RideMark[], mark: RideMark) => {
+  let position = marks.length;
+  while (position > 0 && (marks[position - 1]?.at ?? 0) > mark.at) position -= 1;
+  return [...marks.slice(0, position), mark, ...marks.slice(position)];
+};
+
+/** The stretches the clock ran, from the marks. The last is open while the clock runs. */
+const runningStretches = (marks: readonly RideMark[]) => {
+  const stretches: { start: number; end: number | null }[] = [];
+  let since: number | null = null;
+  for (const mark of marks) {
+    if (mark.kind === "start" || mark.kind === "resume") {
+      since ??= mark.at;
+    } else if (mark.kind === "pause" || mark.kind === "end") {
+      if (since !== null) stretches.push({ start: since, end: mark.at });
+      since = null;
+      if (mark.kind === "end") break;
+    }
+  }
+  if (since !== null) stretches.push({ start: since, end: null });
+  return stretches;
+};
+
+/**
+ * The wall-clock moment the ride clock showed `rideMs`. In the stretch now
+ * running it follows from the clock itself; earlier, from the marks.
+ */
+export const wallClockAt = (run: RideRun, rideMs: number) => {
+  if (run.runningSince !== null && rideMs >= run.bankedMs) return run.runningSince + (rideMs - run.bankedMs);
+  let into = 0;
+  for (const stretch of runningStretches(run.marks ?? [])) {
+    const length = (stretch.end ?? Number.POSITIVE_INFINITY) - stretch.start;
+    if (into + length >= rideMs) return stretch.start + (rideMs - into);
+    into += length;
+  }
+  return Math.max(run.startedAt ?? 0, lastMarkAt(run.marks ?? []));
+};
 
 export const readyRun = (): RideRun => ({
   startedAt: null,
@@ -175,13 +252,19 @@ export const rideElapsedMs = (run: RideRun, now: number) =>
 export const isRunning = (run: RideRun) => run.runningSince !== null;
 
 export const startRun = (run: RideRun, now: number): RideRun =>
-  run.startedAt !== null ? run : { ...run, startedAt: now, runningSince: now, phaseStarts: [0] };
+  run.startedAt !== null
+    ? run
+    : { ...run, startedAt: now, runningSince: now, phaseStarts: [0], marks: [{ kind: "start", at: now }] };
 
 export const pauseRun = (run: RideRun, now: number): RideRun =>
-  run.runningSince === null ? run : { ...run, bankedMs: rideElapsedMs(run, now), runningSince: null };
+  run.runningSince === null
+    ? run
+    : { ...run, bankedMs: rideElapsedMs(run, now), runningSince: null, ...tapped(run, { kind: "pause", at: now }) };
 
 export const resumeRun = (run: RideRun, now: number): RideRun =>
-  run.startedAt === null || run.runningSince !== null ? run : { ...run, runningSince: now };
+  run.startedAt === null || run.runningSince !== null
+    ? run
+    : { ...run, runningSince: now, ...tapped(run, { kind: "resume", at: now }) };
 
 const phaseEnd = (run: RideRun, phases: RidePhasePlan[], index: number) =>
   (run.phaseStarts[index] ?? 0) + (phases[index]?.minutes ?? 0) * minuteMs;
@@ -199,6 +282,7 @@ export const syncRun = (
   if (run.runningSince === null || run.phasesDone || phases.length === 0) return { run, entered: null, finished: false };
   const elapsed = rideElapsedMs(run, now);
   const starts = [...run.phaseStarts];
+  let marks = run.marks;
   let index = run.phaseIndex;
   let entered: number | null = null;
   let finished = false;
@@ -209,12 +293,18 @@ export const syncRun = (
     }
     // The next phase begins where this one was planned to end, not when the
     // phone noticed, so a locked screen does not stretch the plan.
-    starts[index + 1] = phaseEnd({ ...run, phaseStarts: starts }, phases, index);
+    const begins = phaseEnd({ ...run, phaseStarts: starts }, phases, index);
+    starts[index + 1] = begins;
     index += 1;
     entered = index;
+    if (marks) marks = inPlace(marks, { kind: "phase", at: wallClockAt(run, begins), index });
   }
   if (entered === null && !finished) return { run, entered: null, finished: false };
-  return { run: { ...run, phaseIndex: index, phaseStarts: starts, phasesDone: finished }, entered, finished };
+  return {
+    run: { ...run, phaseIndex: index, phaseStarts: starts, phasesDone: finished, ...(marks ? { marks } : {}) },
+    entered,
+    finished
+  };
 };
 
 /** The rider moves on before the phase's time is up. Past the last phase, the phases are done. */
@@ -224,7 +314,64 @@ export const skipPhase = (run: RideRun, phases: RidePhasePlan[], now: number): R
   const next = run.phaseIndex + 1;
   const starts = [...run.phaseStarts];
   starts[next] = rideElapsedMs(run, now);
-  return { ...run, phaseIndex: next, phaseStarts: starts };
+  return { ...run, phaseIndex: next, phaseStarts: starts, ...tapped(run, { kind: "phase", at: now, index: next }) };
+};
+
+/**
+ * The run as Finish leaves it: moved on to where the clock is, the clock
+ * stopped and the end marked. A ride brought back after its planned end was
+ * already ended then (`restoreRun`) and keeps that end.
+ */
+export const finishRun = (run: RideRun, phases: RidePhasePlan[], now: number): RideRun => {
+  if (run.startedAt === null) return run;
+  const synced = syncRun(run, phases, now).run;
+  if (synced.marks?.some((mark) => mark.kind === "end")) return synced;
+  return {
+    ...synced,
+    bankedMs: rideElapsedMs(synced, now),
+    runningSince: null,
+    ...tapped(synced, { kind: "end", at: now })
+  };
+};
+
+/**
+ * When each phase reached was ridden, on the wall clock, in phase order: what
+ * heart-rate samples are split by. Null for a run with no timeline -- not
+ * started, or kept by an app from before it. A ride still going is read as
+ * the clock has it at `now`; without `now`, only up to its last mark.
+ */
+export const phaseWindows = (run: RideRun, phases: RidePhasePlan[], now?: number): RidePhaseWindows[] | null => {
+  if (run.startedAt === null || !run.marks) return null;
+  const current = now === undefined ? run : syncRun(run, phases, now).run;
+  const reached: RidePhaseWindows[] = [];
+  let since: number | null = null;
+  let ended = false;
+  const close = (at: number) => {
+    const phase = reached[reached.length - 1];
+    if (phase && since !== null && at > since) phase.windows.push({ start: since, end: at });
+  };
+  for (const mark of current.marks ?? []) {
+    if (mark.kind === "start") {
+      reached.push({ phaseIndex: 0, windows: [] });
+      since = mark.at;
+    } else if (mark.kind === "resume") {
+      since ??= mark.at;
+    } else if (mark.kind === "pause") {
+      close(mark.at);
+      since = null;
+    } else if (mark.kind === "phase") {
+      close(mark.at);
+      if (since !== null) since = mark.at;
+      reached.push({ phaseIndex: mark.index, windows: [] });
+    } else {
+      close(mark.at);
+      since = null;
+      ended = true;
+      break;
+    }
+  }
+  if (!ended && now !== undefined) close(Math.max(now, since ?? now));
+  return reached;
 };
 
 /** Time left in the current phase. Before the start, the first phase's full time. */
@@ -259,6 +406,57 @@ export const rideScheduleKey = (run: RideRun, phases: RidePhasePlan[]) => {
 };
 
 // Cues ----------------------------------------------------------------------
+
+/** What the cue watcher last saw: which ride, how far its clock had run, and whether its phases were done. */
+export type RideCueWatch = { startedAt: number | null; elapsedMs: number; done: boolean };
+
+/** A look at the ride. The first one, at the start or a ride brought back, announces nothing already passed. */
+export const watchRideCues = (run: RideRun, now: number): RideCueWatch => ({
+  startedAt: run.startedAt,
+  elapsedMs: rideElapsedMs(run, now),
+  done: run.phasesDone
+});
+
+/**
+ * The changes the clock makes in a run, in ride time: each phase's planned
+ * end, counted from where that phase began. A phase reached already began
+ * there only if the clock moved the ride on (`syncRun`); one a skip began
+ * elsewhere was the rider's tap, not the clock.
+ */
+const clockChanges = (run: RideRun, phases: RidePhasePlan[]) => {
+  const changes: { atMs: number; kind: "phase" | "done" }[] = [];
+  let began = run.phaseStarts[0] ?? 0;
+  for (let index = 0; index < phases.length; index += 1) {
+    const end = began + (phases[index]?.minutes ?? 0) * minuteMs;
+    const next = index < run.phaseIndex ? run.phaseStarts[index + 1] : undefined;
+    if (next === undefined || next === end) changes.push({ atMs: end, kind: index === phases.length - 1 ? "done" : "phase" });
+    began = next ?? end;
+  }
+  return changes;
+};
+
+/**
+ * The chime the clock owes since the last look, if any: one for however many
+ * phase changes its time passed, the end over a phase. The changes are the
+ * run's own, in ride time, so a run nobody moved on -- the ride screen is on
+ * another tab -- still rings on time, one the ride screen moved on before
+ * this look still rings once, and a pause holds them. A skip rings inside
+ * its own tap, so it is never rung here.
+ */
+export const nextRideCue = (
+  watch: RideCueWatch,
+  run: RideRun,
+  phases: RidePhasePlan[],
+  now: number
+): { watch: RideCueWatch; cue: "phase" | "done" | null } => {
+  const next = watchRideCues(run, now);
+  if (run.startedAt === null || run.startedAt !== watch.startedAt || watch.done) return { watch: next, cue: null };
+  let cue: "phase" | "done" | null = null;
+  for (const change of clockChanges(run, phases)) {
+    if (change.atMs > watch.elapsedMs && change.atMs <= next.elapsedMs) cue = change.kind;
+  }
+  return { watch: next, cue };
+};
 
 export type RideAlert = {
   /** The phase that begins, or null for the end of the last one. */
