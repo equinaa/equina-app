@@ -10,7 +10,11 @@ import {
   PERMISSION_HINT,
   pickSpeechLocale,
   resolveSpeechLocale,
+  READY_HINT,
   RETRY_HINT,
+  NOTHING_HEARD_HINT,
+  TAP_HINT,
+  WAIT_HINT,
   voiceErrorHint,
   wantedSpeechLocales
 } from "../src/features/coach/voice-text";
@@ -117,7 +121,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
   assert.match(hook, /if \(released\.current\) return settle\(READY_HINT\);/);
   assert.match(hook, /module\.addListener\("start", \(\) => \{\s+if \(released\.current\) module\.stop\(\);/);
   // One session at a time: a press while the last one finishes is ignored, so its late words never land twice.
-  assert.match(hook, /if \(!module \|\| !enabled \|\| busy\.current\) return;/);
+  assert.match(hook, /if \(!module \|\| !enabled\) return;\s+\/\/[^\n]*\n\s+\/\/[^\n]*\n\s+if \(busy\.current\) \{\s+say\(WAIT_HINT\);\s+return;\s+\}\s+busy\.current = true;/);
   // A language the recognizer lists, picked once from the iPhone's own languages
   // then Intl's locale, never Intl's locale as it is. Android only from 13 (on-device guaranteed).
   assert.match(hook, /return Settings\.get\("AppleLanguages"\);/);
@@ -128,7 +132,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
   );
   assert.match(
     hook,
-    /const lang = await speechLanguage\(module\);\s+if \(released\.current\) return settle\(\);\s+if \(!lang\) \{\s+settle\(noLanguageHint\(Platform\.OS\)\);\s+setSupported\(false\);\s+return;\s+\}\s+module\.start\(\{\s+lang,/,
+    /const lang = await speechLanguage\(module\);\s+\/\/[^\n]*\n\s+if \(released\.current\) return settle\(shown\.current \? undefined : RETRY_HINT\);\s+if \(!lang\) \{\s+settle\(noLanguageHint\(Platform\.OS\)\);\s+setSupported\(false\);\s+return;\s+\}\s+module\.start\(\{\s+lang,/,
     "No language the phone can hear: say so, and do not start.",
   );
   assert.doesNotMatch(hook, /lang: deviceSpeechLocale\(\)/);
@@ -178,3 +182,18 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 }
 
 console.log("Voice input passed.");
+
+{
+  // The hints are the whole point of this fix: none may go blank.
+  assert.equal(TAP_HINT, "Hold the mic while you speak.");
+  assert.equal(READY_HINT, "Ready. Hold the mic while you speak.");
+  assert.equal(NOTHING_HEARD_HINT, "Couldn't hear that. Hold the mic while you speak.");
+  for (const hint of [PERMISSION_HINT, RETRY_HINT, TAP_HINT, READY_HINT, NOTHING_HEARD_HINT, WAIT_HINT, DICTATION_HINT, noLanguageHint("ios"), noLanguageHint("android")]) {
+    assert.ok(hint.trim(), "Every hint says something.");
+  }
+  const hook = read("src/features/coach/useVoiceInput.ts");
+  // The language list is asked for as the screen opens, not on the first press.
+  assert.match(hook, /if \(!module\) return;\s+\/\/[^\n]*\n\s+\/\/[^\n]*\n\s+void speechLanguage\(module\);/);
+  // A press while the last session finishes gets a word instead of nothing.
+  assert.match(hook, /if \(busy\.current\) \{\s+say\(WAIT_HINT\);\s+return;\s+\}/);
+}

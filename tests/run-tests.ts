@@ -21,7 +21,6 @@ import "./time-off.test";
 import "./calendar-month.test";
 import "./activity-calendar.test";
 import "./planned-activities.test";
-import "./voice-input.test";
 import "./coach-scripted-replies.test";
 import "./coach-context.test";
 import "./coach-safety.test";
@@ -43,6 +42,7 @@ import "./ralf-thinking.test";
 import "./ralf-new-conversation.test";
 import "./photo-types.test";
 // Top-level await inside, so it is imported rather than hoisted.
+await import("./voice-input.test");
 await import("./horse-selection.test");
 await import("./home-hero.test");
 await import("./paywall.test");

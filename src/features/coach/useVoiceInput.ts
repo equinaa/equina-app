@@ -11,6 +11,7 @@ import {
   RETRY_HINT,
   TAP_HINT,
   voiceErrorHint,
+  WAIT_HINT,
   wantedSpeechLocales
 } from "./voice-text";
 
@@ -107,7 +108,7 @@ export type VoiceInput = {
  * sends them like any typed question.
  *
  * One session at a time: a press while the last one is still finishing
- * waits for it, so its late words never land twice. Music playing in another
+ * is turned away with a word, so its late words never land twice. Music playing in another
  * app is ducked while listening and handed back after.
  *
  * The mic never fails in silence: a press that does not end in words says
@@ -153,6 +154,9 @@ export function useVoiceInput({
   useEffect(() => {
     const module = supported ? speechModule() : null;
     if (!module) return;
+    // Ask for the phone's language list as the screen opens, so the first
+    // press starts listening at once instead of waiting for it.
+    void speechLanguage(module);
     const finish = () => {
       busy.current = false;
       setListening(false);
@@ -215,7 +219,13 @@ export function useVoiceInput({
 
   const start = useCallback(() => {
     const module = speechModule();
-    if (!module || !enabled || busy.current) return;
+    if (!module || !enabled) return;
+    // The last session is still handing over its final words: say so rather
+    // than ignore the press.
+    if (busy.current) {
+      say(WAIT_HINT);
+      return;
+    }
     busy.current = true;
     released.current = false;
     startedAt.current = Date.now();
@@ -237,7 +247,8 @@ export function useVoiceInput({
       // First use: the system prompts took the finger off the mic. Say it works now.
       if (released.current) return settle(READY_HINT);
       const lang = await speechLanguage(module);
-      if (released.current) return settle();
+      // Let go while the language list was still coming: nothing was heard, and the rider is told.
+      if (released.current) return settle(shown.current ? undefined : RETRY_HINT);
       if (!lang) {
         settle(noLanguageHint(Platform.OS));
         setSupported(false);

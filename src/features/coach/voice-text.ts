@@ -113,6 +113,7 @@ export const RETRY_HINT = "Couldn't hear that. Hold the mic and try again.";
 export const TAP_HINT = "Hold the mic while you speak.";
 export const READY_HINT = "Ready. Hold the mic while you speak.";
 export const NOTHING_HEARD_HINT = "Couldn't hear that. Hold the mic while you speak.";
+export const WAIT_HINT = "One moment. Hold the mic again to keep talking.";
 export const DICTATION_HINT = "Turn on Dictation in Settings › General › Keyboard to ask by voice.";
 export const noLanguageHint = (platform: string) =>
   `Voice isn't available in this ${platform === "ios" ? "iPhone" : "phone"}'s language.`;
