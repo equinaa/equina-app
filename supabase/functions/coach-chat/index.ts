@@ -3,7 +3,7 @@ import { coachContextFor } from "../_shared/coach-context.ts";
 import { handleOptions, HttpError, json, readJson, requireMethod, respondToError } from "../_shared/http.ts";
 import { scriptedCoachReply, scriptedReplyUserIds } from "../_shared/coach-scripted-replies.ts";
 import { providerReplyText } from "../_shared/coach-provider-text.ts";
-import { providerUserContent, RIDE_EFFORT_RULE } from "../_shared/coach-provider-input.ts";
+import { providerUserContent, replyWithoutEffortNumbers, RIDE_EFFORT_RULE } from "../_shared/coach-provider-input.ts";
 import {
   assessHealthConcern,
   crossesSafetyLine,
@@ -526,6 +526,11 @@ Deno.serve(async (request) => {
           redacted_reason: "Provider output crossed Equina's diagnosis or clearance boundary.",
         });
       }
+      // The reply is saved as it is written, and the model may quote the
+      // rider's heart rate or calories all the same. Their numbers leave it
+      // here, before the row below is written: the phone is sent that row,
+      // so what it shows is what is saved, and neither holds them.
+      if (input.rideEffort) responseText = replyWithoutEffortNumbers(responseText, input.rideEffort);
     }
 
     const confidence = confidenceFor(basedOn);
