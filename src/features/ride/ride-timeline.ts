@@ -18,6 +18,7 @@ import type { RidePhaseWindows, RideWindow } from "./ride-plan";
 export type RideTimelineStorage = {
   getItem: (key: string) => Promise<string | null>;
   setItem: (key: string, value: string) => Promise<void>;
+  removeItem: (key: string) => Promise<void>;
 };
 
 export const rideTimelineStorageKey = (userId?: string) => `equina.ride-timelines.v1:${userId ?? "guest"}`;
@@ -135,7 +136,29 @@ export function createRideTimelineStore(storage: RideTimelineStorage) {
     }
   };
 
-  return { save, forRide };
+  /**
+   * A ride deleted from the journal takes its windows with it: nothing on
+   * this phone is kept for a ride that is gone. In turn with the saves.
+   */
+  const forget = (userId: string, startedAt: string) => {
+    queue = queue.then(async () => {
+      const rideKey = rideTimelineKey(startedAt);
+      if (!rideKey) return;
+      try {
+        const key = rideTimelineStorageKey(userId);
+        const kept = parseRideTimelines(await storage.getItem(key));
+        if (!(rideKey in kept)) return;
+        delete kept[rideKey];
+        if (Object.keys(kept).length) await storage.setItem(key, JSON.stringify(kept));
+        else await storage.removeItem(key);
+      } catch {
+        // No storage: nothing kept to forget.
+      }
+    });
+    return queue;
+  };
+
+  return { save, forRide, forget };
 }
 
 const onThisPhone = createRideTimelineStore(AsyncStorage);
@@ -145,6 +168,9 @@ export const saveRideTimeline = onThisPhone.save;
 
 /** A journal entry's windows as this phone timed them, or null. */
 export const rideTimelineFor = onThisPhone.forRide;
+
+/** Forgets a deleted ride's windows on this phone. */
+export const forgetRideTimeline = onThisPhone.forget;
 
 /**
  * The windows a ride's saved minutes suggest, for a ride with no timeline:

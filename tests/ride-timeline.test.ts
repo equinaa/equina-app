@@ -337,6 +337,9 @@ const memoryStorage = () => {
     getItem: async (key) => items.get(key) ?? null,
     setItem: async (key, value) => {
       items.set(key, value);
+    },
+    removeItem: async (key) => {
+      items.delete(key);
     }
   };
   return { items, storage };
@@ -374,6 +377,18 @@ const memoryStorage = () => {
   assert.deepEqual(await store.forRide({ riderId: "rider-1", startedAt: "2026-11-29T08:00:00Z" }), other);
   assert.deepEqual(await store.forRide({ riderId: "rider-1", startedAt: "2026-11-30T08:00:00Z" }), other);
   assert.deepEqual(await store.forRide(fromJournal), windows);
+
+  // A ride deleted from the journal takes its windows with it, in turn with a save.
+  void store.save("rider-1", "2026-12-01T08:00:00.000Z", other);
+  await store.forget("rider-1", "2026-11-29T08:00:00+00:00");
+  assert.equal(await store.forRide({ riderId: "rider-1", startedAt: "2026-11-29T08:00:00Z" }), null);
+  assert.deepEqual(await store.forRide({ riderId: "rider-1", startedAt: "2026-12-01T08:00:00Z" }), other, "The save queued before it is kept.");
+  assert.deepEqual(await store.forRide(fromJournal), windows, "The other rides stay.");
+  await store.forget("rider-2", fromJournal.startedAt);
+  assert.deepEqual(await store.forRide(fromJournal), windows, "Another account's delete forgets nothing of this one.");
+  for (const startedAt of [fromJournal.startedAt, "2026-11-30T08:00:00Z", "2026-12-01T08:00:00Z"]) await store.forget("rider-1", startedAt);
+  assert.equal(items.has(rideTimelineStorageKey("rider-1")), false, "The last one forgotten, nothing is left on the phone.");
+  await store.forget("rider-1", "garbled");
 }
 
 {
@@ -410,10 +425,14 @@ const memoryStorage = () => {
     },
     setItem: async () => {
       throw new Error("no storage");
+    },
+    removeItem: async () => {
+      throw new Error("no storage");
     }
   });
   await broken.save("rider-1", "2026-11-03T08:00:00Z", two);
   assert.equal(await broken.forRide({ riderId: "rider-1", startedAt: "2026-11-03T08:00:00Z" }), null);
+  await broken.forget("rider-1", "2026-11-03T08:00:00Z");
 }
 
 // --- The chime, wherever the rider is in the app ---------------------------------------------
@@ -542,7 +561,11 @@ const watcher = (first: RideRun, at: number) => {
   assert.match(app, /useRideCues\(rideActive, ridePlan, rideRun\);/);
   assert.match(app, /const finishRide = \(session: RideCompletion, finishedRun: RideRun\) =>/);
   assert.match(app, /phaseWindows\(finishedRun, ridePlan\.phases\)/);
-  assert.match(app, /if \(timeline && riderId\) void saveRideTimeline\(riderId, session\.startedAt, timeline\);/);
+  // Only on an iPhone, where Apple Health reads it: a shared browser keeps nothing.
+  assert.match(app, /if \(timeline && riderId && Platform\.OS === "ios"\) void saveRideTimeline\(riderId, session\.startedAt, timeline\);/);
+  assert.equal(app.split("saveRideTimeline(").length - 1, 1);
+  // A deleted ride's windows go with it, once the journal has let it go.
+  assert.match(app, /await rideJournal\.deleteRide\(id\);\s+\/\/ Its windows on this phone go with it\.\s+if \(deleted\) void forgetRideTimeline\(deleted\.riderId, deleted\.startedAt\);/);
 
   const cues = read("src/features/ride/useRideCues.ts");
   assert.match(cues, /upcomingRideAlerts\(syncRun\(run, plan\.phases, now\)\.run, plan\.phases, now\)/, "Scheduled from where the clock has the ride, not from its phase index.");
@@ -559,6 +582,26 @@ const watcher = (first: RideRun, at: number) => {
   assert.match(rideCues, /phase: \{ file: "ride_phase\.wav"/);
   assert.match(rideCues, /done: \{ file: "ride_done\.wav"/);
   assert.match(rideCues, /interruptionMode: "duckOthers"/);
+  // The ride's audio mode again before every chime on a phone: a lesson video
+  // or Ralf's mic changes the app's one audio session mid-ride, and playing a
+  // chime never sets it back. In a browser the chime rings inside the tap.
+  assert.match(rideCues, /if \(Platform\.OS === "web"\) \{\s+ring\(kind, tapped\);\s+giveMusicBackLater\(\);\s+return;\s+\}/);
+  assert.match(rideCues, /void applyRideAudioMode\(\)\s+\.catch\(\(\) => undefined\)\s+\.finally\(\(\) => \{\s+ring\(kind, tapped\);\s+giveMusicBackLater\(\);/);
+  assert.match(rideCues, /if \(Platform\.OS !== "web"\) registerRideAudioMode\(rideAudioMode\);/);
+  assert.match(rideCues, /export function releaseRideCues\(\) \{\s+registerRideAudioMode\(null\);/);
+  // Ralf's mic holds it while it listens, and hands it back to the ride.
+  const voice = read("src/features/coach/useVoiceInput.ts");
+  assert.match(voice, /setRideMicListening\(true\);\s+module\.start\(\{/);
+  assert.match(voice, /setRideMicListening\(false\);\s+if \(Platform\.OS === "ios"\) \{\s+try \{\s+\/\/ Hand the audio back[\s\S]*?void applyRideAudioMode\(\)\.catch\(\(\) => undefined\);/);
+  // Ralf's screen closed with the finger still on the mic: no "end" comes to
+  // a listener that is gone, so the mic lets go there, and a session still
+  // starting never starts.
+  assert.match(
+    voice,
+    /return \(\) => \{\s+(?:\/\/[^\n]*\n\s+)*released\.current = true;\s+for \(const subscription of subscriptions\) subscription\.remove\(\);\s+try \{\s+module\.abort\(\);\s+\} catch \{\s+\/\/[^\n]*\n\s+\}\s+if \(busy\.current\) finish\(\);\s+\};\s+\}, \[supported, say\]\);/
+  );
+  assert.match(voice, /const finish = \(\) => \{\s+busy\.current = false;\s+setListening\(false\);\s+setRideMicListening\(false\);/);
+  assert.doesNotMatch(voice, /from "\.\.\/ride\/ride-cues"/, "Only the small shared module, not the ride's alerts.");
   assert.match(rideCues, /data: \{ route: alertRoute \}/);
 
   // The timeline never leaves the phone: nothing that writes to the server knows it.
@@ -569,6 +612,29 @@ const watcher = (first: RideRun, at: number) => {
   assert.doesNotMatch(timeline, /^import \{[^}]*\} from "\.\.\/\.\.\/backend/m);
   assert.doesNotMatch(timeline, /supabase|fetch\(/i);
   assert.match(timeline, /createRideTimelineStore\(AsyncStorage\)/, "On the phone.");
+}
+
+// The app's one audio session, between a ride and Ralf's mic.
+{
+  const session = await import("../src/features/ride/ride-audio-session");
+  const applied: string[] = [];
+  const ride = async () => {
+    applied.push("ride");
+  };
+  await session.applyRideAudioMode();
+  assert.deepEqual(applied, [], "No ride: nothing to put back.");
+  session.registerRideAudioMode(ride);
+  await session.applyRideAudioMode();
+  assert.deepEqual(applied, ["ride"]);
+  session.setRideMicListening(true);
+  await session.applyRideAudioMode();
+  assert.deepEqual(applied, ["ride"], "Never while the mic listens: it would cut the question short.");
+  session.setRideMicListening(false);
+  await session.applyRideAudioMode();
+  assert.deepEqual(applied, ["ride", "ride"]);
+  session.registerRideAudioMode(null);
+  await session.applyRideAudioMode();
+  assert.deepEqual(applied, ["ride", "ride"], "The ride over: the session is the app's again.");
 }
 
 console.log("Ride timeline passed.");
