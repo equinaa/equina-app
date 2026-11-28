@@ -15,7 +15,9 @@ import type { RidePlan, RideRun } from "./ride-plan";
  * - updated on a pause, a resume, a skip, every phase the clock begins while
  *   the app is open, and once the phases are done;
  * - ended at once on Finish (the recap is on screen), End ride without
- *   saving, or signing out.
+ *   saving, or signing out;
+ * - left alone for the rest of the ride once the rider swipes it away, even
+ *   after a relaunch.
  *
  * While the phone is locked no update can be sent, and none is needed to stay
  * true: the activity runs its clocks itself (ride-live-activity.ts). The
@@ -32,7 +34,9 @@ export function useRideLiveActivity(rideActive: boolean, ridePlan: RidePlan | nu
   // on another tab, so the time itself has to ask for a new look.
   const [look, setLook] = useState(0);
   // The activity of the ride now: its id once shown, and whether the rider
-  // or iOS has ended it (then it is left ended for this ride).
+  // or iOS has ended it (then it is left ended for this ride). The ended
+  // ride is also kept on the phone (ride-activity-calls.ts), so a relaunch
+  // mid-ride does not bring back what the rider swiped away.
   const shown = useRef<{ rideId: string; id: string | null; gone: boolean } | null>(null);
   const sent = useRef("");
   const rideRef = useRef(rideId);

@@ -150,10 +150,18 @@ struct RideActivityWidget: Widget {
           .padding(.horizontal, 4)
         }
       } compactLeading: {
+        // The Apple Watch Smart Stack shows these compact views too (there is
+        // no .small layout), so they follow the lock screen's rule: a phase
+        // is named only while the name is exact, counting down or paused mid
+        // ride. Once stale the app may have slept through a phase change, and
+        // a name beside the ride clock would read as that phase's own time,
+        // so the ride's training is shown instead.
         HStack(spacing: 4) {
           Image(systemName: rideGlyph).foregroundStyle(Palette.brass)
-          if let phase = ride.phase, !ride.done {
+          if let phase = ride.phase, ride.live || (ride.paused && !ride.done) {
             Text(phase.title).font(.caption2.weight(.semibold)).lineLimit(1).frame(maxWidth: 64, alignment: .leading)
+          } else if !ride.attributes.training.isEmpty {
+            Text(ride.attributes.training).font(.caption2.weight(.semibold)).lineLimit(1).frame(maxWidth: 64, alignment: .leading)
           }
         }
         .foregroundStyle(Palette.ivory)
@@ -162,7 +170,8 @@ struct RideActivityWidget: Widget {
           .font(.caption2.weight(.semibold).monospacedDigit())
           .foregroundStyle(ride.live ? Palette.brass : Palette.ivory)
       } minimal: {
-        Image(systemName: ride.paused ? "pause.fill" : rideGlyph).foregroundStyle(Palette.brass)
+        // Done wins over paused, as on the ride screen and the lock screen.
+        Image(systemName: ride.paused && !ride.done ? "pause.fill" : rideGlyph).foregroundStyle(Palette.brass)
       }
       .widgetURL(rideURL)
       .keylineTint(Palette.brass)
@@ -185,16 +194,22 @@ struct RideClock: View {
   }
 }
 
-/// Time left in the phase, else the ride clock; a pause sign while paused.
+/// Time left in the phase, else the ride clock; a pause sign while paused mid
+/// ride. Done wins over paused, as on the ride screen, which offers only
+/// Finish then: a ride stopped with its phases done (brought back after its
+/// planned end, or skipped past the last phase while paused) shows its clock
+/// where it stopped, never a pause sign beside "All phases done".
 struct CompactTime: View {
   let ride: RideFacts
   var body: some View {
-    if ride.paused {
+    if ride.paused && !ride.done {
       Image(systemName: "pause.fill")
     } else if ride.live {
       Text(timerInterval: ride.phaseRange, countsDown: true)
         .multilineTextAlignment(.trailing)
         .frame(width: 40, alignment: .trailing)
+    } else if ride.paused {
+      Text(clockText(ride.state.elapsedMs))
     } else {
       Text(timerInterval: ride.clockRange, countsDown: false)
         .multilineTextAlignment(.trailing)

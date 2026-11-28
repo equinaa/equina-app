@@ -21,6 +21,12 @@ import {
   rideActivityId,
   rideActivityLink
 } from "../src/features/ride/ride-live-activity";
+import {
+  createRideActivityCalls,
+  rideActivityDismissedKey,
+  type NativeRideActivity,
+  type RideActivityStorage
+} from "../src/features/ride/ride-activity-calls";
 
 // The ride on the iPhone lock screen and in the Dynamic Island (2026-11-28).
 // No Equina code runs while the phone is locked, so what the activity is
@@ -197,6 +203,125 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   }
 }
 
+// --- Swiped away, then the app closed: the activity stays away -------------------------
+
+{
+  // A phone with the module, its activities, and its storage, all faked.
+  const phone = () => {
+    const showing: { id: string; rideId: string }[] = [];
+    const calls: string[] = [];
+    let started = 0;
+    const module: NativeRideActivity = {
+      isSupported: () => true,
+      start: async (attributesJson) => {
+        const id = `activity-${(started += 1)}`;
+        calls.push(`start ${id}`);
+        showing.push({ id, rideId: (JSON.parse(attributesJson) as { rideId: string }).rideId });
+        return id;
+      },
+      update: async (id) => {
+        calls.push(`update ${id}`);
+        return showing.some((activity) => activity.id === id);
+      },
+      end: async (id) => {
+        calls.push(`end ${id}`);
+        showing.splice(showing.findIndex((activity) => activity.id === id), 1);
+      },
+      list: async () => [...showing],
+      endAll: async () => {
+        calls.push("endAll");
+        showing.length = 0;
+      }
+    };
+    return { module, showing, calls };
+  };
+  const storageOf = (items: Map<string, string>): RideActivityStorage => ({
+    getItem: async (key) => items.get(key) ?? null,
+    setItem: async (key, value) => {
+      items.set(key, value);
+    },
+    removeItem: async (key) => {
+      items.delete(key);
+    }
+  });
+
+  const device = phone();
+  const items = new Map<string, string>();
+  const attributes = rideActivityAttributes(plan, started)!;
+  const first = createRideActivityCalls(() => device.module, storageOf(items));
+  const shown = await first.show(attributes, rideActivityContent(plan, started, t0 + minute), null);
+  assert.deepEqual(shown, { id: "activity-1", gone: false }, "The ride starts its activity.");
+  assert.equal(items.size, 0, "Nothing is kept while it shows.");
+
+  // The rider swipes it off the lock screen: the next update finds it gone.
+  device.showing.length = 0;
+  const gone = await first.show(attributes, rideActivityContent(plan, started, t0 + 12 * minute), "activity-1");
+  assert.deepEqual(gone, { id: null, gone: true });
+  assert.equal(items.get(rideActivityDismissedKey), String(t0), "The dismissal is kept on the phone, under the ride's id.");
+  assert.equal(rideActivityDismissedKey, "equina.ride-activity-dismissed.v1");
+
+  // iOS closes the app mid-ride and the rider opens it again: a new launch,
+  // nothing in memory, and the ride brought back from the phone.
+  const restored = restoreRun(started, phases, t0 + 20 * minute);
+  assert.notEqual(restored.runningSince, null, "Still within its plan, the ride comes back running.");
+  device.calls.length = 0;
+  const relaunch = createRideActivityCalls(() => device.module, storageOf(items));
+  const back = await relaunch.show(rideActivityAttributes(plan, restored)!, rideActivityContent(plan, restored, t0 + 20 * minute), null);
+  assert.deepEqual(back, { id: null, gone: true }, "The activity the rider removed does not come back with the ride.");
+  assert.deepEqual(device.calls, [], "No activity is started for it.");
+  assert.equal(device.showing.length, 0);
+
+  // The ride ends: the dismissal goes with it, and the next ride shows again.
+  await relaunch.endAll();
+  assert.equal(items.has(rideActivityDismissedKey), false, "Cleared when the ride's activities are ended.");
+  const nextRun = startRun(readyRun(), t0 + 3 * 60 * minute);
+  const next = await relaunch.show(rideActivityAttributes(plan, nextRun)!, rideActivityContent(plan, nextRun, t0 + 3 * 60 * minute), null);
+  assert.deepEqual(next, { id: "activity-2", gone: false });
+
+  // A dismissal left by another ride (its end never reached the storage)
+  // does not hide this one.
+  const other = phone();
+  const stale = new Map([[rideActivityDismissedKey, "1700000000000"]]);
+  const otherRide = await createRideActivityCalls(() => other.module, storageOf(stale)).show(attributes, rideActivityContent(plan, started, t0), null);
+  assert.deepEqual(otherRide, { id: "activity-1", gone: false });
+
+  // Relaunched with the activity still on the lock screen: taken back, not started again.
+  const kept = phone();
+  const keptItems = new Map<string, string>();
+  await createRideActivityCalls(() => kept.module, storageOf(keptItems)).show(attributes, rideActivityContent(plan, started, t0), null);
+  kept.calls.length = 0;
+  const retaken = await createRideActivityCalls(() => kept.module, storageOf(keptItems)).show(attributes, rideActivityContent(plan, restored, t0 + 20 * minute), null);
+  assert.deepEqual(retaken, { id: "activity-1", gone: false });
+  assert.deepEqual(kept.calls, ["update activity-1"]);
+
+  // Storage that fails never stops the activity, nor loses the dismissal in memory.
+  const broken: RideActivityStorage = {
+    getItem: async () => {
+      throw new Error("no storage");
+    },
+    setItem: async () => {
+      throw new Error("no storage");
+    },
+    removeItem: async () => {
+      throw new Error("no storage");
+    }
+  };
+  const fragile = phone();
+  const calls = createRideActivityCalls(() => fragile.module, broken);
+  assert.deepEqual(await calls.show(attributes, rideActivityContent(plan, started, t0), null), { id: "activity-1", gone: false });
+  fragile.showing.length = 0;
+  assert.deepEqual(await calls.show(attributes, rideActivityContent(plan, started, t0 + 12 * minute), "activity-1"), { id: null, gone: true });
+  await calls.endAll();
+  assert.deepEqual(fragile.calls.slice(-1), ["endAll"], "Ended even when the dismissal cannot be cleared.");
+
+  // No module (Android, web, an older build): nothing is asked of the storage either.
+  const untouched = new Map<string, string>();
+  const none = createRideActivityCalls(() => null, storageOf(untouched));
+  assert.deepEqual(await none.show(attributes, rideActivityContent(plan, started, t0), null), { id: null, gone: false });
+  await none.endAll();
+  assert.equal(untouched.size, 0);
+}
+
 // --- The native side, read as source ------------------------------------------------------
 
 {
@@ -269,6 +394,24 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   assert.match(widget, /Text\(timerInterval: ride\.phaseRange, countsDown: true\)/, "The phase counts down by itself.");
   assert.match(widget, /ProgressView\(timerInterval: ride\.rideRange, countsDown: false/, "The whole-ride bar fills by itself.");
   assert.match(widget, /compactLeading: \{[\s\S]+compactTrailing: \{[\s\S]+minimal: \{/);
+  // The compact views, which the Apple Watch Smart Stack shows too, name a
+  // phase only while the name is exact; stale or done, the training instead.
+  assert.match(
+    widget,
+    /compactLeading: \{[\s\S]*?if let phase = ride\.phase, ride\.live \|\| \(ride\.paused && !ride\.done\) \{/,
+    "Once stale, the island no longer names a phase that has ended."
+  );
+  assert.doesNotMatch(widget, /if let phase = ride\.phase, !ride\.done \{/);
+  assert.match(widget, /compactLeading: \{[\s\S]*?\} else if !ride\.attributes\.training\.isEmpty \{\s+Text\(ride\.attributes\.training\)/);
+  // Done wins over paused, as on the ride screen: no pause sign beside "All phases done".
+  assert.match(
+    widget,
+    /struct CompactTime: View \{[\s\S]*?if ride\.paused && !ride\.done \{\s+Image\(systemName: "pause\.fill"\)[\s\S]*?\} else if ride\.live \{[\s\S]*?\} else if ride\.paused \{\s+Text\(clockText\(ride\.state\.elapsedMs\)\)/,
+    "Stopped and done, the compact view shows the clock where it stopped."
+  );
+  assert.match(widget, /minimal: \{[\s\S]*?Image\(systemName: ride\.paused && !ride\.done \? "pause\.fill" : rideGlyph\)/);
+  assert.doesNotMatch(widget, /ride\.paused \? "pause\.fill"/);
+  assert.match(widget, /struct RideClock: View \{[\s\S]*?if ride\.paused \{\s+Text\(clockText\(ride\.state\.elapsedMs\)\)/, "The ride clock still stands still whenever it is stopped.");
   assert.match(widget, /Text\("All phases done"\)/);
   assert.match(widget, /Text\("Paused · /);
   assert.match(widget, /Text\("ends "\) \+ Text\(ride\.end, style: \.time\)/, "Once stale, the timetable ends with the planned end.");
@@ -288,9 +431,12 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   assert.match(native, /requireOptionalNativeModule<NativeRideActivity>\("RideActivity"\)/, "Asked of Expo, so a missing module is null.");
   assert.match(native, /if \(Platform\.OS !== "ios"\) return \(loaded = null\);/, "Web and Android never look.");
   assert.doesNotMatch(native, /\brequire\(|requireNativeModule\(/, "Never required: Metro reports a failed require as fatal.");
-  assert.match(native, /if \(!module\) return Promise\.resolve\(fallback\);/, "Without it, every call resolves to nothing.");
-  assert.match(native, /\.catch\(\(\) => fallback\)/, "A native failure is never thrown at the ride.");
-  assert.match(native, /for \(const activity of await module\.list\(\)\) \{\s+if \(activity\.rideId === attributes\.rideId && id === null\) id = activity\.id;\s+else await module\.end\(activity\.id\);/, "After a relaunch the ride's own activity is taken back and any other ended.");
+  assert.match(native, /createRideActivityCalls\(rideActivityModule, AsyncStorage\)/, "On the phone, a dismissal is kept in AsyncStorage.");
+  const calls = read("src/features/ride/ride-activity-calls.ts");
+  assert.doesNotMatch(calls, /from "(expo|react-native)"/, "The calls take the module and the storage, so they run under node.");
+  assert.match(calls, /if \(!module\) return Promise\.resolve\(fallback\);/, "Without it, every call resolves to nothing.");
+  assert.match(calls, /\.catch\(\(\) => fallback\)/, "A native failure is never thrown at the ride.");
+  assert.match(calls, /for \(const activity of await module\.list\(\)\) \{\s+if \(activity\.rideId === attributes\.rideId && id === null\) id = activity\.id;\s+else await module\.end\(activity\.id\);/, "After a relaunch the ride's own activity is taken back and any other ended.");
   // Only that file reaches the native module.
   const reachers = sourceFiles(join(root, "src")).filter((path) => /"RideActivity"/.test(read(path.slice(root.length + 1))));
   assert.deepEqual(reachers, [join(root, "src/features/ride/ride-activity-native.ts")]);
