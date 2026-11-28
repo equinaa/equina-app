@@ -127,7 +127,7 @@ export function RideStepper({
   const stacked = useWindowDimensions().fontScale > STACK_ABOVE_FONT_SCALE;
   const { index, count, previous, next } = peerPosition(peers, entry);
   const label = scopeLabel(scope, words);
-  const where = count > 1 ? `${index + 1} of ${count}` : "the only one";
+  const where = `${index + 1} of ${count}`;
   const step = (target: RideEntry) => {
     selectionHaptic();
     onStep(target);
@@ -155,7 +155,7 @@ export function RideStepper({
         <MotionPressable
           testID="ride-stepper-scope"
           accessibilityRole="button"
-          accessibilityLabel={`${label}, ride ${where}`}
+          accessibilityLabel={count > 1 ? `${label}, ride ${where}` : `${label}, the only one so far`}
           accessibilityHint={scopes.length > 1 ? "Changes which rides this one is shown among" : undefined}
           accessibilityState={{ expanded: choosing, disabled: scopes.length <= 1 }}
           disabled={scopes.length <= 1}
@@ -165,11 +165,11 @@ export function RideStepper({
           }}
           style={styles.stepCentre}
         >
-          <Text style={styles.stepLabel} numberOfLines={stacked ? undefined : 2}>
-            {label}
-            <Text style={styles.stepCount}>{` · ${where}`}</Text>
-          </Text>
-          {scopes.length > 1 ? <ChevronDown size={15} color={equinaTheme.colors.brass} /> : null}
+          <View style={styles.stepLabelLine}>
+            <Text style={styles.stepLabel} numberOfLines={stacked ? undefined : 1}>{label}</Text>
+            {scopes.length > 1 ? <ChevronDown size={15} color={equinaTheme.colors.brass} /> : null}
+          </View>
+          <Text style={styles.stepCount}>{count > 1 ? where : "The only one so far"}</Text>
         </MotionPressable>
         {stacked ? (
           <View style={styles.stepStackedSides}>
@@ -339,7 +339,9 @@ const trendSummary = (points: readonly TrendPoint[], metric: TrendMetric) => {
   if (!saved.length) return "No feeling saved for these rides";
   const counts = new Map<RideMoodRecord, number>();
   for (const point of saved) if (point.mood) counts.set(point.mood, (counts.get(point.mood) ?? 0) + 1);
-  const [mood, rides] = [...counts.entries()].sort((left, right) => right[1] - left[1])[0] ?? ["focused", 0];
+  // Equal counts read in the chips' order, so the line does not change with the rides' order.
+  const order: readonly RideMoodRecord[] = ["fresh", "focused", "tender"];
+  const [mood, rides] = [...counts.entries()].sort((left, right) => right[1] - left[1] || order.indexOf(left[0]) - order.indexOf(right[0]))[0] ?? ["focused", 0];
   return `${moodWord[mood]} in ${rides} of ${points.length} rides`;
 };
 
@@ -525,7 +527,9 @@ export function PhasesCard({ entry, comparison }: { entry: RideEntry; comparison
         const planned = rideMinutesLabel(row.plannedSeconds);
         const ridden = row.seconds === undefined
           ? `${planned} planned, not reached`
-          : manual ? rideMinutesLabel(row.seconds) : `${rideMinutesLabel(row.seconds)} ridden, ${planned} planned`;
+          : manual || rideMinutesLabel(row.seconds) === planned
+            ? rideMinutesLabel(row.seconds)
+            : `${rideMinutesLabel(row.seconds)} ridden, ${planned} planned`;
         const difference = row.seconds !== undefined && row.usualSeconds !== undefined
           ? Math.round(row.seconds / 60) - Math.round(row.usualSeconds / 60)
           : 0;
@@ -558,7 +562,7 @@ export function PhasesCard({ entry, comparison }: { entry: RideEntry; comparison
           </View>
         );
       })}
-      {comparison?.phaseSummary ? <Text style={styles.body}>{comparison.phaseSummary}</Text> : null}
+      {comparison?.phaseSummary ? <Text style={styles.body}>{comparison.phaseSummary.replace(/-/g, "\u2011")}</Text> : null}
       {comparison && comparison.baseline.length > 0 && comparison.phaseRides === 0 ? (
         <Text style={styles.footnote}>No timed ride before this one to compare phases with yet.</Text>
       ) : null}
@@ -698,12 +702,17 @@ const styles = StyleSheet.create({
   },
   stepCentre: {
     flex: 1,
+    minWidth: 0,
     minHeight: TAP_TARGET,
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: equinaTheme.spacing.xs,
     paddingHorizontal: equinaTheme.spacing.xs
+  },
+  stepLabelLine: {
+    maxWidth: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: equinaTheme.spacing.xs
   },
   stepLabel: {
     ...equinaTheme.typography.meta,
@@ -713,8 +722,8 @@ const styles = StyleSheet.create({
     textAlign: "center"
   },
   stepCount: {
+    ...equinaTheme.typography.label,
     color: equinaTheme.text.secondary,
-    fontWeight: "400",
     fontVariant: ["tabular-nums"]
   },
   scopeChoices: {
