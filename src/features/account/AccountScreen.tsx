@@ -768,7 +768,8 @@ function PrivacySettings({
         />
         {appleHealth ? (
           // Kept on this iPhone, not on the server: the heart rate never
-          // leaves the phone except inside a question the rider asks.
+          // leaves the phone except beside a question the rider asks, and
+          // the server hands it to the model without saving it.
           <SettingsRow
             testID="account-ralf-heart-rate"
             title="Heart rate and calories"
@@ -786,7 +787,9 @@ function PrivacySettings({
             testID="account-health-effort"
             title="Show my effort on rides"
             detail="Heart rate and calories, read on this iPhone when a ride opens"
-            switchValue={appleHealth.settings.showEffort}
+            // On only while the card can appear: after "Not now" on the
+            // Connect card it reads off, and one tap brings the card back.
+            switchValue={appleHealth.settings.showEffort && !appleHealth.settings.connectDismissed}
             onToggle={(showEffort) => appleHealth.update({ showEffort, ...(showEffort ? { connectDismissed: false } : {}) })}
           />
           <SettingsRow

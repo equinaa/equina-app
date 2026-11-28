@@ -3,9 +3,18 @@ import { AppState } from "react-native";
 import type { RideEntry } from "../../backend";
 import type { RidePhaseWindows } from "../ride/ride-plan";
 import { approximatePhaseWindows, rideTimelineFor } from "../ride/ride-timeline";
-import { appleHealthAsked, appleHealthAvailable, connectAppleHealth, readRideEffort, saveRideWorkout } from "./apple-health";
+import {
+  appleHealthAsked,
+  appleHealthAvailable,
+  appleHealthReadable,
+  connectAppleHealth,
+  readRideEffort,
+  removeRideCopyIfCovered,
+  saveRideWorkout
+} from "./apple-health";
 import { defaultHealthSettings, healthSettings, type HealthSettings } from "./health-settings";
 import { rideSyncIdentifier } from "./health-workouts";
+import { savedRideWorkouts } from "./saved-ride-workouts";
 import { summarizeRideEffort, type PhasePlacement, type RideEffort } from "./ride-effort";
 
 export type AppleHealthController = {
@@ -44,8 +53,32 @@ export function useAppleHealth(userId: string | undefined): AppleHealthControlle
     if (userId) void healthSettings.update(userId, patch);
   }, [userId]);
 
+  // Equina's copy of a ride goes once the watch's own workout for it is in
+  // Apple Health: looked for as the app opens and each time it comes back to
+  // the front, whatever the effort card's switch, and whether or not the
+  // ride is ever opened in the journal.
+  useEffect(() => {
+    if (!userId || !available) return;
+    const tidy = () => void tidyRideCopies(userId).catch(() => undefined);
+    tidy();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") tidy();
+    });
+    return () => subscription.remove();
+  }, [available, userId]);
+
   return { available: available && Boolean(userId), settings, update };
 }
+
+/**
+ * One pass over the rides this phone saved to Apple Health in the last day
+ * (saved-ride-workouts.ts). Only while the iPhone is unlocked: Apple Health
+ * cannot be read before, and every ride would look alone in it.
+ */
+export const tidyRideCopies = async (userId: string) => {
+  if (!appleHealthReadable()) return;
+  await savedRideWorkouts.tidy(userId, Date.now(), removeRideCopyIfCovered);
+};
 
 /**
  * A ride the clock timed, saved to Apple Health as it is finished, when the
@@ -60,7 +93,10 @@ export const saveFinishedRideToAppleHealth = async (userId: string, ride: { star
   const start = Date.parse(ride.startedAt);
   const end = Date.parse(ride.completedAt);
   if (!syncIdentifier || !Number.isFinite(start) || !Number.isFinite(end)) return;
-  await saveRideWorkout({ start, end, syncIdentifier });
+  const saved = await saveRideWorkout({ start, end, syncIdentifier });
+  // The watch's own workout usually arrives after Finish: the ride is looked
+  // at again later (tidyRideCopies), with its times and nothing else.
+  if (saved === "saved") await savedRideWorkouts.add(userId, { syncIdentifier, start, end, savedAt: Date.now() });
 };
 
 export type RideEffortView =

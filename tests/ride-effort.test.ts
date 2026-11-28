@@ -29,8 +29,9 @@ import {
 } from "../src/features/health/ride-effort";
 import { defaultRidePhases, rideTrainingTypes, type RidePhaseWindows } from "../src/features/ride/ride-plan";
 import {
-  RIDE_REVIEW_PROMPT_LIMIT,
+  RIDE_REVIEW_EFFORT_LIMIT,
   rideComparePrompt,
+  rideEffortForRalf,
   rideReviewPrompt,
   type RideReviewFacts
 } from "../src/features/ride/ride-review-prompt";
@@ -361,7 +362,8 @@ assert.match(
   assert.ok((effortForRalf(denseEffort, { phases: long, placement: "timed" }) ?? "").length <= RALF_EFFORT_LIMIT);
 }
 
-// In the question, after the phases it is split by; the question stays whole.
+// Beside the question, never in it: the question is what Ralf's history
+// keeps, and Equina keeps no heart rate (tests/coach-ride-effort.test.ts).
 {
   const facts: RideReviewFacts = {
     training: "Jumping",
@@ -376,20 +378,32 @@ assert.match(
     note: "Good rhythm over the grid. ".repeat(30),
     logged: false
   };
+  const line = denseLine ?? "";
   const without = rideReviewPrompt(facts);
-  const withEffort = rideReviewPrompt({ ...facts, effort: denseLine ?? undefined });
-  assert.ok(!without.includes("heart rate"), "Nothing about the heart rate unless it was allowed.");
-  assert.ok(withEffort.indexOf(denseLine ?? "") > withEffort.indexOf("Trot & walk"), "After the phase lines.");
-  assert.ok(withEffort.indexOf(denseLine ?? "") < withEffort.indexOf("Daimon felt focused"), "Before the feeling and the note.");
-  assert.ok(withEffort.length <= RIDE_REVIEW_PROMPT_LIMIT);
+  assert.ok(!without.includes("heart rate") && !without.includes("bpm"), "The question holds nothing of the heart rate.");
+  // An older caller that still put the line in the facts changes nothing.
+  assert.equal(rideReviewPrompt({ ...facts, effort: line } as RideReviewFacts), without);
   const question = "What changed, and what should my next Jumping ride with Daimon look like?";
-  const compared = rideComparePrompt({ ...facts, effort: denseLine ?? undefined }, ["Usually 45 min over your last 5 Jumping rides with Daimon."], question);
-  assert.ok(compared.endsWith(question) && compared.length <= RIDE_REVIEW_PROMPT_LIMIT);
-  assert.equal(rideReviewPrompt({ ...facts, effort: "  " }), without, "A blank line adds nothing.");
-  // The coach's health filter answers a health worry with a fixed reply. A
-  // heart rate is training effort, and must never read as one.
-  assert.equal(mentionsHealthConcern(withEffort), false);
-  assert.equal(mentionsHealthConcern(compared), false);
+  const comparison = ["Usually 45 min over your last 5 Jumping rides with Daimon."];
+  assert.equal(
+    rideComparePrompt({ ...facts, effort: line } as RideReviewFacts, comparison, question),
+    rideComparePrompt(facts, comparison, question)
+  );
+  assert.ok(!rideComparePrompt(facts, comparison, question).includes("bpm"));
+
+  // The line as it is sent: one line, never over what coach-chat accepts.
+  assert.equal(rideEffortForRalf(line), line);
+  assert.equal(rideEffortForRalf(`  ${line.replace(/ /g, "\n ")}  `), line, "One line, whatever the spacing.");
+  assert.equal(rideEffortForRalf("  "), undefined, "A blank line is no line.");
+  assert.equal(rideEffortForRalf(null), undefined);
+  assert.equal(rideEffortForRalf(undefined), undefined);
+  const long = rideEffortForRalf(`${"Pole work 140, ".repeat(40)}🐴 end`) ?? "";
+  assert.ok(long.length <= RIDE_REVIEW_EFFORT_LIMIT && long.endsWith("..."), "Cut to the server's 400 characters.");
+  const emoji = rideEffortForRalf(`${"a".repeat(RIDE_REVIEW_EFFORT_LIMIT - 4)}🐴🐴🐴`) ?? "";
+  assert.ok(emoji.length <= RIDE_REVIEW_EFFORT_LIMIT && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emoji), "Never half an emoji.");
+  // The coach's health filter answers a health worry with a fixed reply. It
+  // reads the question only, but a heart rate is training effort all the same.
+  assert.equal(mentionsHealthConcern(line), false);
 }
 
 // Every training's phases, every state: the line never trips the filter.
@@ -413,7 +427,9 @@ for (const training of rideTrainingTypes) {
 {
   assert.equal(RALF_EFFORT_CONSENT.title, "Let Ralf use your heart rate?");
   assert.match(RALF_EFFORT_CONSENT.message, /heart rate and calories/);
-  assert.match(RALF_EFFORT_CONSENT.message, /sent to Anthropic with your question to write the answer/);
+  assert.match(RALF_EFFORT_CONSENT.message, /sent to Anthropic with that one question to write the answer/);
+  // Equina keeps none of them: coach-chat saves the question alone.
+  assert.match(RALF_EFFORT_CONSENT.message, /Equina does not save them/);
   assert.equal(RALF_EFFORT_SWITCH_DETAIL, "From Apple Health, only in the rides you ask about. Sent to Anthropic, who writes Ralf's replies.");
   assert.match(RALF_EFFORT_CONSENT.message, /never the full line/);
   assert.match(RALF_EFFORT_CONSENT.message, /Account, Privacy and Ralf/);

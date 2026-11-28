@@ -37,7 +37,7 @@ import {
   type CompareWords
 } from "./ride-compare";
 import { formatActivityTime, rideTrainingLabel } from "./ride-plan";
-import { rideComparePrompt, rideMinutesLabel, rideReviewFactsFromEntry, rideReviewPrompt } from "./ride-review-prompt";
+import { rideComparePrompt, rideEffortForRalf, rideMinutesLabel, rideReviewFactsFromEntry } from "./ride-review-prompt";
 
 const moodLabel = { fresh: "Fresh", focused: "Focused", tender: "Tender" } as const;
 const moods: readonly RideMoodRecord[] = ["fresh", "focused", "tender"];
@@ -108,8 +108,11 @@ export function RideJournalSheet({
   /**
    * Absent where Ralf is not available: the ride still opens, without the
    * question. With a prompt, the question is the comparison the screen built.
+   * With an effort line, the rider allowed their heart rate to go with it:
+   * it travels beside the question, never inside it, so nothing Equina keeps
+   * holds it (rideEffortForRalf).
    */
-  onAskRalf?: (entry: RideEntry, prompt?: string) => void;
+  onAskRalf?: (entry: RideEntry, prompt?: string, effort?: string) => void;
   /** Opens the ride setup filled in with this ride. */
   onRepeat?: (entry: RideEntry) => void;
   /** Opens Add activity on a day ahead, filled in with this ride. */
@@ -368,7 +371,7 @@ function RideDetail({
   onBaseline: (baseline: CompareBaseline) => void;
   onMetric: (metric: TrendMetric) => void;
   onUpdate?: (id: string, patch: RideUpdate) => Promise<unknown>;
-  onAskRalf?: (entry: RideEntry, prompt?: string) => void;
+  onAskRalf?: (entry: RideEntry, prompt?: string, effort?: string) => void;
   onRepeat?: (entry: RideEntry) => void;
   onPlanAgain?: (entry: RideEntry, day: string) => void;
   /** The horse Plan it again schedules for, so the chips check that horse's days. */
@@ -461,7 +464,9 @@ function RideDetail({
 
   // The heart rate goes to Ralf only after a yes, asked the first time it
   // would: Ralf's replies are written by an AI provider, who would receive it.
-  // The answer is kept on this phone; Account changes it later.
+  // The answer is kept on this phone; Account changes it later. The line is
+  // handed on beside the question, so the question shown and kept in Ralf's
+  // history never holds it.
   const withEffort = (send: (line?: string) => void) => {
     if (!effortLine || !appleHealth) return send();
     if (appleHealth.settings.ralfEffort === "allowed") return send(effortLine);
@@ -489,16 +494,15 @@ function RideDetail({
       { cancelable: false }
     );
   };
-  const factsWith = (line?: string) => ({ ...rideReviewFactsFromEntry(entry, horse), ...(line ? { effort: line } : {}) });
 
   // Ralf is asked about the difference, with the peers in the message: he
   // reads only the newest rides on his own, without their phases.
   const compared = comparison && comparison.baseline.length > 0 && comparison.averageMinutes !== null ? comparison : null;
   const nextRide = lastRidesPhrase(shownScope, words, 1).replace(/^your last /, "");
-  // Without the heart rate, the plain review is the one App writes itself.
+  // The plain review is the one App writes itself, with or without the heart rate.
   const askPlain = () => {
     if (!onAskRalf) return;
-    withEffort((line) => (line ? onAskRalf(entry, rideReviewPrompt(factsWith(line))) : onAskRalf(entry)));
+    withEffort((line) => onAskRalf(entry, undefined, rideEffortForRalf(line)));
   };
   const askAbout = (question: string) => {
     if (!onAskRalf) return;
@@ -506,7 +510,13 @@ function RideDetail({
       askPlain();
       return;
     }
-    withEffort((line) => onAskRalf(entry, rideComparePrompt(factsWith(line), comparisonForRalf(compared, shownScope, words), question)));
+    withEffort((line) =>
+      onAskRalf(
+        entry,
+        rideComparePrompt(rideReviewFactsFromEntry(entry, horse), comparisonForRalf(compared, shownScope, words), question),
+        rideEffortForRalf(line)
+      )
+    );
   };
   const ralfGets = compared
     ? `Ralf gets this ride and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}${effortForRalfNow ? ", with your heart rate and calories" : ""}.`

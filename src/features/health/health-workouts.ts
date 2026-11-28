@@ -44,8 +44,10 @@ export const rideSyncIdentifier = (startedAt: string) => {
 /**
  * Another app's workout (the watch's, most often) during the ride: an
  * Equestrian Sports one first, then any other, the one sharing the most time
- * first. It has to cover at least half of the shorter of the two, so a walk
- * that ended as the ride began is not taken for it. Equina's own are left out.
+ * first. It has to cover at least half of the ride itself, so a walk that
+ * ended as the ride began, or a short workout started by mistake halfway
+ * through, is not taken for it. One watch workout over two rides back to
+ * back still covers each. Equina's own are left out.
  */
 export const matchRideWorkout = (
   workouts: readonly HealthWorkout[],
@@ -57,7 +59,7 @@ export const matchRideWorkout = (
   const candidates = workouts
     .filter((workout) => workout.bundleIdentifier !== ownBundleIdentifier && workout.end > workout.start)
     .map((workout) => ({ workout, shared: overlap(workout, ride) }))
-    .filter(({ workout, shared }) => shared > 0 && shared >= 0.5 * Math.min(rideMs, workout.end - workout.start));
+    .filter(({ shared }) => shared > 0 && shared >= 0.5 * rideMs);
   candidates.sort((a, b) => {
     const equestrian = Number(b.workout.activityType === EQUESTRIAN_SPORTS) - Number(a.workout.activityType === EQUESTRIAN_SPORTS);
     return equestrian || b.shared - a.shared;
@@ -68,6 +70,22 @@ export const matchRideWorkout = (
 /** A workout's calories stand for the ride only when the two are, give or take, the same stretch of time. */
 export const workoutCoversRide = (workout: HealthWorkout, ride: Span) =>
   overlap(workout, ride) >= 0.8 * Math.max(ride.end - ride.start, workout.end - workout.start);
+
+/**
+ * Another app's workout that is the ride itself, give or take: only then is
+ * Equina's own copy not needed, and only then is it removed or never saved.
+ * A workout that merely matches (a watch started late, a long hike around the
+ * ride) leaves Equina's copy where it is: two workouts in Fitness are better
+ * than a ride that is not there at all.
+ */
+export const coveringRideWorkout = (
+  workouts: readonly HealthWorkout[],
+  ride: Span,
+  ownBundleIdentifier: string
+): HealthWorkout | null => {
+  const match = matchRideWorkout(workouts, ride, ownBundleIdentifier);
+  return match && workoutCoversRide(match, ride) ? match : null;
+};
 
 /** Equina's own saved copies of a ride, found by the ride's sync identifier. */
 export const ownRideWorkouts = (workouts: readonly HealthWorkout[], ownBundleIdentifier: string, syncIdentifier: string) =>

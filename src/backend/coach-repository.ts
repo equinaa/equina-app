@@ -2,8 +2,10 @@ import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type {
   CoachConversationRecord,
   CoachMessageRecord,
+  CoachSendInput,
   CoachSendResult
 } from "./contracts";
+import { coachSendBody } from "./coach-request";
 import { EdgeClient } from "./edge-client";
 import { backendError, requireData } from "./errors";
 
@@ -116,25 +118,13 @@ export class CoachRepository {
     return (data ?? []).reverse().map((row) => mapMessage(row as Row));
   }
 
-  async send(input: {
-    conversationId?: string;
-    selectedHorseId?: string;
-    message: string;
-    clientNonce: string;
-    context: { focus: string; load: string; style: string };
-  }): Promise<CoachSendResult> {
+  async send(input: CoachSendInput): Promise<CoachSendResult> {
     const response = await this.edge.invoke<{
       conversation: Row;
       userMessage: Row;
       assistantMessage: Row;
       idempotent: boolean;
-    }>("coach-chat", {
-      conversationId: input.conversationId,
-      selectedHorseId: input.selectedHorseId,
-      message: input.message,
-      clientNonce: input.clientNonce,
-      context: input.context
-    });
+    }>("coach-chat", coachSendBody(input));
     return {
       conversation: mapConversation(response.conversation),
       userMessage: mapMessage(response.userMessage),

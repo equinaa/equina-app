@@ -455,9 +455,10 @@ export const RALF_EFFORT_LIMIT = 400;
 /**
  * The ride's effort, in one plain line for Ralf: averages and each phase's
  * average, never the heart-rate line, the device or a time of day. It says
- * whose heart it is, so a reply never takes it for the horse's. It is added to
- * the question only after the rider said yes (RALF_EFFORT_CONSENT), and its
- * words stay clear of the coach's health filter (tests/ride-effort.test.ts).
+ * whose heart it is, so a reply never takes it for the horse's. It goes
+ * beside the question, never inside it, and only after the rider said yes
+ * (RALF_EFFORT_CONSENT); its words stay clear of the coach's health filter
+ * all the same (tests/ride-effort.test.ts).
  */
 export const effortForRalf = (
   effort: RideEffort,
@@ -496,14 +497,17 @@ export const RALF_EFFORT_SWITCH_DETAIL = `From Apple Health, only in the rides y
 /**
  * Asked the first time the rider asks Ralf about a ride with effort, before
  * anything is sent. It names who writes the reply, as App Review 5.1.2(i)
- * asks for an AI provider. The answer is kept on this phone (health-settings.ts)
- * and Account › Privacy and Ralf changes it.
+ * asks for an AI provider, and says what happens to the numbers: they go
+ * with that one question and Equina keeps none of them (coach-chat hands
+ * them to the model and saves only the question). The answer is kept on
+ * this phone (health-settings.ts) and Account › Privacy and Ralf changes it.
  */
 export const RALF_EFFORT_CONSENT = {
   title: "Let Ralf use your heart rate?",
   message:
     "When you ask Ralf about a ride, Equina can add your heart rate and calories from it: the average, the highest and each phase's average, never the full line. " +
-    `Ralf's replies are written by ${RALF_AI_PROVIDER}, the AI service Equina uses, so these numbers are sent to ${RALF_AI_PROVIDER} with your question to write the answer. ` +
+    `Ralf's replies are written by ${RALF_AI_PROVIDER}, the AI service Equina uses, so these numbers are sent to ${RALF_AI_PROVIDER} with that one question to write the answer. ` +
+    "Equina does not save them: your Ralf history keeps the question without them. " +
     "Ralf talks about training effort, not medical matters. You can turn this off in Account, Privacy and Ralf.",
   allow: "Allow",
   notNow: "Not now"

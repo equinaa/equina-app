@@ -30,6 +30,7 @@ import "./coach-language-es.test";
 import "./coach-language-ro.test";
 import "./coach-language-hu.test";
 import "./coach-provider-text.test";
+import "./coach-ride-effort.test";
 import "./ride-recap-message.test";
 import "./ride-review-prompt.test";
 import "./ride-compare.test";

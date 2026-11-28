@@ -1059,7 +1059,10 @@ function EquinaApp() {
   const [coachLoad, setCoachLoad] = useState(defaultCoachLoad);
   const [coachStyle, setCoachStyle] = useState(defaultCoachStyle);
   const [coachOnboarded, setCoachOnboarded] = useState(false);
-  const [pendingCoachPrompt, setPendingCoachPrompt] = useState("");
+  // A question asked from elsewhere, sent as Ralf opens. A ride's heart-rate
+  // line, when the rider allowed it, waits beside it and goes with it to the
+  // model only (coach-chat never saves it), never inside the text.
+  const [pendingCoachPrompt, setPendingCoachPrompt] = useState<{ text: string; rideEffort?: string } | null>(null);
   // The horse a question is about, when it is not the one on Home: a past
   // ride opened from the journal belongs to the horse that was ridden, or to
   // none (null). Undefined leaves Ralf on the horse on Home.
@@ -2078,19 +2081,20 @@ function EquinaApp() {
   // A prompt arrives already asked, the way the place it came from put it.
   // `about` names the horse the question concerns, or null for no horse;
   // without it Ralf opens on the horse on Home, and a horse left over from an
-  // earlier question is dropped.
-  const openRalf = (prompt?: string, about?: { horseId?: string | null }) => {
+  // earlier question is dropped. `about.effort` is a ride's heart-rate line
+  // the rider allowed to go with this one question.
+  const openRalf = (prompt?: string, about?: { horseId?: string | null; effort?: string }) => {
     if (!ralfAvailable) return;
     void Haptics.selectionAsync().catch(() => undefined);
     setLastRideRecapVisible(false);
-    if (prompt) setPendingCoachPrompt(prompt);
+    if (prompt) setPendingCoachPrompt({ text: prompt, ...(about?.effort ? { rideEffort: about.effort } : {}) });
     setCoachHorseId(about?.horseId);
     setRalfOpen(true);
     refresh("");
   };
 
   const closeRalf = () => {
-    setPendingCoachPrompt("");
+    setPendingCoachPrompt(null);
     setCoachHorseId(undefined);
     setRalfOpen(false);
   };
@@ -2241,8 +2245,10 @@ function EquinaApp() {
   };
 
   // `prompt` is the journal's comparison of the ride with the ones before it;
-  // without one, Ralf reviews the ride on its own.
-  const reviewJournalRideWithRalf = (entry: RideEntry, prompt?: string) => {
+  // without one, Ralf reviews the ride on its own. `effort` is the rider's
+  // heart-rate line for the ride, after their yes: it goes beside the
+  // question, so Ralf's saved history never holds it.
+  const reviewJournalRideWithRalf = (entry: RideEntry, prompt?: string, effort?: string) => {
     const horseId = knownHorseId(entry.horseId);
     // The sheet is a modal over the whole app and Ralf renders under it.
     setRideJournalOpen(false);
@@ -2251,7 +2257,7 @@ function EquinaApp() {
     // without a horse, not as a ride on the horse on Home.
     openRalf(
       prompt ?? rideReviewPrompt(rideReviewFactsFromEntry(entry, horseId ? horseNames[horseId] : undefined)),
-      { horseId: horseId ?? null }
+      { horseId: horseId ?? null, ...(effort ? { effort } : {}) }
     );
   };
 
@@ -3363,8 +3369,9 @@ function EquinaApp() {
                 backend={equinaSession.backend}
                 enabled={ralfAvailable}
                 context={coachContext}
-                queuedPrompt={pendingCoachPrompt}
-                onQueuedPromptConsumed={() => setPendingCoachPrompt("")}
+                queuedPrompt={pendingCoachPrompt?.text ?? ""}
+                queuedRideEffort={pendingCoachPrompt?.rideEffort}
+                onQueuedPromptConsumed={() => setPendingCoachPrompt(null)}
                 suggestions={coachPromptsFor(riderContext, horseState)}
                 focusOptions={coachGoalsByDiscipline[onboardingDiscipline]}
                 onBack={closeRalf}
