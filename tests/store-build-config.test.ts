@@ -35,6 +35,8 @@ const appJson = JSON.parse(readFileSync(join(root, "app.json"), "utf8")) as {
     plugins?: Array<string | [string, Record<string, unknown>?]>;
     ios?: {
       buildNumber?: string;
+      bundleIdentifier?: string;
+      infoPlist?: Record<string, unknown>;
       config?: { usesNonExemptEncryption?: boolean };
       splash?: { backgroundColor?: string; image?: string };
     };
@@ -291,6 +293,38 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     assert.ok(seconds < 30, `${name} is under the 30 s iOS allows a notification sound.`);
     assert.ok(cues.includes(`file: "${name}"`), `ride-cues.ts asks for ${name} by the name the app ships it under.`);
   }
+}
+
+// The ride on the lock screen and in the Dynamic Island: a widget extension
+// (targets/ride-activity) that @bacons/apple-targets adds at prebuild, and
+// the key without which iOS refuses to start a Live Activity.
+{
+  const { ios, plugins = [] } = appJson.expo;
+  assert.equal(ios?.infoPlist?.NSSupportsLiveActivities, true, "Without NSSupportsLiveActivities iOS refuses every Live Activity.");
+  // Only a frequent-updates budget for push would need this one, and there is no push.
+  assert.equal(ios?.infoPlist?.NSSupportsLiveActivitiesFrequentUpdates, undefined);
+  const targets = plugins.find((entry) => (Array.isArray(entry) ? entry[0] : entry) === "@bacons/apple-targets");
+  assert.ok(targets, "The plugin that adds the widget extension at prebuild.");
+  const submitTeam = (easJson.submit?.production as { ios?: { appleTeamId?: string } } | undefined)?.ios?.appleTeamId;
+  assert.ok(submitTeam);
+  assert.equal(
+    Array.isArray(targets) ? targets[1]?.appleTeamId : undefined,
+    submitTeam,
+    "The extension is signed by the team the app is submitted from."
+  );
+  assert.equal(ios?.bundleIdentifier, "com.equina.mobile", "The extension's App ID is this one plus .RideActivity.");
+
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    dependencies: Record<string, string>;
+    expo?: { autolinking?: { exclude?: string[] } };
+  };
+  // 5.0.0 is the line for SDK 55 (6.0 asks for Expo 57). Pinned: every
+  // release rewrites the Xcode project, and a new one is checked with a
+  // native build first.
+  assert.equal(packageJson.dependencies["@bacons/apple-targets"], "5.0.0");
+  // Its own native module (ExtensionStorage, App Group storage) needs iOS 16.4
+  // and is not used: no App Group. Left out, so the app keeps iOS 15.1.
+  assert.deepEqual(packageJson.expo?.autolinking?.exclude, ["@bacons/apple-targets"]);
 }
 
 console.log("Store build configuration passed.");

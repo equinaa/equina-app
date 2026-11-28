@@ -34,6 +34,7 @@ import "./ride-recap-message.test";
 import "./ride-review-prompt.test";
 import "./ride-compare.test";
 import "./active-ride.test";
+import "./ride-live-activity.test";
 import "./store-build-config.test";
 import "./eas-build-guard.test";
 import "./client-secret-scan.test";

@@ -17,7 +17,15 @@
     "seed:print": "tsx src/seed/seed-data.ts",
     "eas-build-pre-install": "node scripts/eas-build-guard.mjs"
   },
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "@bacons/apple-targets"
+      ]
+    }
+  },
   "dependencies": {
+    "@bacons/apple-targets": "5.0.0",
     "@expo/metro-runtime": "~55.0.12",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "11.5.2",

@@ -60,6 +60,12 @@
           "recordAudioAndroid": false,
           "enableBackgroundPlayback": false
         }
+      ],
+      [
+        "@bacons/apple-targets",
+        {
+          "appleTeamId": "3F67G37DN8"
+        }
       ]
     ],
     "ios": {
@@ -70,6 +76,9 @@
         "webcredentials:www.equina.ai",
         "webcredentials:equina.ai"
       ],
+      "infoPlist": {
+        "NSSupportsLiveActivities": true
+      },
       "config": {
         "usesNonExemptEncryption": false
       },

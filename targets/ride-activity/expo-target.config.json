@@ -1,0 +1,12 @@
+{
+  "type": "widget",
+  "name": "RideActivity",
+  "displayName": "Equina",
+  "bundleIdentifier": ".RideActivity",
+  "deploymentTarget": "16.2",
+  "frameworks": ["SwiftUI", "WidgetKit", "ActivityKit"],
+  "colors": {
+    "$accent": "#C4A05A",
+    "$widgetBackground": "#171511"
+  }
+}
