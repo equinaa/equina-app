@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assessHealthConcern, mentionsHealthConcern } from "../supabase/functions/_shared/coach-safety";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RideEntry } from "../src/backend";
@@ -71,12 +72,11 @@ const manualEntry: RideEntry = {
 
 // The filter coach-chat runs on the whole message. A hit answers with the
 // fixed "contact your veterinarian" reply, so the template's own words must
-// never be what trips it. Read from the function, which Node cannot import.
+// never be what trips it. The filter lives in _shared, so the test runs the
+// real one in every language it reads.
 const coachChat = readFileSync(join(process.cwd(), "supabase/functions/coach-chat/index.ts"), "utf8");
-const healthSource = /const healthPattern = \/(.+)\/i;/.exec(coachChat)?.[1];
-assert.ok(healthSource, "coach-chat still declares healthPattern as a single /.../i literal");
-const healthPattern = new RegExp(healthSource, "i");
-assert.match("He felt lame behind", healthPattern);
+assert.ok(coachChat.includes("assessHealthConcern(input.message)"));
+assert.ok(mentionsHealthConcern("He felt lame behind"));
 assert.match(coachChat, /message: z\.string\(\)\.trim\(\)\.min\(1\)\.max\(3000\)/);
 assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
 
@@ -100,7 +100,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   assert.ok(!prompt.includes("My note"));
   assert.ok(!prompt.includes("by hand"));
   assert.ok(!prompt.includes("—"));
-  assert.doesNotMatch(prompt, healthPattern);
+  assert.ok(!mentionsHealthConcern(prompt), prompt);
   assert.ok(prompt.length < RIDE_REVIEW_PROMPT_LIMIT);
 }
 
@@ -118,7 +118,7 @@ assert.ok(RIDE_REVIEW_PROMPT_LIMIT < 3000);
   assert.ok(!prompt.includes("planned"));
   assert.ok(!prompt.includes("felt"));
   assert.ok(prompt.endsWith(`\n\n${question}`));
-  assert.doesNotMatch(prompt, healthPattern);
+  assert.ok(!mentionsHealthConcern(prompt), prompt);
 }
 
 {
@@ -289,9 +289,11 @@ assert.equal(rideReviewFactsFromEntry({ ...liveEntry, trainingType: undefined, d
 }
 
 // Every training the app offers, with its usual phases, timed and logged,
-// with every feeling: the fixed wording never reads as a health question.
+// with every feeling, for horses whose names are words in another language
+// Ralf reads: the fixed wording never reads as a health question.
 const neutral: string[] = [];
-for (const training of rideTrainingTypes) {
+const horseNames = ["Test", "Dolores", "Seb", "Sebe", "Rana", "Rani", "Laz", "Dor", "Dores", "Remedios", "Doze", "Santa", "Coja"];
+for (const horseName of horseNames) for (const training of rideTrainingTypes) {
   const phases = defaultRidePhases(training).map((phase, index) => ({
     title: phase.title,
     detail: phase.detail,
@@ -303,14 +305,37 @@ for (const training of rideTrainingTypes) {
       neutral.push(rideReviewPrompt(rideReviewFactsFromEntry({
         ...liveEntry, trainingType: training.id, focus: training.label, phases, mood, source,
         completedPhases: 2, totalPhases: phases.length
-      }, "Test")));
+      }, horseName)));
     }
   }
 }
-assert.equal(neutral.length, rideTrainingTypes.length * 6);
-assert.deepEqual(neutral.filter((prompt) => healthPattern.test(prompt)), []);
+assert.equal(neutral.length, horseNames.length * rideTrainingTypes.length * 6);
+assert.deepEqual(neutral.filter((prompt) => mentionsHealthConcern(prompt)), []);
+// A note in another language is read in its own language inside the
+// English template: Portuguese "dor", Spanish "dolía" and Hungarian "fáj" are
+// health words there, whatever the horse is called.
+assert.ok(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "x" })).includes("My note: x"));
+for (const [note, language] of [
+  ["Ela estava com dor na pata depois do salto.", "pt"],
+  ["ela ficou mancando dps do galope", "pt"],
+  ["Le dolía el lomo al final.", "es"],
+  ["Il mai doare piciorul din fata.", "ro"],
+  ["Iapa a schiopatat la final.", "ro"],
+  ["Fáj a lába neki.", "hu"],
+  ["He was lame behind at the end.", "en"],
+] as const) {
+  assert.deepEqual(assessHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: note }, "Estrela"))), { concern: true, language }, note);
+}
+for (const note of [
+  "Treino tranquilo, ela foi muito bem.",
+  // Spanish "lame" (licks) and Romanian "lame" (blades) in a note are not English "lame".
+  "Lame el bocado todo el rato, muy relajada.",
+  "Ce lame folosesc la masina de tuns calul?",
+]) {
+  assert.equal(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: note }, "Estrela"))), false, note);
+}
 // The rider's own words are still screened like any message to Ralf.
-assert.match(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." })), healthPattern);
+assert.ok(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." }))));
 
 assert.equal(rideMinutesLabel(0), "<1 min");
 assert.equal(rideMinutesLabel(59), "<1 min");
