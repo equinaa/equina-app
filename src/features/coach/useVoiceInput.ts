@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { requireOptionalNativeModule } from "expo";
-import { Platform } from "react-native";
-import { joinSpoken } from "./voice-text";
+import { Platform, Settings } from "react-native";
+import {
+  joinSpoken,
+  NOTHING_HEARD_HINT,
+  noLanguageHint,
+  PERMISSION_HINT,
+  READY_HINT,
+  resolveSpeechLocale,
+  RETRY_HINT,
+  TAP_HINT,
+  voiceErrorHint,
+  wantedSpeechLocales
+} from "./voice-text";
 
 type SpeechPackage = typeof import("expo-speech-recognition");
 type SpeechModule = SpeechPackage["ExpoSpeechRecognitionModule"];
@@ -27,9 +38,10 @@ const speechModule = (): SpeechModule | null => {
 };
 
 /**
- * The phone's language, which is the one its dictation knows and the one
- * the availability check looks at. Without it the library falls back to
- * en-US, whose on-device model may be missing.
+ * The app's locale as Intl reports it. It joins a language to the phone's
+ * region ("pt-RO", "en-RO") or is just "pt": tags the recognizer does not
+ * list, so a session asked for one fails with "language-not-supported". It
+ * only backs up the phone's own languages (see speechLanguage).
  */
 export const deviceSpeechLocale = () => {
   try {
@@ -39,7 +51,33 @@ export const deviceSpeechLocale = () => {
   }
 };
 
-/** Whether this phone can turn speech into text without sending the audio anywhere. */
+// The rider's real languages, best first. On iOS these are the iPhone's
+// languages (Settings › General › Language & Region); elsewhere there is no list.
+const phoneLanguages = (): unknown => {
+  if (Platform.OS !== "ios") return [];
+  try {
+    return Settings.get("AppleLanguages");
+  } catch {
+    return [];
+  }
+};
+
+// The language every session asks for, worked out once: the phone's
+// languages do not change while the app runs (iOS restarts apps when they do).
+let language: Promise<string | null> | undefined;
+const speechLanguage = (module: SpeechModule) => {
+  language ??= resolveSpeechLocale(wantedSpeechLocales(phoneLanguages(), deviceSpeechLocale()), () =>
+    module.getSupportedLocales({})
+  );
+  return language;
+};
+
+/**
+ * Whether this phone can turn speech into text without sending the audio
+ * anywhere. This asks the phone's default recognizer (the iPhone language,
+ * else the dictation language), not the language a session asks for: a
+ * language with no recognizer says so when the mic is pressed.
+ */
 export const voiceInputAvailable = () => {
   const module = speechModule();
   if (!module) return false;
@@ -49,9 +87,6 @@ export const voiceInputAvailable = () => {
     return false;
   }
 };
-
-const PERMISSION_HINT = "Allow the microphone and speech recognition in Settings to ask by voice.";
-const RETRY_HINT = "Couldn't hear that. Hold the mic and try again.";
 
 export type VoiceInput = {
   /** The phone can do it: the mic shows. */
@@ -74,6 +109,10 @@ export type VoiceInput = {
  * One session at a time: a press while the last one is still finishing
  * waits for it, so its late words never land twice. Music playing in another
  * app is ducked while listening and handed back after.
+ *
+ * The mic never fails in silence: a press that does not end in words says
+ * why (permission, Dictation off, a language the phone cannot hear, nothing
+ * heard) or, on first use, that it is ready now.
  */
 export function useVoiceInput({
   text,
@@ -88,8 +127,14 @@ export function useVoiceInput({
   const [supported, setSupported] = useState(voiceInputAvailable);
   const [listening, setListening] = useState(false);
   const [hint, setHint] = useState("");
+  // The hint as last set, for the listeners: a word already given is not replaced.
+  const shown = useRef("");
   const base = useRef("");
   const heard = useRef("");
+  // Any words at all this session, interim ones included (heard holds final ones only).
+  const spoke = useRef(false);
+  // The recognizer reported nothing heard ("nomatch", "no-speech", "speech-timeout").
+  const missed = useRef(false);
   const startedAt = useRef(0);
   // From press to the session's "end": no second session meanwhile.
   const busy = useRef(false);
@@ -99,6 +144,11 @@ export function useVoiceInput({
   latestText.current = text;
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
+
+  const say = useCallback((next: string) => {
+    shown.current = next;
+    setHint(next);
+  }, []);
 
   useEffect(() => {
     const module = supported ? speechModule() : null;
@@ -121,26 +171,36 @@ export function useVoiceInput({
       }),
       module.addListener("result", (event) => {
         const transcript = event.results[0]?.transcript ?? "";
+        if (transcript.trim()) spoke.current = true;
         // Android hands each pause's words over as final, then starts again;
         // iOS keeps one growing transcript. Both end up as base + all heard.
-        const shown = joinSpoken(heard.current, transcript);
-        if (event.isFinal) heard.current = shown;
-        onTextRef.current(joinSpoken(base.current, shown));
+        const shownText = joinSpoken(heard.current, transcript);
+        if (event.isFinal) heard.current = shownText;
+        onTextRef.current(joinSpoken(base.current, shownText));
       }),
-      module.addListener("end", finish),
+      module.addListener("nomatch", () => {
+        missed.current = true;
+      }),
+      module.addListener("end", () => {
+        finish();
+        // Held, and no words came: say so, unless the rider already has a word (a tap, an error).
+        if (missed.current && !spoke.current && !shown.current) say(NOTHING_HEARD_HINT);
+      }),
       module.addListener("error", (event) => {
         finish();
-        if (event.error === "aborted" || event.error === "no-speech" || event.error === "speech-timeout") return;
-        if (event.error === "not-allowed") {
-          setHint(PERMISSION_HINT);
+        if (event.error === "no-speech" || event.error === "speech-timeout") {
+          // Said when the session ends, unless words came first.
+          missed.current = true;
           return;
         }
-        if (event.error === "language-not-supported" || event.error === "service-not-allowed") {
-          // This phone's language has no on-device model: no mic, rather than one that never works.
+        const next = voiceErrorHint(event.error, Platform.OS);
+        if (!next) return;
+        say(next);
+        if (event.error === "language-not-supported") {
+          // No recognizer for this language: the hint stays and says why the mic
+          // went, rather than a mic that never works.
           setSupported(false);
-          return;
         }
-        setHint(RETRY_HINT);
       })
     ];
     return () => {
@@ -151,7 +211,7 @@ export function useVoiceInput({
         // Nothing was listening.
       }
     };
-  }, [supported]);
+  }, [supported, say]);
 
   const start = useCallback(() => {
     const module = speechModule();
@@ -161,22 +221,30 @@ export function useVoiceInput({
     startedAt.current = Date.now();
     base.current = latestText.current;
     heard.current = "";
-    setHint("");
+    spoke.current = false;
+    missed.current = false;
+    say("");
     setListening(true);
-    void module.requestPermissionsAsync().then((permission) => {
-      if (!permission.granted) {
-        busy.current = false;
-        setListening(false);
-        setHint(PERMISSION_HINT);
-        return;
-      }
-      if (released.current) {
-        busy.current = false;
-        setListening(false);
+    // The session never started: free the mic, with a word for the rider when there is one.
+    const settle = (next?: string) => {
+      busy.current = false;
+      setListening(false);
+      if (next) say(next);
+    };
+    void (async () => {
+      const permission = await module.requestPermissionsAsync();
+      if (!permission.granted) return settle(PERMISSION_HINT);
+      // First use: the system prompts took the finger off the mic. Say it works now.
+      if (released.current) return settle(READY_HINT);
+      const lang = await speechLanguage(module);
+      if (released.current) return settle();
+      if (!lang) {
+        settle(noLanguageHint(Platform.OS));
+        setSupported(false);
         return;
       }
       module.start({
-        lang: deviceSpeechLocale(),
+        lang,
         interimResults: true,
         continuous: true,
         requiresOnDeviceRecognition: true,
@@ -189,18 +257,14 @@ export function useVoiceInput({
           mode: "measurement"
         }
       });
-    }).catch(() => {
-      busy.current = false;
-      setListening(false);
-      setHint(RETRY_HINT);
-    });
-  }, [enabled]);
+    })().catch(() => settle(RETRY_HINT));
+  }, [enabled, say]);
 
   const stop = useCallback(() => {
     const module = speechModule();
     released.current = true;
     // A tap is not a question: say how it works.
-    if (Date.now() - startedAt.current < 350 && !heard.current) setHint("Hold the mic while you speak.");
+    if (Date.now() - startedAt.current < 350 && !heard.current) say(TAP_HINT);
     // The listening look goes as the finger lifts; the session ends a moment
     // later, and "end" lets the next press in.
     setListening(false);
@@ -215,7 +279,7 @@ export function useVoiceInput({
     setTimeout(() => {
       if (startedAt.current === pressed) busy.current = false;
     }, 4000);
-  }, []);
+  }, [say]);
 
   return { available: supported && enabled, listening, hint, start, stop };
 }
