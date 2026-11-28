@@ -503,10 +503,12 @@ function RideDetail({
             <Text style={styles.tag}>{manual ? "Logged" : "Timed"}</Text>
           </View>
           {comparison?.sentence ? <Text style={styles.heroDelta}>{comparison.sentence}</Text> : null}
-          <View style={styles.pills}>
-            {entry.totalPhases > 0 ? <Text style={styles.pill}>{entry.completedPhases} of {entry.totalPhases} phases</Text> : null}
-            <Text style={styles.pill}>{manual ? "Added by hand" : "Timed live"}</Text>
-          </View>
+          {/* How it was recorded is the tag beside the minutes; the Details row spells it out. */}
+          {entry.totalPhases > 0 ? (
+            <View style={styles.pills}>
+              <Text style={styles.pill}>{entry.completedPhases} of {entry.totalPhases} phases</Text>
+            </View>
+          ) : null}
         </View>
 
         {onUpdate ? (
