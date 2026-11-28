@@ -32,6 +32,7 @@ import "./coach-language-hu.test";
 import "./coach-provider-text.test";
 import "./ride-recap-message.test";
 import "./ride-review-prompt.test";
+import "./ride-compare.test";
 import "./active-ride.test";
 import "./store-build-config.test";
 import "./eas-build-guard.test";

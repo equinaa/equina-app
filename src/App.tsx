@@ -223,9 +223,12 @@ import {
   rideTrainingTypeById,
   startRun,
   type ActivityDraft,
+  type RidePhasePlan,
   type RidePlan,
-  type RideRun
+  type RideRun,
+  type RideTrainingType
 } from "./features/ride/ride-plan";
+import { repeatPlanOf } from "./features/ride/ride-compare";
 import { rideSessionFrom, useRideJournal } from "./features/ride/useRideJournal";
 import { createSeededEquinaApi } from "./seed/seed-data";
 import { getFitScreening, type HorseFitContext } from "./product/product-truth";
@@ -968,9 +971,24 @@ function EquinaApp() {
   const [rideActive, setRideActive] = useState(false);
   // Set on the setup sheet; its Start training starts the clock.
   const [rideSetupOpen, setRideSetupOpen] = useState(false);
+  // The setup sheet opened for one particular ride instead of the next one:
+  // a ride repeated from the journal. Cleared when the sheet closes.
+  const [rideSetupOverride, setRideSetupOverride] = useState<{
+    horseId: string;
+    trainingType: RideTrainingType;
+    phases: RidePhasePlan[];
+  } | null>(null);
   const [addActivityOpen, setAddActivityOpen] = useState(false);
   // The day picked in the calendar for Add activity; none from Home's button.
   const [addActivityDay, setAddActivityDay] = useState<string | undefined>(undefined);
+  // Add activity filled in with a ride from the journal, planned again at
+  // the time it was ridden. Cleared when the sheet closes.
+  const [activityOverride, setActivityOverride] = useState<{
+    horseId?: string;
+    trainingType: RideTrainingType;
+    phases: RidePhasePlan[];
+    startMinutes: number;
+  } | null>(null);
   // The calendar, open on a day.
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
   const [rideJournalOpen, setRideJournalOpen] = useState(false);
@@ -1100,8 +1118,10 @@ function EquinaApp() {
     setRidePlan(null);
     setRideRun(null);
     setRideSetupOpen(false);
+    setRideSetupOverride(null);
     setAddActivityOpen(false);
     setAddActivityDay(undefined);
+    setActivityOverride(null);
     setCalendarDay(null);
     setRideJournalOpen(false);
     setHorseSwitcherOpen(false);
@@ -1286,7 +1306,7 @@ function EquinaApp() {
   const nextTraining = todayTraining ?? rememberedTraining;
   // One tap starts the clock, so the setup is never reopened for a ride in
   // progress: the draft is always the next ride's.
-  const rideSetupDraft = {
+  const rideSetupDraft = rideSetupOverride ?? {
     // Home's horse -- the last one picked -- and the remembered one only
     // before the Stable has loaded. Today's planned training is this horse's.
     horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
@@ -1312,7 +1332,7 @@ function EquinaApp() {
   const homeHorseRides = ridePersistence ? ofHorse(rideJournal.entries, summaryHorse) : [];
   const summaryHorseName = summaryHorse ? horseNames[summaryHorse] ?? equinaSession.account?.primaryHorse?.name : undefined;
   // Add activity opens on Home's horse: the last one the rider picked.
-  const activityDraft = {
+  const activityDraft = activityOverride ?? {
     horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
     trainingType: rememberedTraining,
     phases: phasesFor(rideSetupMemory.memory, rememberedTraining)
@@ -1792,6 +1812,7 @@ function EquinaApp() {
   // the rider can put the phone away straight after.
   const confirmRideSetup = (plan: RidePlan) => {
     setRideSetupOpen(false);
+    setRideSetupOverride(null);
     if (rideActive) return;
     setRidePlan(plan);
     setRideRun(startRun(readyRun(), Date.now()));
@@ -1867,6 +1888,7 @@ function EquinaApp() {
       source: "manual"
     });
     setAddActivityOpen(false);
+    setActivityOverride(null);
     refresh("Added to your journal.");
   };
 
@@ -1887,6 +1909,7 @@ function EquinaApp() {
     });
     plannedRemindersAsk.current = true;
     setAddActivityOpen(false);
+    setActivityOverride(null);
     refresh("Scheduled. It's on your calendar.");
   };
 
@@ -2021,7 +2044,9 @@ function EquinaApp() {
     openRalf(rideReviewPrompt(rideReviewFactsFromSession(lastRide, horseName)), { horseId });
   };
 
-  const reviewJournalRideWithRalf = (entry: RideEntry) => {
+  // `prompt` is the journal's comparison of the ride with the ones before it;
+  // without one, Ralf reviews the ride on its own.
+  const reviewJournalRideWithRalf = (entry: RideEntry, prompt?: string) => {
     const horseId = knownHorseId(entry.horseId);
     // The sheet is a modal over the whole app and Ralf renders under it.
     setRideJournalOpen(false);
@@ -2029,9 +2054,49 @@ function EquinaApp() {
     // A ride with no horse, or on one the rider no longer has, is asked about
     // without a horse, not as a ride on the horse on Home.
     openRalf(
-      rideReviewPrompt(rideReviewFactsFromEntry(entry, horseId ? horseNames[horseId] : undefined)),
+      prompt ?? rideReviewPrompt(rideReviewFactsFromEntry(entry, horseId ? horseNames[horseId] : undefined)),
       { horseId: horseId ?? null }
     );
+  };
+
+  // The horse a ride from the journal is set up on again: its own, while it
+  // is still in the stable, or the setup's usual one.
+  const rideHorseFor = (entry: RideEntry) =>
+    entry.horseId && rideHorses.some((option) => option.id === entry.horseId) ? entry.horseId : undefined;
+
+  // A ride from the journal, set up again as it was planned. The journal
+  // closes first: it is a modal over the whole app, the setup sheet too.
+  const repeatJournalRide = (entry: RideEntry) => {
+    if (rideActive) return;
+    const repeat = repeatPlanOf(entry);
+    const trainingType = repeat.trainingType ?? rideSetupDraft.trainingType;
+    setRideJournalOpen(false);
+    rideJournal.clearError();
+    setRideSetupOverride({
+      horseId: rideHorseFor(entry) ?? rideSetupDraft.horseId ?? "",
+      trainingType,
+      phases: repeat.phases ?? phasesFor(rideSetupMemory.memory, trainingType)
+    });
+    setRideSetupOpen(true);
+  };
+
+  // The same ride on a day ahead: Add activity in schedule mode, at the time
+  // it was ridden, with its horse, training and phases.
+  const planJournalRideAgain = (entry: RideEntry, day: string) => {
+    if (rideActive) return;
+    const repeat = repeatPlanOf(entry);
+    const trainingType = repeat.trainingType ?? activityDraft.trainingType;
+    const horseId = rideHorseFor(entry) ?? activityDraft.horseId;
+    setRideJournalOpen(false);
+    rideJournal.clearError();
+    setActivityOverride({
+      ...(horseId ? { horseId } : {}),
+      trainingType,
+      phases: repeat.phases ?? phasesFor(rideSetupMemory.memory, trainingType),
+      startMinutes: repeat.startMinutes
+    });
+    setAddActivityDay(day);
+    setAddActivityOpen(true);
   };
 
   const openAccountAt = (route: AccountRoute) => {
@@ -3400,7 +3465,10 @@ function EquinaApp() {
           phases={rideSetupDraft.phases}
           memory={rideSetupMemory.memory}
           onContinue={confirmRideSetup}
-          onDismiss={() => setRideSetupOpen(false)}
+          onDismiss={() => {
+            setRideSetupOpen(false);
+            setRideSetupOverride(null);
+          }}
         />
 
         <RideSetupSheet
@@ -3412,9 +3480,13 @@ function EquinaApp() {
           phases={activityDraft.phases}
           memory={rideSetupMemory.memory}
           day={addActivityDay}
+          startMinutes={activityOverride?.startMinutes}
           onLog={logActivity}
           onSchedule={ridePersistence ? scheduleActivity : undefined}
-          onDismiss={() => setAddActivityOpen(false)}
+          onDismiss={() => {
+            setAddActivityOpen(false);
+            setActivityOverride(null);
+          }}
         />
 
         <HorseSwitcherSheet
@@ -3543,7 +3615,20 @@ function EquinaApp() {
           deletingId={deletingRideId || undefined}
           error={rideJournalOpen ? rideJournal.error : undefined}
           onDelete={deleteJournalRide}
+          onUpdate={rideJournal.updateRide}
           onAskRalf={ralfAvailable ? reviewJournalRideWithRalf : undefined}
+          onRepeat={repeatJournalRide}
+          onPlanAgain={planJournalRideAgain}
+          onOpenDay={(day) => {
+            setRideJournalOpen(false);
+            rideJournal.clearError();
+            setCalendarDay(day);
+          }}
+          rideActive={rideActive}
+          planned={plannedActivities.items}
+          training={trainingPlan.loaded
+            ? { versions: trainingPlan.versions, timeOff: trainingPlan.timeOff, completions: trainingPlan.completions }
+            : undefined}
           onDismiss={() => {
             setRideJournalOpen(false);
             rideJournal.clearError();

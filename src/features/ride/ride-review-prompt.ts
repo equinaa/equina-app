@@ -90,11 +90,32 @@ const phaseLine = (phase: RidePhaseEntry, logged: boolean) => {
  * The question closes it and is never cut; if anything has to give, it is the
  * tail of the facts.
  */
-export const rideReviewPrompt = (facts: RideReviewFacts): string => {
+export const rideReviewPrompt = (facts: RideReviewFacts): string =>
+  sessionPrompt(facts, "Review", "What went well, and what is the one thing to work on next time?");
+
+/** A comparison stays a few lines; a row no screen could write cannot push the question out. */
+const RIDE_COMPARE_LIMIT = 700;
+
+/**
+ * The same ride, with how it compares to the rides before it
+ * (ride-compare.ts), and the rider's own question about the difference.
+ * The comparison comes after the ride's facts and is kept whole: if
+ * anything has to give, it is still the tail of the facts.
+ */
+export const rideComparePrompt = (facts: RideReviewFacts, comparison: readonly string[], question: string): string =>
+  sessionPrompt(facts, "Compare", question, comparison);
+
+const sessionPrompt = (
+  facts: RideReviewFacts,
+  verb: "Review" | "Compare",
+  question: string,
+  comparison: readonly string[] = []
+): string => {
   const moment = localMomentLabel(facts.startedAt);
   const [day, time] = moment ? moment.split(" · ") : [];
-  const opening = `Review my session${day ? ` on ${day}` : ""}: ${facts.training}${facts.horseName ? ` with ${facts.horseName}` : ""}.`;
-  const question = "What went well, and what is the one thing to work on next time?";
+  const opening = `${verb} my session${day ? ` on ${day}` : ""}: ${facts.training}${facts.horseName ? ` with ${facts.horseName}` : ""}.`;
+  const compared = comparison.join("\n");
+  const tail = compared.length > RIDE_COMPARE_LIMIT ? `${cutAt(compared, RIDE_COMPARE_LIMIT - 3).trim()}...` : compared;
 
   const lines: string[] = [];
   if (time) lines.push(`It started at ${time}.`);
@@ -115,7 +136,8 @@ export const rideReviewPrompt = (facts: RideReviewFacts): string => {
     lines.push(`My note: ${note.length > RIDE_REVIEW_NOTE_LIMIT ? `${cutAt(note, RIDE_REVIEW_NOTE_LIMIT).trim()}...` : note}`);
   }
 
-  const room = RIDE_REVIEW_PROMPT_LIMIT - opening.length - question.length - 4;
+  const room = RIDE_REVIEW_PROMPT_LIMIT - opening.length - question.length - 4 - (tail ? tail.length + 2 : 0);
   const body = lines.join("\n");
-  return `${opening}\n\n${body.length > room ? `${cutAt(body, Math.max(0, room - 3)).trim()}...` : body}\n\n${question}`;
+  const kept = body.length > room ? `${cutAt(body, Math.max(0, room - 3)).trim()}...` : body;
+  return `${opening}\n\n${kept}${tail ? `\n\n${tail}` : ""}\n\n${question}`;
 };
