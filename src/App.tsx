@@ -3619,6 +3619,7 @@ function EquinaApp() {
           onAskRalf={ralfAvailable ? reviewJournalRideWithRalf : undefined}
           onRepeat={repeatJournalRide}
           onPlanAgain={planJournalRideAgain}
+          planHorseFor={(entry) => rideHorseFor(entry) ?? activityDraft.horseId}
           onOpenDay={(day) => {
             setRideJournalOpen(false);
             rideJournal.clearError();

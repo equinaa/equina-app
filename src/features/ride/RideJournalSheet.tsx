@@ -80,6 +80,7 @@ export function RideJournalSheet({
   onAskRalf,
   onRepeat,
   onPlanAgain,
+  planHorseFor,
   onOpenDay,
   rideActive = false,
   planned = [],
@@ -106,6 +107,8 @@ export function RideJournalSheet({
   onRepeat?: (entry: RideEntry) => void;
   /** Opens Add activity on a day ahead, filled in with this ride. */
   onPlanAgain?: (entry: RideEntry, day: string) => void;
+  /** The horse Plan it again schedules for, so the chips check that horse's days. */
+  planHorseFor?: (entry: RideEntry) => string | undefined;
   /** Opens the calendar on a day. */
   onOpenDay?: (day: string) => void;
   /** A ride is under way: another cannot be set up or planned over it. */
@@ -198,6 +201,7 @@ export function RideJournalSheet({
           onAskRalf={onAskRalf}
           onRepeat={onRepeat}
           onPlanAgain={onPlanAgain}
+          planHorseFor={planHorseFor}
           onOpenDay={onOpenDay}
           onAskDelete={() => {
             selectionHaptic();
@@ -314,6 +318,7 @@ function RideDetail({
   onAskRalf,
   onRepeat,
   onPlanAgain,
+  planHorseFor,
   onOpenDay,
   onAskDelete,
   onKeep,
@@ -344,6 +349,8 @@ function RideDetail({
   onAskRalf?: (entry: RideEntry, prompt?: string) => void;
   onRepeat?: (entry: RideEntry) => void;
   onPlanAgain?: (entry: RideEntry, day: string) => void;
+  /** The horse Plan it again schedules for, so the chips check that horse's days. */
+  planHorseFor?: (entry: RideEntry) => string | undefined;
   onOpenDay?: (day: string) => void;
   onAskDelete: () => void;
   onKeep: () => void;
@@ -364,7 +371,7 @@ function RideDetail({
   const shownScope: CompareScope = scopes.includes(scope) ? scope : "horse+training";
   const peers = entry.trainingType ? ridePeers(entries, entry, shownScope) : [];
   const comparison = entry.trainingType ? compareRide(entry, peers, baseline, { scope: shownScope, words }) : null;
-  const week = weekAround(entry, entries, { today, ...(training ? { plan: training.versions, timeOff: training.timeOff } : {}) });
+  const week = weekAround(entry, entries, { today, ...(training ? { plan: training.versions, timeOff: training.timeOff, completions: training.completions } : {}) });
   const streak = training ? streakAround(entry, training, today) : null;
 
   const repeat = repeatPlanOf(entry);
@@ -604,7 +611,7 @@ function RideDetail({
           <Text accessibilityRole="header" style={styles.sectionLabel}>Plan it again</Text>
           <View style={styles.chips}>
             {planDays.map((day) => {
-              const taken = scheduledOn(planned, day, entry.horseId);
+              const taken = scheduledOn(planned, day, planHorseFor ? planHorseFor(entry) : entry.horseId);
               return (
                 <MotionPressable
                   key={day}

@@ -396,7 +396,8 @@ export function TrendCard({
   }, [metric, reducedMotion, grow]);
 
   const most = Math.max(1, ...points.map((point) => point.minutes), usualMinutes ?? 0);
-  const habit = weekdayHabit(points.map((point) => point.entry), scope, words);
+  // Over every ride in scope, not just the bars that fit: "of your 20", not "of your 7".
+  const habit = weekdayHabit(peers, scope, words);
   const heading = `${scopeLabel(scope, words)} · ${newest ? `last ${points.length}` : `${points.length} rides`}`;
 
   return (

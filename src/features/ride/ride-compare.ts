@@ -1,5 +1,5 @@
 import type { PlannedActivity, RideEnd, RideEntry, RideMoodRecord } from "../../backend/contracts";
-import { weekOf } from "../../domain/activity-calendar";
+import { activityDayOf, weekOf } from "../../domain/activity-calendar";
 import { disciplineLabel } from "../../domain/labels";
 import { localDayOf, localMomentLabel, localToday, shortDayLabel } from "../../domain/local-day";
 import {
@@ -11,6 +11,7 @@ import {
   planOn,
   plannedOn,
   rideDays,
+  ridesForHorse,
   timeOffOn,
   trainingStreakFor,
   type PlanVersion,
@@ -434,7 +435,7 @@ const startDay = (entry: RideEntry) => localDayOf(entry.startedAt) ?? localDayOf
 
 /**
  * "8 of your 9 Jumping rides with Daimon were on a Tuesday." Said only when
- * it is a habit: at least three rides, and most of them on that day.
+ * it is a habit: at least four rides, and most of them on that day.
  */
 export const weekdayHabit = (rides: readonly RideEntry[], scope: CompareScope, words: CompareWords): string | null => {
   if (rides.length < 4) return null;
@@ -452,7 +453,7 @@ export const weekdayHabit = (rides: readonly RideEntry[], scope: CompareScope, w
 // The week it belonged to -------------------------------------------------------
 
 export type RideWeek = {
-  /** The ride's day, by when it ended: the day the streak counts it on. */
+  /** The ride's day as the calendar files it: the day it started. */
   day: string;
   days: WeekDay[];
   /** Activities that week on the ride's horse; every horse's for a ride without one. */
@@ -470,13 +471,29 @@ export type RideWeek = {
 export const weekAround = (
   entry: RideEntry,
   entries: readonly RideEntry[],
-  options: { today?: string; plan?: readonly PlanVersion[]; timeOff?: readonly TimeOffPeriod[] } = {}
+  options: {
+    today?: string;
+    plan?: readonly PlanVersion[];
+    timeOff?: readonly TimeOffPeriod[];
+    /**
+     * Every ride end the app knows, not just the journal's loaded page: the
+     * oldest loaded week is usually only partly loaded, and its days ridden
+     * before the page starts would otherwise read as missed.
+     */
+    completions?: readonly RideEnd[];
+  } = {}
 ): RideWeek | null => {
-  const day = localDayOf(entry.completedAt);
+  // The calendar files a ride on the day it started, so the card does too:
+  // a ride from 23:40 to 00:25 belongs to the day it began.
+  const day = activityDayOf(entry);
   if (!day) return null;
   const today = options.today ?? localToday();
-  const horseRides = [...ofHorse(entries.filter((ride) => ride.id !== entry.id), entry.horseId), entry];
-  const ridden = rideDays(horseRides.map((ride) => ride.completedAt));
+  const otherEnds = (options.completions
+    ? ridesForHorse(options.completions, entry.horseId)
+    : ofHorse(entries, entry.horseId).map((ride) => ride.completedAt)
+  ).filter((completedAt) => completedAt !== entry.completedAt);
+  const ridden = rideDays(otherEnds);
+  ridden.add(day);
   const week = weekOf(day);
   const versions = options.plan ? planForHorse(options.plan, entry.horseId) : [];
   const planned = entry.horseId === undefined ? Boolean(planOn(versions, day)) : Boolean(planOn(versions, day)?.days.length);
@@ -495,8 +512,9 @@ export const weekAround = (
   return {
     day,
     days,
-    rides: horseRides.filter((ride) => {
-      const ended = localDayOf(ride.completedAt);
+    // This ride, plus the horse's other rides that ended that week.
+    rides: 1 + otherEnds.filter((completedAt) => {
+      const ended = localDayOf(completedAt);
       return ended !== null && inWeek.has(ended);
     }).length,
     planned
@@ -556,7 +574,12 @@ export const scheduledOn = (
   planned: readonly Pick<PlannedActivity, "day" | "horseId" | "status">[],
   day: string,
   horseId: string | undefined
-) => planned.some((item) => item.status === "planned" && item.day === day && belongsTo(item, horseId));
+) => planned.some((item) =>
+  item.status === "planned" &&
+  item.day === day &&
+  // No horse to plan for: only an activity without a horse blocks the day.
+  (horseId === undefined ? !item.horseId : belongsTo(item, horseId))
+);
 
 const minutesInDay = 24 * 60;
 
@@ -616,9 +639,11 @@ export const comparisonForRalf = (comparison: RideComparison, scope: CompareScop
       : `of the ${timed} the app timed, I reached every phase in ${everyPhase}`);
   }
   const top = comparison.feelings.tally[0];
-  const horse = words.horse ?? "my horse";
+  // Name the horse only when every ride compared was on it: across horses,
+  // a tally of other horses' feelings must not read as this horse's.
+  const subject = scope === "training" || !words.horse ? (one ? "the horse" : "the horses") : words.horse;
   facts.push(top
-    ? one ? `${horse} felt ${top.mood}` : `${horse} felt ${top.mood} in ${top.rides} of ${baseline.length}`
+    ? one ? `${subject} felt ${top.mood}` : `${subject} felt ${top.mood} in ${top.rides} of ${baseline.length}`
     : `no feeling was saved for ${one ? "it" : "them"}`);
   const lines = [`Compared with ${lastRidesPhrase(scope, words, baseline.length).replace(/^your /, "my ")}${span}: ${facts.join("; ")}.`];
   const difference = comparison.minutes - comparison.averageMinutes;

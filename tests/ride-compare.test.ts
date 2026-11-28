@@ -317,6 +317,23 @@ const plan: PlanVersion = {
   assert.equal(off?.days[3]?.state, "off");
 
   const completions: RideEnd[] = journal.map((entry) => ({ completedAt: entry.completedAt, ...(entry.horseId ? { horseId: entry.horseId } : {}) }));
+
+  // The journal page starts mid-week: the days before it come from every
+  // ride end the app knows, so they read as ridden, not missed.
+  const pageStart = journal.filter((entry) => entry.completedAt >= thisRide.completedAt);
+  const partial = weekAround(thisRide, pageStart, { today: TODAY, plan: [plan], completions });
+  assert.deepEqual(partial?.days.map((day) => day.state), ["ridden", "ridden", "rest", "ridden", "rest", "ridden", "rest"]);
+  assert.equal(partial?.rides, 4, "Counted from every end that week, not only the loaded page.");
+  const withoutEnds = weekAround(thisRide, pageStart, { today: TODAY, plan: [plan] });
+  assert.equal(withoutEnds?.days[0]?.state, "missed", "Without the full ends, Monday looked missed: the reason completions are passed.");
+
+  // A ride from 23:40 to 00:25 belongs to the day it started, as in the calendar.
+  const late = ride("late", "2026-10-25", 45, { startedAt: "23:40:00" });
+  const lateWeek = weekAround(late, [late], { today: TODAY });
+  assert.equal(lateWeek?.day, "2026-10-25");
+  assert.equal(lateWeek?.days[6]?.day, "2026-10-25", "Sunday is in the card's week.");
+  assert.equal(lateWeek?.days[6]?.state, "ridden");
+  assert.equal(lateWeek?.rides, 1);
   assert.deepEqual(
     streakAround(thisRide, { versions: [plan], completions }, TODAY),
     { day: 2, now: 0, best: 4 },
@@ -344,7 +361,8 @@ const plan: PlanVersion = {
   assert.equal(scheduledOn(planned, "2026-12-01", "daimon"), true);
   assert.equal(scheduledOn(planned, "2026-12-03", "daimon"), false, "Luna's plan leaves Daimon's day open.");
   assert.equal(scheduledOn(planned, "2026-12-08", "daimon"), false, "A plan let go is no plan.");
-  assert.equal(scheduledOn(planned, "2026-12-03", undefined), true, "A ride without a horse: anything that day.");
+  assert.equal(scheduledOn(planned, "2026-12-03", undefined), false, "No horse to plan for: another horse's plan leaves the day open.");
+  assert.equal(scheduledOn([...planned, { day: "2026-12-03", status: "planned" as const }], "2026-12-03", undefined), true, "Only an activity without a horse blocks it.");
 
   const repeat = repeatPlanOf(thisRide);
   assert.equal(repeat.trainingType?.id, "jumping");
@@ -398,6 +416,17 @@ const plan: PlanVersion = {
     "Compared with my last Jumping ride (Tue 6 Oct): it lasted 40 min; I added it by hand; no feeling was saved for it.",
     "This one was 4 min longer."
   ]);
+  // Across horses, the tally is never pinned on this ride's horse.
+  const mixed = [
+    ride("l1", "2026-11-02", 40, { horseId: "luna", mood: "tender" }),
+    ride("l2", "2026-11-04", 40, { horseId: "luna", mood: "tender" }),
+    ride("l3", "2026-11-05", 40, { horseId: "luna", mood: "tender" }),
+    ride("d1", "2026-11-07", 44, { mood: "fresh" })
+  ];
+  const later = ride("d2", "2026-11-10", 52);
+  const acrossHorses = comparisonForRalf(compareRide(later, [...mixed, later], "average", { words }), "training", words).join(" ");
+  assert.ok(!acrossHorses.includes("Daimon felt"), acrossHorses);
+  assert.ok(acrossHorses.includes("the horses felt tender in 3 of 4"), acrossHorses);
   for (const mood of ["fresh", "focused", "tender"] as const) {
     const moody = peers.map((entry) => ({ ...entry, mood }));
     const text = rideComparePrompt(
@@ -479,3 +508,15 @@ else process.env.TZ = machineZone;
 }
 
 console.log("Ride compare passed.");
+
+{
+  // The weekday habit counts every ride in scope, not just the bars that fit on screen.
+  const cards = readFileSync(join(process.cwd(), "src/features/ride/RideContextCards.tsx"), "utf8");
+  assert.match(cards, /const habit = weekdayHabit\(peers, scope, words\);/);
+  // The plan chips check the horse Plan it again schedules for.
+  const app = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
+  assert.match(app, /planHorseFor=\{\(entry\) => rideHorseFor\(entry\) \?\? activityDraft\.horseId\}/);
+  const sheet = readFileSync(join(process.cwd(), "src/features/ride/RideJournalSheet.tsx"), "utf8");
+  assert.match(sheet, /scheduledOn\(planned, day, planHorseFor \? planHorseFor\(entry\) : entry\.horseId\)/);
+  assert.match(sheet, /completions: training\.completions/);
+}
