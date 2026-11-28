@@ -909,7 +909,12 @@ export function AccountMethodSheet({
             label="Email"
             value={email}
             onChangeText={onEmailChange}
-            onBlur={() => onEmailChange(email.trim().toLowerCase())}
+            // Read from the field: AutoFill fills and leaves it in one go,
+            // before a re-render, so `email` would be the old, empty value.
+            // iOS and the web send the text with the blur (the type omits it).
+            onBlur={(event) =>
+              onEmailChange(((event.nativeEvent as { text?: string }).text ?? email).trim().toLowerCase())
+            }
             placeholder="you@example.com"
             autoCapitalize="none"
             autoCorrect={false}
