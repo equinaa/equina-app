@@ -4,11 +4,13 @@ import { ChevronUp, Minus, Plus, RotateCcw, X } from "lucide-react-native";
 import type { RideMood } from "./RideExperience";
 import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives";
 import { cuePhaseChange, prepareRideCues, rideAlertsAllowed } from "./ride-cues";
+import { localDayOf } from "../../domain/local-day";
+import { WeekDayPicker } from "../calendar/WeekDayPicker";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
 import {
-  activityDays,
+  activityIsAhead,
   activityProblem,
   activityTimeExists,
   addPhase,
@@ -21,6 +23,7 @@ import {
   removePhase,
   ridePhaseLimits,
   ridePlanProblem,
+  scheduleProblem,
   rideTrainingTypes,
   cleanPhases,
   setPhaseMinutes,
@@ -38,17 +41,7 @@ export type RideSetupHorse = { id?: string; name: string };
 export type LoggedActivity = { draft: ActivityDraft; mood?: RideMood; note?: string };
 
 const moods: readonly RideMood[] = ["Fresh", "Focused", "Tender"];
-const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const minutesInDay = 24 * 60;
-
-/** "Today", "Yesterday", then "Thu 22" for the days before. */
-const dayLabel = (day: string, index: number) => {
-  if (index === 0) return "Today";
-  if (index === 1) return "Yesterday";
-  const [year, month, date] = day.split("-").map(Number);
-  const weekday = weekdays[new Date(year ?? 0, (month ?? 1) - 1, date ?? 1).getDay()];
-  return `${weekday} ${date}`;
-};
 
 // The list is rebuilt on every render of the app, so horses compare by who
 // they are, not by object. A horse from the demo has a name and no id.
@@ -81,8 +74,10 @@ export function RideSetupSheet({
   trainingType,
   phases: initialPhases,
   memory,
+  day: requestedDay,
   onContinue,
   onLog,
+  onSchedule,
   onDismiss
 }: {
   visible: boolean;
@@ -94,9 +89,20 @@ export function RideSetupSheet({
   /** The phases to open with: the last ones for this training, or the yard's. */
   phases: RidePhasePlan[];
   memory: RideSetupMemory | null;
+  /**
+   * Add activity only: the day picked in the calendar, any of the last month.
+   * Without one the sheet opens on the latest time the training could have
+   * ended by now.
+   */
+  day?: string;
   onContinue?: (plan: RidePlan) => void;
   /** Saves a logged activity. The sheet stays open, with what was entered, if it fails. */
   onLog?: (activity: LoggedActivity) => Promise<void>;
+  /**
+   * Add activity on a day ahead (or later today): schedules it instead of
+   * logging it. Without it, only days already gone can be picked.
+   */
+  onSchedule?: (activity: { draft: ActivityDraft; note?: string }) => Promise<void>;
   onDismiss: () => void;
 }) {
   const logging = mode === "log";
@@ -131,8 +137,10 @@ export function RideSetupSheet({
     setEdited(false);
     setAddedId(null);
     const opening = defaultActivityStart(Date.now(), plannedMinutes(initialPhases));
-    setDay(opening.day);
-    setStartMinutes(opening.startMinutes);
+    setDay(requestedDay ?? opening.day);
+    // A day ahead from the calendar opens on a morning ride, not on now.
+    const openingToday = localDayOf(Date.now()) as string;
+    setStartMinutes(requestedDay && requestedDay > openingToday ? 9 * 60 : opening.startMinutes);
     setMood(undefined);
     setNote("");
     setSaving(inFlight.current);
@@ -162,7 +170,6 @@ export function RideSetupSheet({
   };
 
   const now = Date.now();
-  const days = logging ? activityDays(now) : [];
   const plan: RidePlan = {
     ...(horse?.id ? { horseId: horse.id } : {}),
     horseName: horse?.name ?? "",
@@ -170,7 +177,11 @@ export function RideSetupSheet({
     phases: cleanPhases(phases)
   };
   const draft: ActivityDraft = { day, startMinutes, plan };
-  const problem = logging ? activityProblem(draft, now) : ridePlanProblem(phases);
+  // A day ahead, or later today, is scheduled rather than logged.
+  const scheduling = logging && Boolean(onSchedule) && activityIsAhead(draft, now);
+  const problem = scheduling
+    ? scheduleProblem(draft, now)
+    : logging ? activityProblem(draft, now) : ridePlanProblem(phases);
   const total = plannedMinutes(phases);
   const atDefault = samePhases(cleanPhases(phases), defaultRidePhases(training));
 
@@ -184,14 +195,15 @@ export function RideSetupSheet({
   };
 
   const save = async () => {
-    if (problem || inFlight.current || !onLog) return;
+    if (problem || inFlight.current || !(scheduling ? onSchedule : onLog)) return;
     inFlight.current = true;
     setSaving(true);
     setSaveError("");
     try {
-      await onLog({ draft, ...(mood ? { mood } : {}), ...(note.trim() ? { note: note.trim() } : {}) });
+      if (scheduling && onSchedule) await onSchedule({ draft, ...(note.trim() ? { note: note.trim() } : {}) });
+      else if (onLog) await onLog({ draft, ...(mood ? { mood } : {}), ...(note.trim() ? { note: note.trim() } : {}) });
     } catch (error) {
-      setSaveError(error instanceof Error && error.message ? error.message : "The activity could not be saved.");
+      setSaveError(error instanceof Error && error.message ? error.message : scheduling ? "The activity could not be scheduled." : "The activity could not be saved.");
     } finally {
       inFlight.current = false;
       setSaving(false);
@@ -228,7 +240,7 @@ export function RideSetupSheet({
   return (
     <EquinaSheet
       visible={visible}
-      title={logging ? "Add activity" : "Customize training"}
+      title={scheduling ? "Schedule activity" : logging ? "Add activity" : "Customize training"}
       // Held open while saving: closed mid-save, a failure would go unseen.
       onDismiss={saving ? () => undefined : onDismiss}
       closeTestID={logging ? "add-activity-close" : "ride-setup-close"}
@@ -237,30 +249,9 @@ export function RideSetupSheet({
         {logging ? (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>When</Text>
-            <View accessibilityRole="radiogroup" style={styles.chips}>
-              {days.map((option, index) => {
-                const selected = option === day;
-                return (
-                  <MotionPressable
-                    key={option}
-                    testID={`add-activity-day-${index}`}
-                    accessibilityRole="radio"
-                    accessibilityLabel={dayLabel(option, index)}
-                    accessibilityState={{ selected }}
-                    pressedScale={0.97}
-                    onPress={() => {
-                      if (!selected) selectionHaptic();
-                      setDay(option);
-                    }}
-                    style={[styles.chip, selected && styles.chipSelected]}
-                  >
-                    <Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected]}>{dayLabel(option, index)}</Text>
-                  </MotionPressable>
-                );
-              })}
-            </View>
+            <WeekDayPicker value={day} today={localDayOf(now) as string} ahead={Boolean(onSchedule)} onChange={setDay} />
             <View style={styles.timeRow}>
-              <Text style={styles.timeLabel}>Started at</Text>
+              <Text style={styles.timeLabel}>{scheduling ? "Starts at" : "Started at"}</Text>
               <View
                 accessible
                 accessibilityRole="adjustable"
@@ -410,6 +401,7 @@ export function RideSetupSheet({
 
         {logging ? (
           <>
+            {scheduling ? null : (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>How the horse felt</Text>
               <View accessibilityRole="radiogroup" style={styles.chips}>
@@ -436,6 +428,7 @@ export function RideSetupSheet({
                 })}
               </View>
             </View>
+            )}
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Note</Text>
               <TextInput
@@ -443,7 +436,7 @@ export function RideSetupSheet({
                 accessibilityLabel="Note"
                 value={note}
                 onChangeText={setNote}
-                placeholder="What worked, what to try next time"
+                placeholder={scheduling ? "What to work on, who's teaching" : "What worked, what to try next time"}
                 placeholderTextColor={equinaTheme.text.tertiary}
                 selectionColor={equinaTheme.colors.brass}
                 maxLength={2000}
@@ -452,7 +445,9 @@ export function RideSetupSheet({
               />
             </View>
             <Text style={styles.note}>
-              Saved straight to your journal. The minutes are the ones you set, so they show as logged, not tracked.
+              {scheduling
+                ? "It goes on your calendar, with a reminder when it starts. Once it's done, mark it done and it goes into your journal."
+                : "Saved straight to your journal. The minutes are the ones you set, so they show as logged, not tracked."}
             </Text>
           </>
         ) : (
@@ -466,7 +461,7 @@ export function RideSetupSheet({
         {!problem && saveError ? <Text accessibilityRole="alert" style={styles.problem}>{saveError}</Text> : null}
         <EquinaButton
           testID={logging ? "add-activity-save" : "ride-setup-continue"}
-          label={logging ? (saving ? "Saving..." : "Save to journal") : "Start training"}
+          label={scheduling ? (saving ? "Scheduling..." : "Schedule") : logging ? (saving ? "Saving..." : "Save to journal") : "Start training"}
           disabled={Boolean(problem) || saving}
           onPress={() => void submit()}
         />

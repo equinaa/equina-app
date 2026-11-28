@@ -6,11 +6,9 @@ import { localMomentLabel, shortDayLabel } from "../src/domain/local-day";
 import { describeLogged, describeTracked, summarise } from "../src/domain/ride-stats";
 import {
   activityCompletion,
-  activityDays,
   activityProblem,
   activityStartedAt,
   activityTimeExists,
-  activityWindowDays,
   defaultActivityStart,
   defaultRidePhases,
   formatActivityTime,
@@ -35,13 +33,8 @@ const draft = (patch: Partial<ActivityDraft> = {}): ActivityDraft => ({ day: "20
 
 // --- When it can be ------------------------------------------------------------------
 
-{
-  const days = activityDays(now);
-  assert.equal(days.length, activityWindowDays);
-  assert.deepEqual(days.slice(0, 3), ["2026-10-25", "2026-10-24", "2026-10-23"], "Today first, then back one day at a time.");
-  assert.equal(days[days.length - 1], "2026-10-19", "A week, today included.");
-  assert.deepEqual(activityDays(Date.parse("2026-03-01T08:00:00Z")).slice(0, 2), ["2026-03-01", "2026-02-28"], "Back across a month end.");
-}
+// Which days can be picked is the calendar's (tests/activity-calendar.test.ts):
+// the week picker offers today and the 29 days before it.
 
 {
   // The phases come to 52 minutes; at 12:10 the last quarter hour from which
@@ -89,8 +82,12 @@ const draft = (patch: Partial<ActivityDraft> = {}): ActivityDraft => ({ day: "20
     /hasn't finished yet/,
     "A training that would still be going on now cannot be logged."
   );
-  assert.match(activityProblem(draft({ day: "2026-10-18" }), now) ?? "", /up to 6 days back/, "Eight days ago is outside the window.");
-  assert.match(activityProblem(draft({ day: "2026-10-26" }), now) ?? "", /up to 6 days back/, "Tomorrow is not a day to log.");
+  // The chips offer the last week; the calendar reaches a month back, which
+  // is what the server takes.
+  assert.equal(activityProblem(draft({ day: "2026-10-18" }), now), null, "Eight days ago, picked in the calendar, can be saved.");
+  assert.equal(activityProblem(draft({ day: "2026-09-26" }), now), null, "Twenty-nine days back is the oldest day.");
+  assert.match(activityProblem(draft({ day: "2026-09-25" }), now) ?? "", /up to a month back/, "Thirty days back is outside the window.");
+  assert.match(activityProblem(draft({ day: "2026-10-26" }), now) ?? "", /hasn't come yet/, "Tomorrow is not a day to log.");
   assert.match(
     activityProblem(draft({ plan: { ...plan, phases: [{ id: "a", title: " ", detail: "", minutes: 10 }] } }), now) ?? "",
     /Give every phase a name/,

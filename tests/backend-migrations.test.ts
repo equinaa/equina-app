@@ -900,6 +900,128 @@ const strangerPlans = await db.query("select id from public.training_plans where
 assert.equal(strangerPlans.rows.length, 0, "Another rider never reads a training plan.");
 await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
 
+// Scheduled activities (202611270001): a training put on a day ahead, which
+// becomes a logged activity when the rider marks it done.
+const plannedPhases = JSON.stringify([{ title: "Warm-up", detail: "Walk", planned_seconds: 600 }, { title: "Flatwork", planned_seconds: 1800 }]);
+const nextWeek = await db.query<{ id: string; status: string }>(
+  "insert into public.planned_activities(rider_id, horse_id, day, start_minutes, training_type, phases, note) values ($1, $2, current_date + 7, 600, 'dressage', $3::jsonb, 'Lesson with Ana') returning id, status",
+  [riderA, horseId, plannedPhases]
+);
+const nextWeekId = nextWeek.rows[0]?.id;
+assert.equal(nextWeek.rows[0]?.status, "planned", "A scheduled activity starts as planned.");
+await assert.rejects(
+  db.query("insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases) values ($1, current_date - 3, 600, 'hack', $2::jsonb)", [riderA, plannedPhases]),
+  /scheduled from today/,
+  "A day already gone is logged with Add activity, not scheduled."
+);
+await assert.rejects(
+  db.query("insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases) values ($1, current_date + 120, 600, 'hack', $2::jsonb)", [riderA, plannedPhases]),
+  /three months ahead/,
+  "At most three months ahead."
+);
+await assert.rejects(
+  db.query("insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases) values ($1, current_date + 1, 1440, 'hack', $2::jsonb)", [riderA, plannedPhases]),
+  /planned_activities_start_valid/,
+  "A start time is a minute of the day."
+);
+await assert.rejects(
+  db.query(
+    "insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases) values ($1, current_date + 1, 600, 'hack', $2::jsonb)",
+    [riderA, JSON.stringify([{ title: "Warm-up", planned_seconds: 600, actual_seconds: 590 }])]
+  ),
+  /planned_activities_phases_valid/,
+  "A plan has no ridden seconds."
+);
+await assert.rejects(
+  db.query("insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases, status) values ($1, current_date + 1, 600, 'hack', $2::jsonb, 'done')", [riderA, plannedPhases]),
+  /permission denied/,
+  "The status is not the rider's to set on insert."
+);
+const moved = await db.query("update public.planned_activities set day = current_date + 8, start_minutes = 660 where id = $1 returning id", [nextWeekId]);
+assert.equal(moved.rows.length, 1, "A planned activity can move to another day ahead.");
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderC}', false);`);
+const strangerPlanned = await db.query("select id from public.planned_activities where rider_id = $1", [riderA]);
+assert.equal(strangerPlanned.rows.length, 0, "Another rider never reads a scheduled activity.");
+const strangerAnswer = await db.query("update public.planned_activities set status = 'skipped' where id = $1 returning id", [nextWeekId]);
+assert.equal(strangerAnswer.rows.length, 0, "Another rider cannot answer it.");
+const strangerEntry = await db.query<{ id: string }>(`
+  insert into public.ride_entries(rider_id, discipline, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases, source)
+  values ($1, 'dressage', 'Not yours', now() - interval '2 hours', now() - interval '1 hour', 3600, 1, 1, 'manual')
+  returning id
+`, [riderC]);
+await db.exec(`select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+await assert.rejects(
+  db.query("update public.planned_activities set status = 'done', ride_entry_id = $2 where id = $1", [nextWeekId, strangerEntry.rows[0]?.id]),
+  /row-level security/,
+  "A done activity points at the rider's own journal entry."
+);
+const ownEntry = await db.query<{ id: string }>(`
+  insert into public.ride_entries(rider_id, horse_id, discipline, training_type, focus, started_at, completed_at, elapsed_seconds, completed_phases, total_phases, source)
+  values ($1, $2, 'dressage', 'dressage', 'Dressage', now() - interval '2 hours', now() - interval '1 hour', 2400, 2, 2, 'manual')
+  returning id
+`, [riderA, horseId]);
+const answered = await db.query<{ status: string }>(
+  "update public.planned_activities set status = 'done', ride_entry_id = $2 where id = $1 returning status",
+  [nextWeekId, ownEntry.rows[0]?.id]
+);
+assert.equal(answered.rows[0]?.status, "done", "Marked done, linked to the activity it became.");
+await assert.rejects(
+  db.query("update public.planned_activities set day = current_date + 9 where id = $1", [nextWeekId]),
+  /answered activity stays/,
+  "An answered activity is not moved."
+);
+await assert.rejects(
+  db.query("update public.planned_activities set status = 'planned' where id = $1", [nextWeekId]),
+  /planned_activities_entry_only_when_done|answered activity stays/,
+  "Only a done activity points at a journal entry."
+);
+await assert.rejects(
+  db.query("update public.planned_activities set status = 'planned', ride_entry_id = null where id = $1", [nextWeekId]),
+  /answered activity stays/,
+  "A done activity never goes back to planned, even unlinked first."
+);
+await assert.rejects(
+  db.query(
+    "insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases, note) values ($1, current_date + 1, 600, 'hack', $2::jsonb, $3)",
+    [riderA, plannedPhases, "x".repeat(2001)]
+  ),
+  /planned_activities_note_valid/,
+  "A note is as long as a ride's at most."
+);
+await db.exec("reset role;");
+await db.exec(`
+  alter table public.planned_activities disable trigger planned_activities_dates_guard;
+  insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases)
+  values ('${riderA}', current_date - 10, 600, 'hack', '${plannedPhases}'::jsonb);
+  alter table public.planned_activities enable trigger planned_activities_dates_guard;
+`);
+const missed = await db.query<{ id: string }>("select id from public.planned_activities where rider_id = $1 and day = current_date - 10", [riderA]);
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+await assert.rejects(
+  db.query("update public.planned_activities set day = current_date + 5 where id = $1", [missed.rows[0]?.id]),
+  /past activity can only be marked done or let go/,
+  "A missed plan is answered, not brought back as a future one."
+);
+const letGo = await db.query<{ status: string }>("update public.planned_activities set status = 'skipped' where id = $1 returning status", [missed.rows[0]?.id]);
+assert.equal(letGo.rows[0]?.status, "skipped", "A missed plan can be let go.");
+await db.query("delete from public.ride_entries where id = $1", [ownEntry.rows[0]?.id]);
+const unlinked = await db.query<{ status: string; ride_entry_id: string | null }>(
+  "select status, ride_entry_id from public.planned_activities where id = $1",
+  [nextWeekId]
+);
+assert.equal(unlinked.rows[0]?.ride_entry_id, null, "Deleting the journal entry leaves the plan, unlinked.");
+await db.exec("reset role;");
+const horseGone = await db.query("update public.planned_activities set horse_id = null where id = $1 returning id", [nextWeekId]);
+assert.equal(horseGone.rows.length, 1, "A deleted horse leaves an answered plan without one (on delete set null).");
+await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${riderA}', false);`);
+assert.equal(unlinked.rows[0]?.status, "done");
+const removable = await db.query<{ id: string }>(
+  "insert into public.planned_activities(rider_id, day, start_minutes, training_type, phases) values ($1, current_date + 2, 480, 'hack', $2::jsonb) returning id",
+  [riderA, plannedPhases]
+);
+const removed = await db.query("delete from public.planned_activities where id = $1 returning id", [removable.rows[0]?.id]);
+assert.equal(removed.rows.length, 1, "The rider can remove a scheduled activity.");
+
 // The training program seen per horse (202610250003): several horses on one
 // day, and a horse's time off.
 const twoHorsesMonday = JSON.stringify([
@@ -1631,6 +1753,11 @@ const clientWrites: Record<string, ClientWrites> = {
   },
   saved_listings: { insert: ["user_id", "listing_id"], update: ["user_id", "listing_id"], delete: true },
   training_plans: { insert: ["user_id", "effective_from", "days", "reminders"], update: ["days", "reminders"] },
+  planned_activities: {
+    insert: ["rider_id", "horse_id", "day", "start_minutes", "training_type", "phases", "note"],
+    update: ["horse_id", "day", "start_minutes", "training_type", "phases", "note", "status", "ride_entry_id"],
+    delete: true
+  },
   horse_time_off: { insert: ["horse_id", "kind", "starts_on", "ends_on", "note"], update: ["ends_on"], delete: true },
   user_blocks: { insert: ["blocker_id", "blocked_id"], update: ["blocker_id", "blocked_id"], delete: true },
   user_preferences: {

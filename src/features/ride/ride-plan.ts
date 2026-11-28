@@ -1,3 +1,4 @@
+import { dayUseOn, logStateOn } from "../../domain/activity-calendar";
 import type { RidePhaseEntry } from "../../backend";
 import { localDayOf } from "../../domain/local-day";
 import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
@@ -375,12 +376,6 @@ export const rememberSetup = (memory: RideSetupMemory | null, plan: RidePlan): R
 
 // Logging afterwards ----------------------------------------------------------
 
-/**
- * How far back Add activity reaches, today included. The database allows a
- * month (202610250001), so this can grow without a migration.
- */
-export const activityWindowDays = 7;
-
 /** A training the rider did without the clock, as set in Add activity. */
 export type ActivityDraft = {
   /** The local day it happened, YYYY-MM-DD. */
@@ -393,14 +388,6 @@ export type ActivityDraft = {
 const atLocalDay = (day: string, minutes = 0) => {
   const [year, month, date] = day.split("-").map(Number);
   return new Date(year ?? 0, (month ?? 1) - 1, date ?? 1, 0, minutes);
-};
-
-/** Today, yesterday and back through the window, newest first, as local days. */
-export const activityDays = (now: number): string[] => {
-  const today = new Date(now);
-  return Array.from({ length: activityWindowDays }, (_, back) =>
-    localDayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() - back)) as string
-  );
 };
 
 /** The instant the activity started, on the rider's local clock. */
@@ -436,11 +423,39 @@ export const formatActivityTime = (minutes: number) =>
 export const activityProblem = (draft: ActivityDraft, now: number) => {
   const phases = ridePlanProblem(draft.plan.phases);
   if (phases) return phases;
-  if (!activityDays(now).includes(draft.day)) return `Activities can be added up to ${activityWindowDays - 1} days back.`;
+  // The chips offer the last week; the calendar can pick any day of the
+  // last month, which is how far back the server takes a logged activity.
+  const when = logStateOn(draft.day, localDayOf(now) as string);
+  if (when === "future") return "That day hasn't come yet. Pick today or a day before.";
+  if (when === "tooOld") return "Activities can be added up to a month back.";
   if (!activityTimeExists(draft.day, draft.startMinutes)) return "The clocks went forward at that time. Pick another start time.";
   const length = plannedMinutes(draft.plan.phases) * 60_000;
   if (atLocalDay(draft.day).getTime() + length > now) return "That can't have finished today yet. Pick an earlier day.";
   if (activityStartedAt(draft).getTime() + length > now) return "That hasn't finished yet. Pick an earlier start time.";
+  return null;
+};
+
+/**
+ * Whether an activity is scheduled rather than logged: a day ahead, or later
+ * today at a time that has not come yet. One already started stays a log
+ * (and waits until it has ended).
+ */
+export const activityIsAhead = (draft: ActivityDraft, now: number) => {
+  const today = localDayOf(now) as string;
+  if (!draft.day) return false;
+  if (draft.day > today) return true;
+  return draft.day === today && activityStartedAt(draft).getTime() > now;
+};
+
+/** What stops the rider from scheduling, in their words. Null when it can be scheduled. */
+export const scheduleProblem = (draft: ActivityDraft, now: number) => {
+  const phases = ridePlanProblem(draft.plan.phases);
+  if (phases) return phases;
+  const use = dayUseOn(draft.day, localDayOf(now) as string);
+  if (use === "tooFar") return "Activities can be scheduled up to three months ahead.";
+  if (use === "tooOld") return "Activities can be added up to a month back.";
+  if (!activityTimeExists(draft.day, draft.startMinutes)) return "The clocks go forward at that time. Pick another start time.";
+  if (activityStartedAt(draft).getTime() <= now) return "That time has passed. Pick a later start time.";
   return null;
 };
 
