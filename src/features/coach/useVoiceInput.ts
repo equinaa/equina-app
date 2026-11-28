@@ -212,12 +212,17 @@ export function useVoiceInput({
       })
     ];
     return () => {
+      // Ralf's screen gone with the finger still on the mic: a session still
+      // starting does not start, and since its "end" is no longer heard, the
+      // mic lets go of the ride's audio here.
+      released.current = true;
       for (const subscription of subscriptions) subscription.remove();
       try {
         module.abort();
       } catch {
         // Nothing was listening.
       }
+      if (busy.current) finish();
     };
   }, [supported, say]);
 

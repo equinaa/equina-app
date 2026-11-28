@@ -593,6 +593,14 @@ const watcher = (first: RideRun, at: number) => {
   const voice = read("src/features/coach/useVoiceInput.ts");
   assert.match(voice, /setRideMicListening\(true\);\s+module\.start\(\{/);
   assert.match(voice, /setRideMicListening\(false\);\s+if \(Platform\.OS === "ios"\) \{\s+try \{\s+\/\/ Hand the audio back[\s\S]*?void applyRideAudioMode\(\)\.catch\(\(\) => undefined\);/);
+  // Ralf's screen closed with the finger still on the mic: no "end" comes to
+  // a listener that is gone, so the mic lets go there, and a session still
+  // starting never starts.
+  assert.match(
+    voice,
+    /return \(\) => \{\s+(?:\/\/[^\n]*\n\s+)*released\.current = true;\s+for \(const subscription of subscriptions\) subscription\.remove\(\);\s+try \{\s+module\.abort\(\);\s+\} catch \{\s+\/\/[^\n]*\n\s+\}\s+if \(busy\.current\) finish\(\);\s+\};\s+\}, \[supported, say\]\);/
+  );
+  assert.match(voice, /const finish = \(\) => \{\s+busy\.current = false;\s+setListening\(false\);\s+setRideMicListening\(false\);/);
   assert.doesNotMatch(voice, /from "\.\.\/ride\/ride-cues"/, "Only the small shared module, not the ride's alerts.");
   assert.match(rideCues, /data: \{ route: alertRoute \}/);
 
