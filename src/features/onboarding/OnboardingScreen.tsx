@@ -192,6 +192,20 @@ export function OnboardingScreen({
   const stageMotion = useRef(new Animated.Value(1)).current;
   const [completing, setCompleting] = useState(false);
   const [fieldFocused, setFieldFocused] = useState(false);
+  // Read by the scroll view's layout handler: the keyboard can shrink the
+  // view in the same moment the field gains focus, before that state lands.
+  const fieldFocusedNow = useRef(false);
+  useEffect(() => {
+    fieldFocusedNow.current = fieldFocused;
+  }, [fieldFocused]);
+  // A field that unmounts while focused (the horse editor, on "Not yet") may
+  // never send its blur; once the keyboard is gone, nothing is left to reveal.
+  useEffect(() => {
+    const closed = Keyboard.addListener("keyboardDidHide", () => {
+      fieldFocusedNow.current = false;
+    });
+    return () => closed.remove();
+  }, []);
   const [accountSheetVisible, setAccountSheetVisible] = useState(false);
   const [accountMethod, setAccountMethod] = useState<AccountMethod>("choice");
   const [password, setPassword] = useState("");
@@ -363,7 +377,11 @@ export function OnboardingScreen({
         : "Account unavailable";
   const primaryLabel = step === "you" ? "Continue" : step === "horse" ? "See my Equina" : completionLabel;
   const completionUnavailable = step === "preview" && completionMode === "unavailable";
+  const keepFocusedFieldInView = () => {
+    if (fieldFocusedNow.current) scrollRef.current?.scrollToEnd({ animated: !reducedMotion });
+  };
   const revealActiveInput = () => {
+    fieldFocusedNow.current = true;
     setFieldFocused(true);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -376,7 +394,6 @@ export function OnboardingScreen({
     <KeyboardAvoidingContainer
       testID="onboarding-screen"
       style={styles.root}
-      keyboardVerticalOffset={0}
     >
       <View style={styles.chrome}>
         <View style={styles.topBar}>
@@ -448,6 +465,11 @@ export function OnboardingScreen({
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        // The scroll asked for on focus runs before the keyboard has shrunk
+        // this view; once it has, scroll again so the field sits whole above
+        // the footer instead of half under it.
+        onLayout={keepFocusedFieldInView}
+        onContentSizeChange={keepFocusedFieldInView}
       >
         <Animated.View
           style={[
@@ -524,6 +546,7 @@ export function OnboardingScreen({
                   onChangeText={onNameChange}
                   onFocus={revealActiveInput}
                   onBlur={() => setFieldFocused(false)}
+                  onSubmitEditing={handleNext}
                   placeholder="Your name"
                   autoCapitalize="words"
                   autoComplete="name"

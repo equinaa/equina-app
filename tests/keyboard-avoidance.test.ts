@@ -2,15 +2,20 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
+  androidKeyboardEvents,
   createKeyboardAvoider,
   followKeyboard,
+  iosKeyboardEvents,
+  keyboardLayoutAnimation,
   keyboardOverlap,
+  type KeyboardEventLike,
+  type KeyboardEventName,
   type KeyboardSource,
   type WindowFrame
 } from "../src/ui/keyboard/keyboard-avoidance";
 
-// Android keyboard avoidance, without a device. Numbers are dp on a 915 dp
-// tall phone: status bar 48, navigation bar 24, keyboard top edge at 565
+// Keyboard avoidance, without a device. Android first: numbers are dp on a
+// 915 dp tall phone: status bar 48, navigation bar 24, keyboard top edge at 565
 // (350 dp of keyboard including the navigation bar).
 const screen = 915;
 const keyboardTop = 565;
@@ -31,6 +36,23 @@ const keyboardTop = 565;
   assert.equal(keyboardOverlap({ y: 0, height: screen }, null), 0);
   assert.equal(keyboardOverlap(null, keyboardTop), 0);
   assert.equal(keyboardOverlap({ y: 0, height: Number.NaN }, keyboardTop), 0);
+  // iOS with Prefer Cross-Fade Transitions reports the keyboard at 0: not an edge.
+  assert.equal(keyboardOverlap({ y: 0, height: screen }, 0), 0);
+}
+
+{
+  // iOS, measured on an iPhone 17 Pro (iOS 26.4, points): Ralf sits inside
+  // the tab content's ScrollView, under the 62 pt status bar, 778 pt tall,
+  // so it ends 34 pt above the bottom; the keyboard's top edge is at 566.
+  const iosKeyboardTop = 566;
+  const ralf = { y: 62, height: 778 };
+  assert.equal(keyboardOverlap(ralf, iosKeyboardTop), 274, "Lifted by all it covers: 62 + 778 - 566.");
+  // What React Native's KeyboardAvoidingView did: its frame comes from
+  // onLayout, relative to the ScrollView (y = 0), so it padded 212 and the
+  // 70 pt composer stayed behind the keyboard but for a sliver.
+  assert.equal(keyboardOverlap({ y: 0, height: ralf.height }, iosKeyboardTop), 212);
+  // A sheet in a Modal starts at the top of the screen: the same as before.
+  assert.equal(keyboardOverlap({ y: 0, height: 874 }, iosKeyboardTop), 308);
 }
 
 // A fake measure whose answers arrive when the test says so.
@@ -126,32 +148,39 @@ function harness(initial: WindowFrame) {
 // visible area's height as screenY. Keyboard.metrics() keeps the last
 // keyboardDidShow's coordinates until the keyboard closes.
 type KeyboardCoordinates = { screenX: number; screenY: number; width: number; height: number };
+type FakeEvent = KeyboardEventLike & { endCoordinates: KeyboardCoordinates };
 function fakeKeyboard() {
-  const listeners = {
-    keyboardDidShow: new Set<(event: { endCoordinates: KeyboardCoordinates }) => void>(),
-    keyboardDidHide: new Set<(event: { endCoordinates: KeyboardCoordinates }) => void>()
-  };
+  const listeners = new Map<KeyboardEventName, Set<(event: FakeEvent) => void>>();
   let showing: KeyboardCoordinates | undefined;
   const source: KeyboardSource = {
     addListener(event, listener) {
-      listeners[event].add(listener);
-      return { remove: () => void listeners[event].delete(listener) };
+      const set = listeners.get(event) ?? new Set();
+      listeners.set(event, set);
+      set.add(listener);
+      return { remove: () => void set.delete(listener) };
     },
     isVisible: () => showing !== undefined,
     metrics: () => showing
   };
+  const fire = (name: KeyboardEventName, event: FakeEvent) => {
+    for (const listener of [...(listeners.get(name) ?? [])]) listener(event);
+  };
   return {
     source,
+    fire,
     show(endCoordinates: KeyboardCoordinates) {
       showing = endCoordinates;
-      for (const listener of [...listeners.keyboardDidShow]) listener({ endCoordinates });
+      fire("keyboardDidShow", { endCoordinates });
     },
     hide(endCoordinates: KeyboardCoordinates) {
       showing = undefined;
-      for (const listener of [...listeners.keyboardDidHide]) listener({ endCoordinates });
+      fire("keyboardDidHide", { endCoordinates });
+    },
+    listeningTo(name: KeyboardEventName) {
+      return listeners.get(name)?.size ?? 0;
     },
     get listening() {
-      return listeners.keyboardDidShow.size + listeners.keyboardDidHide.size;
+      return [...listeners.values()].reduce((sum, set) => sum + set.size, 0);
     }
   };
 }
@@ -165,6 +194,8 @@ const hiddenEvent: KeyboardCoordinates = { screenX: 0, screenY: screen - 48 - 24
   const sheet = harness({ y: 0, height: screen });
   const stop = followKeyboard(keyboard.source, sheet.avoider);
   assert.equal(keyboard.listening, 2);
+  assert.equal(keyboard.listeningTo("keyboardDidShow"), 1, "Android follows keyboardDidShow by default.");
+  assert.equal(keyboard.listeningTo("keyboardDidHide"), 1);
   keyboard.show(shownEvent);
   sheet.answer();
   assert.equal(sheet.padding, 350, "Padded by the part under the keyboard's top edge (screenY), not by the keyboard's height.");
@@ -201,8 +232,66 @@ const hiddenEvent: KeyboardCoordinates = { screenX: 0, screenY: screen - 48 - 24
   assert.deepEqual(screenView.paddings, []);
 }
 
-// Structure: every keyboard-avoiding root goes through the container, and its
-// iOS and web path renders what the screens rendered before.
+{
+  // iOS: the keyboard is announced before it moves (keyboardWillShow and
+  // keyboardWillHide), so the padding moves with it; each event reaches the
+  // caller first, with the timing the animation needs.
+  const keyboard = fakeKeyboard();
+  const ralf = harness({ y: 62, height: 778 });
+  const seen: KeyboardEventLike[] = [];
+  const stop = followKeyboard(keyboard.source, ralf.avoider, iosKeyboardEvents, (event) => seen.push(event));
+  assert.equal(keyboard.listeningTo("keyboardWillShow"), 1);
+  assert.equal(keyboard.listeningTo("keyboardWillHide"), 1);
+  assert.equal(keyboard.listeningTo("keyboardDidShow"), 0, "iOS does not wait for the keyboard to finish moving.");
+  assert.equal(keyboard.listeningTo("keyboardDidHide"), 1, "keyboardDidHide only confirms the keyboard is gone.");
+  const opening: FakeEvent = { endCoordinates: { screenX: 0, screenY: 566, width: 402, height: 308 }, duration: 250, easing: "keyboard" };
+  keyboard.fire("keyboardWillShow", opening);
+  ralf.answer();
+  assert.equal(ralf.padding, 274);
+  assert.deepEqual(seen, [opening]);
+  // The keyboard grows (predictions bar): iOS sends keyboardWillShow again.
+  keyboard.fire("keyboardWillShow", { ...opening, endCoordinates: { ...opening.endCoordinates, screenY: 522 } });
+  ralf.answer();
+  assert.equal(ralf.padding, 318);
+  keyboard.fire("keyboardWillHide", { ...opening, endCoordinates: { ...opening.endCoordinates, screenY: 874 } });
+  assert.equal(ralf.padding, 0);
+  assert.equal(seen.length, 3);
+  stop();
+  assert.equal(keyboard.listening, 0);
+}
+
+{
+  // The padding change animates with the keyboard on iOS; Android's events
+  // carry no duration, so nothing animates there.
+  assert.deepEqual(keyboardLayoutAnimation({ endCoordinates: { screenY: 566 }, duration: 250, easing: "keyboard" }), {
+    duration: 250,
+    update: { duration: 250, type: "keyboard" }
+  });
+  // RCTLayoutAnimation's smallest accepted duration.
+  assert.equal(keyboardLayoutAnimation({ endCoordinates: { screenY: 566 }, duration: 5, easing: "keyboard" })?.duration, 10);
+  assert.equal(keyboardLayoutAnimation({ endCoordinates: { screenY: 565 }, duration: 0, easing: "keyboard" }), null);
+  assert.equal(keyboardLayoutAnimation(null), null);
+  assert.deepEqual(androidKeyboardEvents, { show: "keyboardDidShow", hide: "keyboardDidHide" });
+  assert.deepEqual(iosKeyboardEvents, { show: "keyboardWillShow", hide: "keyboardWillHide", closed: "keyboardDidHide" });
+}
+
+{
+  // iOS: a sheet that mounts after keyboardWillHide but before keyboardDidHide
+  // still finds the keyboard "visible" (React Native updates isVisible on the
+  // Did events) and is padded for it; keyboardDidHide takes that padding away.
+  const keyboard = fakeKeyboard();
+  keyboard.show({ screenX: 0, screenY: 566, width: 402, height: 308 });
+  const sheet = harness({ y: 0, height: 874 });
+  const stop = followKeyboard(keyboard.source, sheet.avoider, iosKeyboardEvents);
+  sheet.answer();
+  assert.equal(sheet.padding, 308);
+  keyboard.hide({ screenX: 0, screenY: 874, width: 402, height: 0 });
+  assert.equal(sheet.padding, 0, "keyboardDidHide clears a padding no keyboardWillHide reached.");
+  stop();
+  assert.equal(keyboard.listening, 0);
+}
+
+// Structure: every keyboard-avoiding root goes through the container.
 const root = process.cwd();
 const sourceFiles = (dir: string): string[] =>
   readdirSync(dir).flatMap((name) => {
@@ -245,18 +334,30 @@ for (const site of sites) {
 }
 
 const containerSource = readFileSync(container, "utf8");
-// Android only on the new path; iOS and the web get the same element with the same props as before.
-assert.match(containerSource, /if \(Platform\.OS === "android"\) \{\s*return \(\s*<AndroidKeyboardAvoidingView/);
-assert.match(containerSource, /<KeyboardAvoidingView behavior=\{Platform\.OS === "ios" \? "padding" : undefined\} \{\.\.\.rest\}>/);
+// iOS and Android take the measured path, each with its own events; only iOS
+// animates. The web keeps KeyboardAvoidingView with no behavior, as before.
+assert.match(
+  containerSource,
+  /if \(Platform\.OS === "ios" \|\| Platform\.OS === "android"\) \{\s*return \(\s*<MeasuredKeyboardAvoidingView/
+);
+assert.match(containerSource, /events=\{Platform\.OS === "ios" \? iosKeyboardEvents : androidKeyboardEvents\}/);
+assert.match(containerSource, /animate=\{Platform\.OS === "ios"\}/);
+assert.match(containerSource, /<KeyboardAvoidingView style=\{style\} testID=\{testID\}>/);
+assert.doesNotMatch(containerSource, /behavior=/, "No KeyboardAvoidingView behavior is left: its parent-relative frame is what broke iOS.");
 // The frame must come from measure's pageY: measureInWindow is off by the status bar in the main window.
 assert.match(containerSource, /\.measure\(\(_x, _y, _width, height, _pageX, pageY\) => done\(\{ y: pageY, height \}\)\)/);
 assert.doesNotMatch(containerSource, /\.measureInWindow\(/);
-// The React side of the Android path, which only a device runs: the view
-// measured is the one padded, the keyboard is followed through followKeyboard
-// (tested above) and let go on unmount, and the padding goes inside the view.
+// The React side, which only a device runs: the view measured is the one
+// padded, the keyboard is followed through followKeyboard (tested above) and
+// let go on unmount, and the padding goes inside the view.
 assert.match(containerSource, /<View\s+ref=\{viewRef\}/, "The view measured must be the view padded.");
-assert.match(containerSource, /createKeyboardAvoider\([\s\S]*?\),\s*setPadding\s*\)/, "The avoider's padding must reach the view's state.");
-assert.match(containerSource, /useEffect\(\(\) => followKeyboard\(Keyboard, avoider\), \[avoider\]\);/, "Subscribed through followKeyboard, whose return is the cleanup.");
+assert.match(containerSource, /setPadding\(next\);/, "The avoider's padding must reach the view's state.");
+assert.match(
+  containerSource,
+  /followKeyboard\(Keyboard, avoider, events, \(event\) => \{/,
+  "Subscribed through followKeyboard, whose return is the cleanup."
+);
+assert.match(containerSource, /\[avoider, events\]/);
 assert.doesNotMatch(containerSource, /Keyboard\.addListener\(/, "The container listens only through followKeyboard.");
 assert.match(containerSource, /onLayout=\{\(\) => avoider\.layout\(\)\}/, "A view whose frame changes is measured again.");
 assert.match(
@@ -264,5 +365,25 @@ assert.match(
   /style=\{padding > 0 \? \[style, \{ paddingBottom: padding \}\] : style\}/,
   "Padding inside the view lifts its content; a margin would move the view itself and change the next measurement."
 );
+// No screen hands the container an offset any more: the measurement already knows where the view is.
+for (const site of sites) {
+  assert.doesNotMatch(readFileSync(join(root, site), "utf8"), /keyboardVerticalOffset/, `${site} still passes keyboardVerticalOffset.`);
+}
 
-console.log("Android keyboard avoidance passed.");
+// Onboarding, step 1 (a tester's account creation, 2026-11-27): the keyboard
+// shrinks the scroll view after the focus scroll has run, which left the Name
+// field half under the footer. The view scrolls again when its frame or content
+// changes while a field has focus, read from a ref because that change can land
+// before the focus state does. The return key moves on, like Continue.
+const onboardingSource = readFileSync(join(root, "src/features/onboarding/OnboardingScreen.tsx"), "utf8");
+assert.match(onboardingSource, /onLayout=\{keepFocusedFieldInView\}/);
+assert.match(onboardingSource, /onContentSizeChange=\{keepFocusedFieldInView\}/);
+assert.match(onboardingSource, /if \(fieldFocusedNow\.current\) scrollRef\.current\?\.scrollToEnd\(/);
+assert.match(onboardingSource, /fieldFocusedNow\.current = true;\s+setFieldFocused\(true\);/);
+// The ref follows the state back to false; and once the keyboard is gone no
+// field is waiting to be revealed, even one that unmounted without a blur.
+assert.match(onboardingSource, /useEffect\(\(\) => \{\s+fieldFocusedNow\.current = fieldFocused;\s+\}, \[fieldFocused\]\);/);
+assert.match(onboardingSource, /Keyboard\.addListener\("keyboardDidHide", \(\) => \{\s+fieldFocusedNow\.current = false;/);
+assert.match(onboardingSource, /testID="onboarding-name"[\s\S]{0,400}onSubmitEditing=\{handleNext\}/);
+
+console.log("Keyboard avoidance (iOS and Android) passed.");
