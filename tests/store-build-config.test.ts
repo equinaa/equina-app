@@ -210,6 +210,7 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     assert.match(String(purpose), /^[A-Z][^!]+\.$/, "Plain sentences, no exclamation mark.");
     assert.match(String(purpose), /Apple Health/, "Apple Health by its name.");
     assert.doesNotMatch(String(purpose), /HealthKit/, "Never the framework's name.");
+    assert.doesNotMatch(String(purpose), /\b(anthropic|claude|openai|chatgpt|gemini)\b/i, "Never the AI provider's name (tests/ralf-notice.test.ts).");
   }
   assert.equal(
     health.NSHealthShareUsageDescription,

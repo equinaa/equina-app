@@ -484,30 +484,27 @@ export const effortForRalf = (
 };
 
 /**
- * Who writes Ralf's replies, named where the rider decides whether their heart
- * rate goes with a question (owner's decision, 2026-11-28). The one place the
- * name is written: everywhere else Ralf's provider stays unnamed
- * (tests/ralf-notice.test.ts).
+ * The Account switch's own words: the same promise as the question below.
+ * The owner decided (2026-11-28) that the app never names the AI provider:
+ * it is "the AI service that writes Ralf's answers" (tests/ralf-notice.test.ts).
  */
-export const RALF_AI_PROVIDER = "Anthropic";
-
-/** The Account switch's own words: the same promise as the question below. */
-export const RALF_EFFORT_SWITCH_DETAIL = `From Apple Health, only in the rides you ask about. Sent to ${RALF_AI_PROVIDER}, who writes Ralf's replies.`;
+export const RALF_EFFORT_SWITCH_DETAIL = "From Apple Health, only in the rides you ask about. Sent to the AI service that writes Ralf's answers.";
 
 /**
  * Asked the first time the rider asks Ralf about a ride with effort, before
- * anything is sent. It names who writes the reply, as App Review 5.1.2(i)
- * asks for an AI provider, and says what happens to the numbers: they go
- * with that one question and Equina keeps none of them (coach-chat hands
- * them to the model and saves only the question). The answer is kept on
- * this phone (health-settings.ts) and Account › Privacy and Ralf changes it.
+ * anything is sent. It says that a third-party AI service receives the
+ * numbers, as App Review 5.1.2(i) asks, without naming it, and what happens
+ * to them: they go with that one question and Equina keeps none of them
+ * (coach-chat hands them to the model, saves only the question, and takes
+ * them out of the reply before saving it). The answer is kept on this phone
+ * (health-settings.ts) and Account › Privacy and Ralf changes it.
  */
 export const RALF_EFFORT_CONSENT = {
   title: "Let Ralf use your heart rate?",
   message:
     "When you ask Ralf about a ride, Equina can add your heart rate and calories from it: the average, the highest and each phase's average, never the full line. " +
-    `Ralf's replies are written by ${RALF_AI_PROVIDER}, the AI service Equina uses, so these numbers are sent to ${RALF_AI_PROVIDER} with that one question to write the answer. ` +
-    "Equina does not save them: your Ralf history keeps the question without them. " +
+    "These numbers are sent with that one question to the AI service that writes Ralf's answers. " +
+    "Equina does not save them, and Ralf's reply does not repeat them. " +
     "Ralf talks about training effort, not medical matters. You can turn this off in Account, Privacy and Ralf.",
   allow: "Allow",
   notNow: "Not now"

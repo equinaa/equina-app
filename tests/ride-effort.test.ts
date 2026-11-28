@@ -423,14 +423,16 @@ for (const training of rideTrainingTypes) {
   }
 }
 
-// The question asked before anything is sent names who would receive it.
+// The question asked before anything is sent says who would receive it, an
+// AI service, without naming the provider (the owner's decision, 2026-11-28).
 {
   assert.equal(RALF_EFFORT_CONSENT.title, "Let Ralf use your heart rate?");
   assert.match(RALF_EFFORT_CONSENT.message, /heart rate and calories/);
-  assert.match(RALF_EFFORT_CONSENT.message, /sent to Anthropic with that one question to write the answer/);
-  // Equina keeps none of them: coach-chat saves the question alone.
-  assert.match(RALF_EFFORT_CONSENT.message, /Equina does not save them/);
-  assert.equal(RALF_EFFORT_SWITCH_DETAIL, "From Apple Health, only in the rides you ask about. Sent to Anthropic, who writes Ralf's replies.");
+  assert.match(RALF_EFFORT_CONSENT.message, /These numbers are sent with that one question to the AI service that writes Ralf's answers\./);
+  // Equina keeps none of them: coach-chat saves the question alone, and
+  // takes them out of the reply before it saves that.
+  assert.match(RALF_EFFORT_CONSENT.message, /Equina does not save them, and Ralf's reply does not repeat them\./);
+  assert.equal(RALF_EFFORT_SWITCH_DETAIL, "From Apple Health, only in the rides you ask about. Sent to the AI service that writes Ralf's answers.");
   assert.match(RALF_EFFORT_CONSENT.message, /never the full line/);
   assert.match(RALF_EFFORT_CONSENT.message, /Account, Privacy and Ralf/);
   assert.deepEqual([RALF_EFFORT_CONSENT.allow, RALF_EFFORT_CONSENT.notNow], ["Allow", "Not now"]);
