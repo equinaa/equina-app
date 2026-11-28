@@ -211,10 +211,27 @@ const coachChat = read("supabase/functions/coach-chat/index.ts");
     ["Phases: 101, 128 and 156 bpm.", line],
     ["Warm-up was 128-156bpm and you burned ~310 calories.", line],
     ["Ride 3 transitions every 20 minutes, 15 minutes of walk, 1,310 kcal.", line],
-    ["It peaked at 156/min.", line]
+    ["It peaked at 156/min.", line],
+    // Points and "minimum" are no way round it.
+    ["Your heart rate was about 20 points higher in the canter.", walkTrot],
+    ["Your canter was about 20 points higher than your trot.", walkTrot],
+    ["Keep your heart rate at 150 minimum.", walkTrot],
+    ["Stay under 150 min/max.", walkTrot],
+    // A difference is told by the word that holds on to the number.
+    ["The canter was 19 more than the trot.", walkTrot],
+    ["Your canter climbed 62 over the walk.", walkTrot],
+    ["From walk to canter it rose by about 60.", walkTrot],
+    ["In the canter you were up about 20 on the trot.", walkTrot],
+    ["The difference was about 19 between trot and canter.", walkTrot],
+    ["Your canter averaged 20 more beats than your trot.", walkTrot]
   ] as const) {
     assert.equal(scrub(reply, block), leftOut, reply);
   }
+  assert.equal(scrub("A diferença foi de 19 entre o trote e o galope.", walkTrot, "pt"), EFFORT_LEFT_OUT.pt);
+  assert.equal(scrub("O galope ficou 19 acima do trote.", walkTrot, "pt"), EFFORT_LEFT_OUT.pt);
+  assert.equal(scrub("El galope quedó 19 por encima del trote.", walkTrot, "es"), EFFORT_LEFT_OUT.es);
+  assert.equal(scrub("Galopul a fost cu 19 mai mare decât trapul.", walkTrot, "ro"), EFFORT_LEFT_OUT.ro);
+  assert.equal(scrub("A vágta 19-cel magasabb volt, mint az ügetés.", walkTrot, "hu"), EFFORT_LEFT_OUT.hu);
 
   // Numbers that are not the rider's stay, even when they equal one of the
   // block's: another unit after them, or after the range they end, a date,
@@ -235,9 +252,35 @@ const coachChat = read("supabase/functions/coach-chat/index.ts");
     ["In 2024 you rode 118 times.", line],
     ["Your ride on Tuesday 17 November was steady.", line],
     ["Ride on a 20x40 arena.", line],
-    ["Do 3 transitions.", "average 3 bpm"]
+    ["Do 3 transitions.", "average 3 bpm"],
+    // The next step RIDE_EFFORT_RULE asks for stays whole: "more" before the
+    // unit is still the unit's, and "more", "up" or "under" elsewhere in the
+    // sentence do not make the number a difference.
+    ["Next ride, add 10 more minutes of trot before the canter.", walkTrot],
+    ["Do 10 more minutes of walk on a long rein at the end.", walkTrot],
+    ["Ride 15 more strides of canter on each rein.", walkTrot],
+    ["Go up to 20 more minutes only if your breathing settles.", walkTrot],
+    ["Next time do 12 more transitions than today.", walkTrot],
+    ["Keep the warm-up under 15 and the canter work under 10 minutes.", walkTrot],
+    ["Sit the trot for 20 strides, then rise for 20 more.", walkTrot],
+    ["Sit 20, rise 20.", walkTrot],
+    ["Your heart rate rose more in the canter than in the trot, so add 20 more seconds of walk between canters.", walkTrot],
+    ["Your heart rate was higher in the canter, so add 15 additional minutes of walk.", walkTrot],
+    ["Your effort was higher in the canter than last time; try 15 fewer minutes of canter.", walkTrot],
+    ["Your heart rate in the canter was higher than in 2024.", walkTrot],
+    ["Ride for 45 mins with a 10 min walk.", walkTrot],
+    ["The horse scored 68 points in the test.", walkTrot]
   ] as const) {
     assert.equal(scrub(reply, block), reply, reply);
+  }
+  for (const [reply, language] of [
+    ["Próximo treino: mais 10 minutos de passo no fim.", "pt"],
+    ["Faça mais 15 minutos de trote antes do galope.", "pt"],
+    ["Haz 10 minutos más de paso al final.", "es"],
+    ["Fă 10 minute în plus la pas.", "ro"],
+    ["Sétálj még 10 percet a végén.", "hu"]
+  ] as const) {
+    assert.equal(scrub(reply, walkTrot, language), reply, reply);
   }
 
   // The rest stays as written, in the rider's language, to the character.
