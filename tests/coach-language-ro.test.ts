@@ -9,6 +9,7 @@ import {
   mentionsHealthConcern,
   providerReviewReply,
 } from "../supabase/functions/_shared/coach-safety";
+import { rideReviewPrompt, type RideReviewFacts } from "../src/features/ride/ride-review-prompt";
 
 // Romanian. Riders often type on the phone without diacritics, so most
 // messages come in both spellings. Cross-language behaviour is tested in
@@ -153,6 +154,153 @@ const healthMessages = [
   "pls ajutor, s-a lovit la ochi si nu-l deschide",
   "Calul are o rană deschisă pe crupă",
   "S-a umflat la gat dupa vaccin",
+  // The horse's temperature, with a horse in the sentence or "a făcut temperatură" (ran a fever).
+  "Iapa mea are o temperatura ridicata",
+  "Temperatura ridicata la cal",
+  "Temperatura ridicata a calului de ieri",
+  "A facut temperatura mare aseara",
+  "Calul a facut temperatura",
+  "A facut temperatura dupa ce a stat la soare",
+  "A facut temperatura azi noapte",
+  "Calul are o temperatura ridicata dupa ce a stat la soare",
+  "temperatura calului e mare",
+  "Calul are temperatura 39",
+  "Calul are 39 de grade",
+  "Iapa are 40 de grade de ieri",
+  "Are 39,8 grade, e normal?",
+  // A reading the rider took, which the Portuguese decimal term catches: the reply stays Romanian.
+  "I-am luat temperatura: 39,2",
+  "Am masurat temperatura: 39,5",
+  "Temperatura e 39,5 la cal",
+  // The horse's pain, also with "mai", "tot" or "încă", and the literal elbow.
+  "Il mai doare piciorul",
+  "Il tot doare copita",
+  "O doare in continuare spatele",
+  "Il doare cotul",
+  "Ma tem ca il doare spatele",
+  "Îl mai dor picioarele după concurs",
+  "O tot dor copitele",
+  // Swelling, also "umflat ca un balon / cât o minge", and a leg named next to a tyre or a ball.
+  "Piciorul e umflat",
+  "Are genunchiul umflat",
+  "S-a umflat la jaret",
+  "I s-a umflat piciorul",
+  "Calul are piciorul umflat de ieri",
+  "Umflatura pe picior",
+  "S-a umflat la picior dupa ce l-am dus cu remorca",
+  "Piciorul e umflat ca un balon",
+  "Genunchiul e umflat ca o minge",
+  "Genunchiul e umflat cat o minge de tenis",
+  "Se umflă ca un balon piciorul din spate",
+  "Se umfla piciorul",
+  "S-a speriat de un balon, acum are piciorul umflat",
+  "A calcat pe o minge si s-a umflat piciorul",
+  "A lovit roata remorcii si are jaretul umflat",
+  "I s-au umflat picioarele in remorca",
+  "Are ochii umflati de dimineata",
+  // Fever, also with a show coming up.
+  "Are febra",
+  "Are febra 39",
+  "Are febra mare",
+  "Calul are febra de ieri",
+  "Are febra de 3 zile",
+  "Are febra, concursul e sambata",
+  // Wounds, scrapes and cough.
+  "Are o rana la picior",
+  "Are o plaga pe genunchi",
+  "Rana la picior nu se vindeca",
+  "O rana pe gat",
+  "S-a julit la genunchi",
+  "Calul s-a julit la genunchi",
+  "Si-a julit piciorul",
+  "si-a julit genunchii cand a cazut",
+  "Are o julitura pe cap",
+  "are o julitura pe picior",
+  "Are julituri pe picior",
+  "e julit la genunchi",
+  "Calul e julit pe crupa",
+  "Iapa e julita la genunchi",
+  "Iapa e julită la genunchi",
+  "Iapa mea e julita pe picior",
+  "Iapa e julita la jaret",
+  "Iapa e julita, e normal?",
+  "Calul tuse de ieri",
+  "Tuse uscata dimineata",
+  "Are tuse",
+  "Are tuse la efort",
+  // Everyday phone messages from riders, without diacritics.
+  "calu meu e cam schiop de la potcovit, ce fac",
+  "i s-a umflat glezna de la piciorul din spate dupa cross",
+  "ce doza de fenilbutazona ii dau la 550kg?",
+  "are o rana deschisa pe crupa, sangereaza putin",
+  "iapa nu mai mananca de aseara si se uita la burta",
+  "Calul a facut febra 39,8 dupa vaccin",
+  "Tuseste cand il pun la galop si are muci galbeni",
+  "Are o zgarietura adanca pe fluier de la sarma",
+  "Mi se pare ca il doare spatele cand pun saua",
+  "dupa concurs avea tendonul fierbinte si umflat",
+  "Am observat sange in urina dupa antrenament",
+  "Poneiul are copitele calde si sta lasat pe spate, cred ca e laminita",
+  "pot sa ii dau algocalmin daca are colici?",
+  "s-a lovit de bara si acum calca greu pe stangul din fata",
+  "calul meu schiopata usor la trap pe teren tare",
+  "Iapa are diaree de doua zile si e abatuta",
+  "ii curge puroi din ochiul drept",
+  "A aparut o umflatura mare pe gat dupa injectie",
+  "Iapa mea respira greu si are febra",
+  "si-a sucit piciorul in padoc, schiopateaza",
+  "nu se mai ridica de jos de o ora, ce fac??",
+  "e normal sa aiba picioarele umflate dimineata?",
+  "Calul are rani la gura de la zabala",
+  "Calmantul pe care mi l-a dat veterinarul, cat ii dau?",
+  "Nu vrea sa manance nimic de ieri",
+  // Down and not getting up, not drinking, sick, sore-footed, breathing fast.
+  "Iapa sta culcata in boxa si nu vrea sa se ridice",
+  "nu vrea sa se ridice de jos",
+  "nu bea apa de ieri, e normal?",
+  "Calul nu bea apa si sta cu capul in jos",
+  "Nu bea apa rece iarna, e grav?",
+  "Calul meu e bolnav, ce fac?",
+  "Iapa antrenoarei e bolnava de ieri",
+  "Calul de la antrenorul meu e bolnav",
+  "Antrenorul zice ca e bolnav, il las in boxa?",
+  "Mi-e teama ca iapa e bolnava",
+  "S-a imbolnavit iapa dupa transport",
+  "Calul s-a îmbolnăvit, are nas care curge",
+  "calca greu pe piciorul stang din fata",
+  "respira repede si transpira in boxa",
+  // A fever that started before the show, the horse's temperature in the stall, "a făcut o
+  // temperatură de 39" with the horse named.
+  "Are febra dinainte de concurs, ce fac?",
+  "Are febră de dinainte de concurs",
+  "Ce temperatura are calul in boxa?",
+  "Ce temperatura are azi calul?",
+  "Calul a facut o temperatura de 39",
+  "Iapa mea a facut o temperatura de 40",
+  "Iapa a facut o temperatura de 39,5 azi noapte",
+  "Calul a facut o temperatura mare aseara",
+  // The horse, when a person is named elsewhere in the sentence.
+  "Iapa mea s-a lovit la picior",
+  "Mama iepei s-a lovit in padoc",
+  "Fiica mea zice ca iapa s-a lovit",
+  "Antrenorul meu a vazut ca s-a lovit la jaret",
+  "Calul s-a lovit cu antrenorul pe el",
+  "Calul tatei s-a lovit la cap",
+  "Antrenorul zice ca il doare spatele",
+  "Ne arata ca il doare cand il ating",
+  "Am observat ca are dureri la atingere",
+  "Ce sa-i dau pentru dureri?",
+  "Am un cal cu dureri de spate",
+  // "S-a / s-au umflat" typed without the hyphen, also next to the girth.
+  "I sau umflat picioarele in remorca",
+  "sa umflat genunchiul",
+  "S-a umflat sub chinga",
+  // Doses of a drug, also with a modifier or an amount.
+  "Nu mai vrea sa manance morcovi",
+  "doza de bute pentru 500 kg?",
+  "O doza dubla de antiinflamator e ok?",
+  "Ce doza de 2 g de bute?",
+  "calmantul de la veterinar e bun?",
 ];
 assert.ok(healthMessages.length >= 50);
 for (const message of healthMessages) {
@@ -317,6 +465,132 @@ const ordinaryQuestions = [
   "Ea e iapa mea nouă, cum o obișnuiesc cu grajdul?",
   "Noi lucrăm de trei ori pe săptămână, e suficient?",
   "Iar nu vrea să intre în apă la cross, cum o ajut?",
+  // Hot weather, a hot barn, trailer or arena: "temperatură mare / ridicată" is the day's, not the horse's.
+  "Azi e o temperatura mare afara, sa lucrez calul dimineata?",
+  "Temperatura mare in grajd vara, cum il racoresc?",
+  "Cu temperatura ridicata de azi, cat sa-l lucrez?",
+  "Temperatura ridicata, cat beau caii?",
+  "E o temperatura mare azi, lucrez seara?",
+  "In grajd e temperatura mare",
+  "Remorca are 40 de grade vara, e ok pentru transport?",
+  "Manejul are 40 de grade la amiaza",
+  "In grajd are 40 de grade",
+  "Azi a facut o temperatura de 40 de grade afara",
+  "Azi a facut o temperatura mare afara",
+  "Am facut temperatura apei potrivita",
+  "Am facut o temperatura buna in grajd",
+  "Apa are temperatura buna pentru dus?",
+  // The same weather written with a bare number (the Portuguese reading term must not take it).
+  "Maine e o temperatura de 38, sa lucrez dimineata?",
+  "Temperatura e 39 maine, lucrez seara?",
+  "Afara temperatura e 38 azi, pot sa calaresc?",
+  "Maine temperatura e 39 la concurs, cum il pregatesc?",
+  "Cu o temperatura de 38, lucrez calul?",
+  "Temperatura e 40 la umbra",
+  // The rider's own soreness with "tot", "mai" or "cam", and "îl doare în cot" (he couldn't care less).
+  "Ma tot doare spatele dupa lectie",
+  "Mă tot doare spatele după lecție",
+  "Ma mai doare genunchiul dupa cazatura, pot calari?",
+  "Ma cam doare spatele",
+  "Calul nu asculta de pinten, il doare-n cot",
+  "Pe el îl doare în cot de pinteni",
+  // Tyres, balloons and balls are pumped up; a horse blowing out against the burtieră is the girth.
+  "Cat de umflate trebuie sa fie rotile remorcii?",
+  "Roțile remorcii trebuie umflate inainte de drum?",
+  "Cauciucurile umflate la presiunea corecta?",
+  "Se sperie de baloane umflate la concurs",
+  "Baloanele umflate il sperie",
+  "Mingea umflata il sperie, cum il obisnuiesc?",
+  "Cât de umflată trebuie să fie mingea pentru lucru la pământ?",
+  "Umfla roata de rezerva inainte de drum",
+  "Se umfla cand strang burtiera",
+  // The rush before a show is not a fever.
+  "Suntem in febra pregatirilor pentru campionat",
+  "Ne pregatim in febra concursurilor",
+  "E in plina febra a pregatirilor",
+  // A horse or a coach called Julita.
+  "Iapa se numeste Julita",
+  "Julita e antrenoarea mea, zice sa lucrez fara scarite",
+  "Am calarit-o pe Julita azi",
+  // Clipper blades ("lame de tuns") are not English "lame".
+  "lame de tuns 10",
+  "Ce lame folosesc la masina de tuns calul?",
+  // Romanian verbs ending in -ficăm are not the Hungarian "ficam" (sprain).
+  "Ne calificam la campionatul national?",
+  "Verificam potcoavele inainte de concurs",
+  // Not lifting the forehand at all, and doses of a supplement.
+  "Calul nu se ridica deloc in fata la sarituri",
+  "Ce doza de magneziu ii dau vara?",
+  "Ce doza de biotina pentru copite?",
+  // Everyday phone messages from riders, without diacritics.
+  "cum fac sa nu mai traga de frau la galop?",
+  "ce exercitii de gimnastica pentru un cal care sare plat?",
+  "Vreau sa umflu rotile la remorca, ce presiune?",
+  "Ma tem ca nu sunt pregatita pentru 1,10, ce zici?",
+  "Am fost cu Ruby la concurs si a sarit superb",
+  "Cum o conving sa intre in apa la cross?",
+  "Calul se uita la burtiera cand o strang, e normal?",
+  "Calul nu se ridica din spate la piruete",
+  // Pumping up tyres and balls: "să umflați", "umflarea roților", "moi sau umflate", "mingea nu se umflă".
+  "Trebuie sa umflati rotile inainte de drum?",
+  "Cat dureaza umflarea rotilor la benzinarie?",
+  "Ce pompa pentru umflarea rotilor la remorca?",
+  "Rotile sunt moi sau umflate cum trebuie?",
+  "Mingea nu se mai umfla, ce pompa iau?",
+  "Rotile le umfla tata la benzinarie, cat sa fie presiunea?",
+  // The coach, a child or the rider is the one hurt, sick or in pain.
+  "Antrenorul s-a accidentat la schi, ce lucrez singura saptamana asta?",
+  "Instructoarea s-a lovit la mana, lectia se muta joi",
+  "Pe antrenor il doare spatele, anulam lectia?",
+  "Antrenoarea mea are dureri de spate si lucram singure, ce fac?",
+  "Te doare spatele dupa trap usor? Pe mine da",
+  "Ne doare pe toti spatele dupa cantonament",
+  "Am dureri de spate dupa calarie, ce exercitii fac?",
+  "Simt dureri in genunchi cand calaresc, scaritele sunt prea scurte?",
+  "Sunt bolnava, pot sa calaresc?",
+  "Antrenorul meu e bolnav, ce lucrez singura?",
+  "Am fost bolnava o saptamana, cum reiau antrenamentul?",
+  "Ma simt cam bolnava azi, merg la lectie?",
+  "M-am imbolnavit si nu pot calari, cine il misca?",
+  "Copilul s-a imbolnavit, anulam lectia?",
+  "Mama s-a lovit la mana, cine ma duce la grajd?",
+  "Fiica mea a cazut si s-a lovit, dar e ok. Cum ii redau increderea?",
+  "M-a lovit la picior cand l-am potcovit, cum il invat sa stea?",
+  "Am fost lovita la genunchi de usa boxei",
+  "Fiul meu nu se scoala dimineata pentru antrenament, cum il motivez?",
+  "S-a taiat curentul la grajd, cum incalzesc apa?",
+  "S-a taiat lectia de azi din cauza ploii",
+  // The rider in the stirrups, an idiom, a horse that stopped rearing.
+  "Fiica mea nu se ridica in scarite la trap, cum o ajut?",
+  "Fii atenta, nu se ridica deloc din sa la sarituri, cum o ajut?",
+  "Nu vrea sa se ridice in doua puncte la galop, cum o ajut?",
+  "Calul nu se ridica la nivelul asteptarilor la concursuri, ce schimb?",
+  "Nu se mai ridica in doua picioare de cand lucram la pamant",
+  "Mi-e teama ca nu ma ridic bine in scarite",
+  // Treats, a hay net, a heavy horse.
+  "Nu vrea sa manance morcovi din mana, ce recompensa ii dau?",
+  "Nu mai mananca asa repede de cand ii dau fan in plasa, e bine?",
+  "Calul calca greu, e un cal de tractiune",
+  // Doses of patience, feed and work; calming herbs.
+  "Cu o doza de rabdare a iesit bine, ce urmeaza?",
+  "Cu o doza zdravana de curaj a sarit oxerul!",
+  "Pot sa-i dau o doza mai mare de ovaz in sezonul de concursuri?",
+  "Doza de 30 g de electroliti e ok vara?",
+  "Ce doza de seminte de in ii dau?",
+  "Dozajul de lucru e prea mare pentru un cal tanar?",
+  "Calmantul natural pe baza de plante e bun inainte de concurs?",
+  "Pot sa-i dau calmantul pe baza de plante inainte de transport?",
+  "Supliment calmantul natural sau magneziu?",
+  // Show nerves, weather, a slope.
+  "Cum scap de febra dinainte de concurs?",
+  "Febra startului ma blocheaza la concurs, ce fac?",
+  "Toata lumea e in febra startului",
+  "Ieri a facut o temperatura de 38 de grade, am anulat antrenamentul",
+  "Ce temperatura are iarna in grajd, ii pun patura?",
+  "Ce temperatura are noaptea in boxa iarna?",
+  "Ce temperatura are vara in grajd?",
+  "Ce temperatura are afara azi la concurs?",
+  "Panta are 40 de grade, pot sa urc la galop?",
 ];
 assert.ok(ordinaryQuestions.length >= 50);
 for (const message of ordinaryQuestions) {
@@ -392,6 +666,35 @@ for (const message of [
   "¿La rana la tengo que recortar antes de herrar?",
   "Mi yegua se llama Ranita y es muy nerviosa en pista",
   "Ayer le tusé las crines para el concurso",
+  // Spanish "plaga" (pest) and "a Rana" (a horse called Rana) before "la", "tusé" after
+  // "hoy" or "y", and the names Julita and Julito, in Spanish and in English.
+  "Las moscas este año son una plaga la verdad, ¿qué repelente uso?",
+  "Es una plaga la cantidad de moscas en la cuadra",
+  "Monté a Rana la semana pasada y estuvo genial",
+  "Monté a Rana la semana pasada",
+  "Hoy tusé las crines de mi yegua para el concurso",
+  "Y tusé la cola también",
+  "Mi yegua se llama Julita y salta muy bien",
+  "Mañana monto con Julito, ¿qué ejercicio hago?",
+  "Clase con Julito hoy, ¿qué trabajamos?",
+  "Julita is my sister's pony, she jumps 90cm",
+  "Julita jumped clean today, what next?",
+  "Julita rode him today, he was great",
+  "Julito is my new coach, what should I ask him?",
+  // The app's own observation prompt and short English chat with a horse called Rani, Rana,
+  // Ranita, Calmant or Julita, and an English word Romanian also writes.
+  "Help me write down a health observation about Rani",
+  "Help me write down a health observation about Rana",
+  "Help me write down a health observation about Ranita",
+  "Help me write down a health observation about Calmant",
+  "Help me write down a health observation about Julita",
+  "Rani clear round!! next steps?",
+  "Rana keeps cutting corners in dressage",
+  "Medicament-free calming options?",
+  // Spanish "esta plaga la tenemos" (this pest) and a mare called Rana before "la".
+  "Esta plaga la tenemos todos los veranos, ¿qué repelente uso?",
+  "Esa plaga la combato con vinagre, ¿funciona?",
+  "Mi yegua Rana la monto los martes con Julito",
 ]) {
   assert.equal(mentionsHealthConcern(message), false, message);
 }
@@ -408,6 +711,9 @@ const otherLanguages: Array<[string, "en" | "pt" | "es" | "hu"]> = [
   ["The din in the indoor arena makes her spooky", "en"],
   ["Is it ok to ride in the rain if the arena is sandy?", "en"],
   ["Santa brought me new tendon boots, how tight should they be?", "en"],
+  ["Julita is my sister's pony, she jumps 90cm", "en"],
+  ["Julito is my new coach, what should I ask him?", "en"],
+  ["Help me write down a health observation about Julita", "en"],
   ["Meu cavalo tem doze anos, quantas vezes por semana devo saltar?", "pt"],
   ["Vem cá, como faço o cavalo ficar mais leve na mão?", "pt"],
   ["Ela cai muito para dentro na curva, o que faço?", "pt"],
@@ -419,6 +725,12 @@ const otherLanguages: Array<[string, "en" | "pt" | "es" | "hu"]> = [
   ["¿La rana la tengo que recortar antes de herrar?", "es"],
   ["Mi yegua se llama Ranita y es muy nerviosa en pista", "es"],
   ["Ayer le tusé las crines para el concurso", "es"],
+  ["Hoy tusé las crines de mi yegua para el concurso", "es"],
+  ["Las moscas este año son una plaga la verdad, ¿qué repelente uso?", "es"],
+  ["Es una plaga la cantidad de moscas en la cuadra", "es"],
+  ["Monté a Rana la semana pasada y estuvo genial", "es"],
+  ["Mi yegua se llama Julita y salta muy bien", "es"],
+  ["Mañana monto con Julito, ¿qué ejercicio hago?", "es"],
   ["Hoy tuve clase con Dolores, ¿qué trabajo mañana?", "es"],
   ["Si cojo las riendas más cortas se pone tenso", "es"],
   ["¿Cuántas veces a la semana salto con mi caballo de doce años?", "es"],
@@ -430,12 +742,71 @@ const otherLanguages: Array<[string, "en" | "pt" | "es" | "hu"]> = [
   ["Mennyi abrakot adjak neki edzésnapokon?", "hu"],
   ["A gát előtt mindig megáll a lovam", "hu"],
   ["Laza szárral lovagoljak bemelegítéskor?", "hu"],
+  // Horses, coaches and places with Romanian-looking names, and words Romanian also writes.
+  ["Took Julito and Rani to the Bucharest show, both jumped clean", "en"],
+  ["Coach Vlad says I should sit deeper, any tips?", "en"],
+  ["We're stabled at Calarasi for the weekend show", "en"],
+  ["Mara jumped the water tray today, next step?", "en"],
+  ["Sold my saddle to a rider from Cluj last week", "en"],
+  ["Doina is my new coach, she wants more leg", "en"],
+  ["A Juliana montou o Rani ontem, ele saltou muito bem", "pt"],
+  ["Vamos ao concurso em Campinas com a Tusa e o Bento", "pt"],
+  ["O treinador Marcos pediu mais perna na curva", "pt"],
+  ["Ela ficou calma depois do trote, posso saltar amanhã?", "pt"],
+  ["Tenho aula com a Doroteia amanhã cedo", "pt"],
+  ["Comprei um cabeção novo para a Raninha", "pt"],
+  ["Essa praga de mosca não sai da cocheira", "pt"],
+  ["Esta plaga la tenemos todos los veranos, ¿qué repelente uso?", "es"],
+  ["Esa plaga la combato con vinagre, ¿funciona?", "es"],
+  ["Mi yegua Rana la monto los martes con Julito", "es"],
+  // "Que no se pare" (that he does not stop) is not the Romanian "se pare" (it seems).
+  ["Que no se pare antes del oxer, ¿cómo lo hago?", "es"],
+  ["No quiero que se pare en la entrada de la pista", "es"],
+  ["Hoy me tomé una copita con mi entrenador después del concurso", "es"],
+  ["Le tusé las crines al potro ayer", "es"],
+  ["Ayer en Durango montamos a Julita y a Rani", "es"],
+  ["La cal del picadero está muy dura, ¿afecta los cascos?", "es"],
+  ["¿Cuántas veces a la semana salto con Rani?", "es"],
+  ["Rana és Julita holnap jönnek edzésre", "hu"],
+  // Hungarian "sár" (mud) and "s" (and) are not the Romanian "sar" (I jump) and "s-a".
+  ["Nagy a sár a karámban, lovagoljak?", "hu"],
+  ["A lovam lassan s nyugodtan ugrott", "hu"],
+  ["Az edzőm, Tusa Péter szerint többet kell ügetni", "hu"],
+  ["Csütörtökön Debrecenben versenyzünk Mucival", "hu"],
+  ["Rani ma nagyon jól ment a pályán", "hu"],
+  ["Holnap Kolozsváron lovagolok Doinával", "hu"],
 ];
 assert.ok(otherLanguages.length >= 30);
 for (const [message, language] of otherLanguages) {
   assert.equal(romanianAlwaysOn.test(foldForMatching(message)), false, `always-on ro term: ${message}`);
   // Which other language wins is that pack's business; a tie with Romanian would return "ro".
   assert.notEqual(guessCoachLanguage(message).language, "ro", `${language}: ${message}`);
+}
+
+// "Ask Ralf about this ride": the app's English review, with the horse's name and the
+// rider's note. A horse called Julita or Rani never trips it; a Romanian note is read as Romanian.
+const ride: RideReviewFacts = {
+  training: "Pole work",
+  startedAt: new Date(2026, 10, 17, 14, 50).toISOString(),
+  elapsedSeconds: 42 * 60,
+  completedPhases: 3,
+  totalPhases: 4,
+  logged: false,
+};
+for (const horseName of ["Julita", "Julito", "Rani", "Rana", "Ranita", "Calmant"]) {
+  assert.equal(mentionsHealthConcern(rideReviewPrompt({ ...ride, horseName })), false, horseName);
+}
+for (const note of [
+  "Clase con Julito, trabajamos transiciones.",
+  "Se sperie de baloane umflate la concurs.",
+  "Ma tot doare spatele dupa lectie.",
+  "Suntem in febra pregatirilor pentru campionat.",
+  "Azi e o temperatura mare afara, am lucrat dimineata.",
+]) {
+  assert.equal(mentionsHealthConcern(rideReviewPrompt({ ...ride, horseName: "Julita", note })), false, note);
+}
+for (const note of ["Il dor picioarele dupa concurs.", "Iapa e julita la genunchi.", "A facut temperatura mare aseara."]) {
+  assert.deepEqual(assessHealthConcern(rideReviewPrompt({ ...ride, horseName: "Julita", note })), { concern: true, language: "ro" }, note);
 }
 
 // AI replies that diagnose, prescribe or clear the horse to work are replaced.
@@ -467,6 +838,11 @@ const unsafeReplies = [
   "Este sigur pentru ea să sară azi.",
   "Iapa e aptă de efort, poți relua săriturile.",
   "Medicamentul prescris de medic trebuie continuat încă o săptămână.",
+  "E în siguranță să o călărești ușor mâine.",
+  "Calul este apt de efort după o săptămână de pauză.",
+  "Un diagnostic corect îl poate pune doar veterinarul.",
+  "Medicul poate prescrie un antiinflamator dacă e nevoie.",
+  "Diagnosticul cel mai probabil este o contuzie la talpă.",
 ];
 for (const reply of unsafeReplies) {
   assert.equal(crossesSafetyLine(reply, riderMessage), true, reply);
@@ -507,6 +883,15 @@ const trainingReplies = [
   "Programul de săptămâna asta: două zile de dresaj, o zi de sărituri, o zi de teren.",
   // The rider's own safety, not clearance of the horse.
   "Nu e sigur pentru tine să sari fără cască.",
+  // "Fii sigur să ..." is the English "be sure to ...".
+  "Fii sigur să lucrezi pe ambele mâini la fel de mult.",
+  "Ca să fii sigur să sari corect, numără foulée-urile înainte de oxer.",
+  "Nu sunt sigur că e o idee bună să sari azi; întreabă antrenorul.",
+  "Asigură-te că lucrezi în siguranță: cască și vestă.",
+  "Pentru siguranța calului, verifică chinga înainte să urci.",
+  "Sunt sigur că o să sară mai bine după încălzire.",
+  "Dozează efortul: zece minute de trap, apoi pauză la pas.",
+  "Fă o pauză dacă simți că se încordează și notează ce ai observat pentru antrenor.",
 ];
 for (const reply of trainingReplies) {
   assert.equal(crossesSafetyLine(reply, riderMessage), false, reply);

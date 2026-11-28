@@ -13,6 +13,11 @@ import {
   REPLY_LANGUAGE_RULE,
 } from "../supabase/functions/_shared/coach-safety";
 import type { CoachLanguage } from "../supabase/functions/_shared/coach-safety";
+import { english } from "../supabase/functions/_shared/coach-language-en";
+import { spanish } from "../supabase/functions/_shared/coach-language-es";
+import { hungarian } from "../supabase/functions/_shared/coach-language-hu";
+import { portuguese } from "../supabase/functions/_shared/coach-language-pt";
+import { romanian } from "../supabase/functions/_shared/coach-language-ro";
 
 // Cross-language behaviour. Each language's own words are tested in
 // tests/coach-language-<code>.test.ts.
@@ -202,6 +207,21 @@ assert.equal(
 );
 assert.equal(crossesSafetyLine("Sim, é seguro montar hoje se ele trotar regular.", "Posso montar hoje?"), true);
 assert.equal(crossesSafetyLine("Da, este sigur să călărești mâine.", "Pot să călăresc mâine?"), true);
+
+// Every pack's patterns stay small enough for V8 to compile fast: past about
+// 30,000 characters the first match of a pattern slows down sharply.
+for (const pack of [english, portuguese, spanish, romanian, hungarian]) {
+  for (const terms of [pack.health, pack.healthWhenDetected, pack.unsafeOutput, pack.unsafeOutputWhenDetected]) {
+    assert.ok(terms.join("|").length < 25_000, "pattern size");
+  }
+}
+// And a full-length message is quick.
+{
+  const long = "Meu cavalo está ótimo hoje e fizemos um treino de salto com transições. ".repeat(50).slice(0, 3000);
+  const started = performance.now();
+  for (let index = 0; index < 50; index += 1) assessHealthConcern(`${long}${index}`);
+  assert.ok(performance.now() - started < 2_000, "50 full-length messages in under 2 s");
+}
 
 // coach-chat wires all of it in, and the English-only patterns are gone.
 const coachChat = readFileSync(join(process.cwd(), "supabase/functions/coach-chat/index.ts"), "utf8");

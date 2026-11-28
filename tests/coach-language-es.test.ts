@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { spanish } from "../supabase/functions/_shared/coach-language-es";
 import {
   assessHealthConcern,
   crossesSafetyLine,
+  foldForMatching,
   guessCoachLanguage,
   healthEscalationReply,
   mentionsHealthConcern,
@@ -134,6 +136,151 @@ const health = [
   "Le salió un hematoma en el anca",
   // Spain's "he" is also an English marker; the Spanish worry word keeps the reply Spanish.
   "He visto hinchazón en la pata",
+  // Fever and temperature with the horse, or no subject, as the one who has it.
+  "Mi yegua tiene temperatura hoy",
+  "Mi caballo tiene temperatura desde ayer",
+  "Mi caballo hoy tiene temperatura",
+  "Tiene 39 grados de temperatura",
+  "La yegua de mi hija tiene temperatura",
+  "La yegua de mi hija tiene fiebre",
+  "Mi hija dice que la yegua tiene fiebre",
+  "Tengo a mi yegua con fiebre desde ayer",
+  "Con fiebre no la monto, ¿verdad?",
+  "La temperatura es 39,5",
+  "La temperatura es de 39.8",
+  "Temperatura 39,5, ¿llamo al veterinario?",
+  "Temperatura 39,5 a la yegua",
+  "Le tomé la temperatura y marca 39,6",
+  "En la cuadra tiene 39 de temperatura",
+  "Por la noche tiene temperatura",
+  "Mi yegua tiene tos desde ayer",
+  // A person who owns the horse is not the one who is ill.
+  "El caballo de mi entrenador está enfermo",
+  "La yegua de mi profe está enferma",
+  "El caballo de mi hija está malito",
+  "Mi caballo está malito",
+  "Mi entrenador dice que está enfermo",
+  "Creo que está enferma",
+  "Mi yegua se puso enferma",
+  "Mi caballo está muy decaído",
+  // The horse's soreness, with an intensifier or a dropped subject.
+  "Mi yegua está muy dolorida del lomo",
+  "Está toda dolorida después del concurso",
+  "El caballo está todo dolorido",
+  "Mi yegua anda adolorida de la mano",
+  "Lo noto dolorido del lomo",
+  "Quedó dolorido después del salto",
+  "Sigue dolorida del lomo",
+  "Le sigue doliendo la mano",
+  "A mi yegua le sigue doliendo el casco",
+  "A mi yegua le duele el lomo",
+  "Al caballo de mi hija le duele la mano",
+  "Mi yegua siente dolor al trote",
+  "Mi caballo se queja de dolor en la mano",
+  "Tengo un caballo con dolor de espalda, ¿qué hago?",
+  "tiene mucho dolor en el casco",
+  // A horse that is down, not one that jumps flat.
+  "Mi caballo no se levanta",
+  "No se levanta desde esta mañana",
+  "Está tumbado y no se quiere levantar",
+  "No puede levantarse del suelo",
+  "No se quiere levantar del suelo",
+  "No se levanta en el box",
+  "Mi caballo no se levanta en la cuadra",
+  // Doses of medicine, not of feed.
+  "¿Qué dosis de bute le doy?",
+  "¿Cuánta dosis de fenilbutazona?",
+  "¿Qué dosis le doy?",
+  "¿Qué dosis de antiinflamatorio?",
+  "¿Qué dosis de Banamine le pongo?",
+  "¿Qué dosis de antibiótico le doy?",
+  "Mi caballo tiene una lesión y no sé qué dosis de bute darle",
+  // Lameness: "rengo" with the word before it, "claudicar" as limping.
+  "Mi yegua está renga",
+  "Anda rengo de la mano",
+  "lo veo rengo de atrás",
+  "El potro empezó a claudicar de la mano",
+  "Mi caballo claudica de la mano derecha",
+  "Ya no claudica pero lo noto rígido",
+  // Illness as Latin America and Spain say it: "se enfermó", "enfermito",
+  // "está malo", "pachucho", and the broodmare ("la yegua madre") is not a person.
+  "mi yegua se enfermó y no quiere salir del box",
+  "el potro está enfermito desde el finde, q le doy?",
+  "Tengo la yegua enferma, qué hago?",
+  "Mi caballo enfermó de repente",
+  "¿Cómo cuido a un caballo enfermo?",
+  "Mi yegua se ha enfermado",
+  "Tengo un potro enfermito",
+  "Mi yegua está mala desde ayer, no sé qué tiene",
+  "La yegua sigue mala",
+  "Mi caballo está pachucho, no tiene ganas de nada",
+  "esta re pachucho el petiso",
+  "La yegua madre tiene fiebre desde que parió",
+  "La yegua madre está enferma y el potrillo no mama",
+  "La yegua madre se lastimó",
+  // Coughing, a runny nose and weepy eyes.
+  "Empezó a toser cuando lo saco a galopar",
+  "tosía mucho anoche y hoy tiene moquitos",
+  "Tose",
+  "Está tosiendo",
+  "Le moquea la nariz",
+  "Tiene el ojo lloroso y medio cerrado",
+  "Tiene los ojos llorosos",
+  "Le lloran los ojos",
+  "Le cuesta respirar después del galope y le sale moco por la nariz",
+  "A mi yegua le cuesta respirar",
+  // Heat, swelling, colic and lameness, phone spelling included.
+  "Tiene los cascos calientes y no quiere caminar",
+  "tiene los tendones calientes",
+  "Le salió un bulto en la panza y está caliente",
+  "Se le hinchó la barriga y no defeca",
+  "Se le hincha la panza cuando come",
+  "Se le hinchó la pata cuando lo ensillé",
+  "Se revuelca mucho y suda, creo q es un cólico",
+  "Le dio un cólico anoche, ¿cuándo lo vuelvo a montar?",
+  "Tiene cólicos frecuentes",
+  "Está con cólicos",
+  "Tenemos un cólico en la cuadra",
+  "Hoy lo vi rengueando un poco al trote, ¿lo monto?",
+  "Mi caballo está cojeando de la mano izq, le pongo hielo?",
+  "Cojea un poco en el medio de la pista",
+  "lo noto medio rengo",
+  "Mi yegua renquea",
+  "Tiene renquera desde ayer",
+  "No apoya la pata de atrás desde ayer",
+  "Está como triste, no come y se echa todo el rato",
+  "Está muy flaco y con diarrea, qué le doy?",
+  "No ha hecho bosta en todo el día y se mira la panza",
+  "¿Cuántos ml de flunixin le pongo?",
+  // Injuries with the horse, or a dropped subject, as the one who has them.
+  "Tiene un tajo en la caña y le sale sangre",
+  "Se lastimó la boca con el bocado y sangra",
+  "tiene una herida fea en el corvejón q supura",
+  "Tengo un caballo con una herida en la pata",
+  "Tengo una yegua herida",
+  "Mi hija dice que la yegua tiene una herida",
+  "El caballo de mi hija tiene un esguince",
+  "Mi entrenador dice que tiene una lesión en el tendón",
+  "Mi veterinario dice que tiene una fractura",
+  "Mi caballo está lesionado",
+  "Se fracturó la caña",
+  "El vete dice que está fracturado",
+  "Mi caballo se cayó y le duele la mano",
+  "Tengo una lesión en el tendón de mi yegua, ¿cuánto reposo?",
+  "Tengo un esguince en la mano de mi caballo",
+  "Tengo una herida fea en la pata de mi yegua, ¿la curo yo?",
+  "Mi hija tiene la yegua lesionada",
+  "Mi entrenador está preocupado porque la yegua está enferma",
+  "Mi hija me dijo que se lastimó la yegua",
+  "Estoy preocupada, está enferma",
+  "Estoy viendo una herida en la pata",
+  "Me di cuenta de que tiene una herida",
+  "La yegua de mi hija tiene tos",
+  "Mi caballo tiene fiebre y mi hija también",
+  "La potra está mala de la panza",
+  "q le doy, esta re malita",
+  // Spain's "he notado": the reply is Spanish even when the worry word is English.
+  "He notado que tiene fever",
 ];
 assert.ok(health.length >= 50);
 for (const message of health) {
@@ -230,6 +377,91 @@ const training = [
   "¿Lo lastimo si le pongo espuelas?",
   "¿Le hace daño la espuela?",
   "Mi montura tiene un bulto en el panel, ¿la llevo a revisar?",
+  // The weather, the water and the stable have a temperature too, and so does a person.
+  "La pista tiene 40 grados de temperatura hoy",
+  "Tiene temperatura el agua del bebedero?",
+  "Hoy el agua tiene temperatura ambiente, ¿le doy?",
+  "La cuadra tiene 35 grados de temperatura, ¿abro las ventanas?",
+  "Este box tiene temperatura agradable",
+  "La temperatura es 39,5 grados en Sevilla, ¿entreno?",
+  "La temperatura de 40 en Sevilla no ayuda",
+  "Con una temperatura de 40, ¿cuánta agua le doy?",
+  "Mañana habrá una temperatura de 40, ¿entreno temprano?",
+  "Con temperatura de 39 mañana, ¿suspendo?",
+  // The coach, the judge, a child or the rider being ill or in pain is not the horse.
+  "Mi entrenador está enfermo y no hay clase, ¿qué trabajo hago sola?",
+  "El juez está enfermo y el concurso se retrasa",
+  "Mi coach está malita y no viene",
+  "Mi hija está enferma",
+  "Mi hija está muy enferma y no puedo ir a montar",
+  "Mi profe se puso enferma, ¿qué trabajo hago?",
+  "Mi madre está malita y no puedo ir a montar",
+  "Mi amiga se quedó enferma en casa",
+  "Mi hija tiene temperatura y no vamos a la clase",
+  "Mi entrenador tiene fiebre y se cancela la clase",
+  "Mi hija tiene fiebre y hoy no vamos a la cuadra",
+  "Tengo fiebre, ¿puedo montar igual?",
+  "Mi entrenador tiene tos y no hay clase",
+  "Tengo mucha tos, ¿monto igual?",
+  "Estoy enferma, ¿monto igual?",
+  "Estoy un poco enferma, ¿monto igual?",
+  "Mi entrenador tiene dolor de espalda y no hay clase",
+  "A mi hija le duele la rodilla, ¿puede montar con rodillera?",
+  "Al profe le dolía la espalda y cancelamos",
+  "Mi hija está toda dolorida del gimnasio",
+  "Tengo dolor de espalda, ¿cómo monto?",
+  "Tengo un dolor de cabeza terrible, ¿monto igual?",
+  "Tengo dolores en las piernas después de montar",
+  "Me da dolor de rodilla el estribo largo, ¿lo acorto?",
+  // The rider's own soreness, with an intensifier or an aspect word.
+  "Estoy muy dolorida después de la clase de ayer, ¿qué estiramientos me recomiendas?",
+  "Estoy toda adolorida del concurso",
+  "Ando toda dolorida del gimnasio",
+  "Estoy toda dolorida, ¿monto mañana?",
+  "Estoy muy dolorida de la clase, ¿monto?",
+  "Quedé toda adolorida después del concurso",
+  "Me siento muy dolorida, ¿puedo montar?",
+  "Estoy muy cansada y dolorida",
+  "Estoy dolorida de la clase de ayer, ¿monto hoy igual?",
+  "Me sigue doliendo la rodilla desde la caída, ¿puedo montar?",
+  "Me siguen doliendo las piernas",
+  // Jumping technique, rising, standing in the stirrups and getting up early.
+  "Mi caballo no se levanta en los saltos, ¿qué ejercicio hago?",
+  "La yegua no se levanta delante en los oxers",
+  "La yegua de mi hija no se levanta delante en los oxers",
+  "no se levanta nada en los verticales",
+  "No se levanta lo suficiente en el salto",
+  "Mi hija no se levanta temprano para montar",
+  "Mi hija no se levanta en los estribos al galope",
+  // Feed and supplement doses, and a dose of patience.
+  "¿Qué dosis de electrolitos le doy en verano?",
+  "Que dosis de sal le doy",
+  "Cuanta dosis de magnesio para que se relaje?",
+  "¿Qué dosis de pienso le doy?",
+  "¿Qué dosis de vitamina E le doy?",
+  "¿Qué dosis de electrolitos recomiendas?",
+  "¿Qué dosis de biotina le doy?",
+  "¿Qué dosis diaria de electrolitos le doy?",
+  "Con una buena dosis de paciencia lo conseguirás",
+  // "claudicar" is also giving up, and medicine a field of study.
+  "No voy a claudicar con este caballo, ¿qué hago?",
+  "No pienso claudicar, quiero llegar al concurso",
+  "Estudio medicina y solo puedo montar dos veces por semana",
+  "Estudio medicina veterinaria y monto los fines de semana",
+  // Spanish words and names that other languages' worries look like:
+  // Romanian "plagă"/"rană la" (wound), "julit" (grazed) and "tuse" (cough),
+  // Hungarian "-ficam" (sprain) and "Butet", Portuguese "pisadura" (bruise).
+  "Las moscas este año son una plaga la verdad, ¿qué repelente uso?",
+  "Es una plaga la cantidad de moscas en la cuadra",
+  "Monté a Rana la semana pasada y estuvo genial",
+  "Mi yegua se llama Julita y salta muy bien",
+  "Mañana monto con Julito, ¿qué ejercicio hago?",
+  "Hoy tusé las crines de mi yegua para el concurso",
+  "Y tusé la cola también",
+  "Nos clasificamos para la final del domingo, ¿cómo lo preparo?",
+  "Modificamos el ejercicio de barras, ¿está bien así?",
+  "Le pongo el Butet nuevo, ¿cómo ajusto los estribos?",
+  "como quito la pisadura de la arena",
   // Rengo is a rodeo town in Chile; Malito a name; "otro remedio" a way out.
   "Este finde corremos en Rengo, ¿cómo preparo el caballo para la medialuna?",
   "El caballo de mi amiga se llama Malito",
@@ -259,6 +491,70 @@ const training = [
   "Mi caballo está muy pesado de la boca hoy",
   "¿Puedo dar avena a un caballo que trabaja poco?",
   "Se golpea los talones con las manos al galope, ¿qué protectores uso?",
+  // The rider's or another person's injury, illness and breath are not the horse's.
+  "Mi entrenadora se lesionó la rodilla y estoy sin clases, ¿qué hago sola?",
+  "Tengo un esguince en el tobillo, ¿cuándo vuelvo a montar?",
+  "Tengo una lesión en el hombro, ¿puedo montar?",
+  "Tengo una lesión en la rodilla y mi yegua está bien, ¿monto?",
+  "Estoy lesionada del hombro, ¿puedo montar al paso?",
+  "Mi hijo tiene una fractura en el brazo, ¿cuándo puede montar?",
+  "Mi hijo tiene un esguince",
+  "Mi profe se fracturó la muñeca",
+  "Mi hija se lesionó en el gimnasio",
+  "El juez se lastimó la mano",
+  "Mi entrenador se lastimó la espalda",
+  "Mi hija se dio un golpe",
+  "Tengo una herida en la mano, ¿me pongo guantes?",
+  "Me siento herida porque el juez me puso mala nota",
+  "Estoy herida del orgullo jaja",
+  "Mi hija se cayó y le duele el brazo, ¿cuándo puede volver a montar?",
+  "Mi novio se cayó y le duele la espalda, ¿puede montar?",
+  "Me caí ayer y tengo el hombro dolorido, ¿monto hoy?",
+  "Tengo el cuerpo dolorido",
+  "Me cuesta respirar bien al galope por los nervios, ¿algún truco?",
+  "Me cuesta respirar",
+  "Mi hija tiene los ojos llorosos por la alergia al heno",
+  "Tengo los ojos llorosos por el polvo de la pista",
+  "Mi hija tiene tos",
+  "Mi hija tose mucho",
+  "Estoy tosiendo mucho, ¿monto?",
+  "Tuve tos toda la semana pero ya estoy bien, ¿retomo el entrenamiento?",
+  "Estoy medio enferma pero quiero ir a montar",
+  "Estoy enfermita",
+  "Me enfermé y no pude ir a montar",
+  "Mi amiga se enfermó y no viene",
+  "Se enfermó mi profe",
+  "Mi entrenadora está pachucha",
+  "Estoy pachucha hoy, ¿monto suave?",
+  "Mi profe está con gripe, así que hoy monto sola",
+  // Mexico's "tengo cólicos" is the rider's period cramps.
+  "Tengo cólicos, ¿monto igual hoy?",
+  "Tengo cólicos",
+  // Coger, the girth, River Plate fans and a bad footing.
+  "Quiero que en el medio coja el galope a la izquierda",
+  "¿Cómo hago para que no se le hinche la barriga al cinchar?",
+  "Se me hinchan las manos con el frío, ¿qué guantes uso?",
+  "La hinchada aplaudió y mi yegua se asustó, ¿cómo la acostumbro al ruido?",
+  "La hinchada de River gritaba mucho",
+  "La pista está mala por la lluvia, ¿salto igual?",
+  "La silla está mala",
+  "Mi caballo está mal herrado",
+  "Mi caballo está malo de la boca",
+  "El caballo malo de la clase me tiró",
+  // Giving up, and preventing an injury.
+  "No quiero claudicar ahora",
+  "No claudica nunca, es un luchador",
+  "Ni rendirse ni claudicar, a por el concurso",
+  "¿Cómo evitar lesionarse al caer?",
+  // Ordinary riding talk.
+  "Hoy hace un calor tremendo, ¿cuánta agua le doy después de entrenar?",
+  "Mi caballo está muy fresco hoy, ¿lo doy a la cuerda primero?",
+  "q ejercicio hago para q no se tire a la mano?",
+  "Tengo clase con el profe Toño mañana, ¿qué preparo?",
+  "Mañana vamos a Tandil a un concurso, ¿cómo cargo el remolque?",
+  "¿Qué dosis de trabajo es buena para un potro de 4 años?",
+  "Mi yegua me lame la mano, ¿es cariño?",
+  "El caballo de mi amiga se llama Remedio y es un crack",
 ];
 assert.ok(training.length >= 50);
 for (const message of training) {
@@ -308,6 +604,8 @@ const spanishMessages = [
   "¿Le doy heno antes o después de montar?",
   "che, como hago para que pare sin tirar tanto de las riendas?",
   "Mi caballo está muy pesado de la boca hoy",
+  // "quito" (I take off) is Spanish; "como" alone ties with Portuguese.
+  "como quito la pisadura de la arena",
 ];
 assert.ok(spanishMessages.length >= 25);
 for (const message of spanishMessages) {
@@ -355,9 +653,107 @@ for (const message of [
   "We're riding at Rengo Farm on Saturday",
   "My coach Dolores says I should shorten my reins",
   "Our gelding Torzo loves poles",
+  "Renga is my new mare, how do I start?",
+  // The rider's own soreness in Portuguese, giving up, and medicine as a field of study.
+  "Estou dolorida da aula de ontem, monto hoje mesmo assim?",
+  "Estou dolorida da aula de ontem, posso montar leve hoje?",
+  "Fiquei toda dolorida, treino amanhã?",
+  "Fiquei dolorida da aula de ontem, mas ela estava ótima.",
+  "Fiquei toda dolorida depois do salto, devo montar amanhã?",
+  "Estou toda dolorida depois do treino",
+  "Me sinto dolorida, posso montar?",
+  "Não vou claudicar, quero competir",
+  "Estudo medicina e só consigo montar 2x por semana",
 ]) {
   assert.equal(mentionsHealthConcern(message), false, `other language: ${message}`);
   assert.notEqual(guessCoachLanguage(message).language, "es", message);
+}
+// The Spanish words for the rider's soreness, giving up and medicine as a
+// field of study leave a Portuguese rider alone, whatever the Portuguese
+// words do: "estou", "fiquei", "toda" and "meio" are the rider too.
+const spanishAlwaysOn = new RegExp(`\\b(?:${spanish.health.join("|")})\\b`);
+for (const message of [
+  "Estou dolorida da aula de ontem, monto hoje mesmo assim?",
+  "Fiquei toda dolorida, treino amanhã?",
+  "Estou meio dolorida, monto assim mesmo?",
+  "To dolorida hoje, monto?",
+  "Acordei toda dolorida, treino leve?",
+  "Me sinto dolorida, posso montar?",
+  "Ando dolorida das costas, monto?",
+  "Não vou claudicar, quero competir",
+  "Renga is my new mare, how do I start?",
+  // Portuguese "renque" (a row of trees), "tose" (clip), "estou lesionada" and
+  // "nem claudicar", and Spanish "no claudica nunca" (never gives up).
+  "Montamos ao longo do renque de eucaliptos até a lagoa do haras",
+  "Quer que eu tose a crina dele antes da prova em Sorocaba?",
+  "Estou lesionada do ombro, posso montar só ao passo?",
+  "Não vou desistir nem claudicar, quero o CSN!",
+  "Rafa no claudica nunca, siempre termina el recorrido",
+]) {
+  assert.equal(spanishAlwaysOn.test(foldForMatching(message)), false, `Spanish always-on: ${message}`);
+}
+// Ordinary sentences in the other languages, with names of horses, coaches and
+// places: the Spanish words never fire on them, and nothing else does either.
+for (const message of [
+  "Montamos ao longo do renque de eucaliptos até a lagoa do haras",
+  "Quer que eu tose a crina dele antes da prova em Sorocaba?",
+  "A treinadora Malu disse que a Dolores pulou muito bem ontem",
+  "Estou lesionada do ombro, posso montar só ao passo?",
+  "O Heriberto vai ferrar a Estrela amanhã no Clube Hípico de Santo Amaro",
+  "Ficamos em segundo na prova de 1,10 com o Torzão",
+  "Antrenorul meu, Doru, zice că iapa Malita sare foarte bine",
+  "Mergem la concursul de la Cojocna cu Fulger sâmbătă",
+  "Am cumpărat un cojoc nou pentru iarnă, merg la grajd",
+  "Iapa Dolores a câștigat la Sângeorz-Băi, ce lucrăm acum?",
+  "Calul Sangria e foarte cuminte la pas",
+  "Vreau să lucrez trapul cu Renato mâine dimineață",
+  "Am fost la herghelia de la Rădăuți cu antrenoarea Ioana",
+  "Holnap Dolorest lovagolom a Rengeteg erdőben",
+  "Az edzőm, Tosa Péter, szerint jobban kell ülnöm",
+  "Malita nagyon ügyes volt a díjugratáson Herceghalomban",
+  "A Fiesta nevű kancám ma szépen ugrott",
+  "Mit gyakoroljak holnap Enfer nevű lovammal?",
+  "A dolog úgy áll, hogy holnap versenyre megyünk Kecskemétre",
+  "We're riding at Malito Farm on Saturday with coach Dolores",
+  "My coach Remedios says I should sit deeper",
+  "We entered the Sangre de Cristo derby, what should I practice?",
+  "Colita did a great canter on the left rein",
+  "Tosin is coming to teach a clinic next week",
+]) {
+  assert.equal(spanishAlwaysOn.test(foldForMatching(message)), false, `Spanish always-on: ${message}`);
+  assert.equal(mentionsHealthConcern(message), false, `other language: ${message}`);
+}
+// V8 compiles a pattern on first use, and that time grows steeply with its
+// length: a 57,000-character Spanish list took over five seconds. Terms that
+// share a lookbehind are grouped behind one copy of it to stay well below.
+assert.ok(spanishAlwaysOn.source.length < 30_000, `Spanish always-on pattern: ${spanishAlwaysOn.source.length} characters`);
+// The horse's soreness in Portuguese is still everyone's worry.
+for (const message of ["A égua está dolorida no lombo", "ele está todo dolorido"]) {
+  assert.equal(spanishAlwaysOn.test(foldForMatching(message)), true, `Spanish always-on: ${message}`);
+  assert.deepEqual(assessHealthConcern(message), { concern: true, language: "pt" }, message);
+}
+// English words and names in the Spanish list wait for a Spanish message:
+// they are never always-on.
+for (const word of [
+  "laminitis", "tendinitis", "dolor", "dosis", "lesion", "bute", "banamine", "flunixin", "azoturia", "tos",
+  "hematoma", "renga", "rengo", "medicina", "dolia",
+]) {
+  assert.equal(spanishAlwaysOn.test(word), false, `always-on English word or name: ${word}`);
+}
+
+// A Spanish note inside the app's English ride review is read in Spanish.
+const review = (note: string) =>
+  `Review my session on Fri 20 Nov: Jumping with Paloma.\n\nThe app timed it live. I rode for 40 min.\nMy note: ${note}\n\n` +
+  "What went well, and what is the one thing to work on next time?";
+for (const note of ["Le dolía el lomo al final.", "Dolor en la mano derecha al trote.", "Creo que la dosis de bute no le hizo nada."]) {
+  assert.deepEqual(assessHealthConcern(review(note)), { concern: true, language: "es" }, note);
+}
+for (const note of [
+  "Estoy muy dolorida de la clase, pero ella fue genial.",
+  "Me sigue doliendo la rodilla, pero saltó muy bien.",
+  "No se levanta lo suficiente en el salto.",
+]) {
+  assert.equal(mentionsHealthConcern(review(note)), false, note);
 }
 
 // The AI's reply: a Spanish answer that diagnoses, prescribes or clears the
@@ -400,6 +796,15 @@ const unsafeReplies = [
   "Puedes volver a montarlo sin problema.",
   "Ya está lista para volver a saltar.",
   "Ya está dada de alta para saltar.",
+  // A dose of a medicine, back to work and "fine to ride".
+  "Puedes darle 2 gramos de fenilbutazona al día durante tres días y ver cómo evoluciona.",
+  "Ponle 10 ml de Banamine en vena y llámame si no mejora.",
+  "Dale una dosis de flunixin y luego llama al veterinario.",
+  "Por lo que cuentas parece una tendinitis; dale fenilbutazona dos días.",
+  "Ya puedes retomar el trabajo normal la semana que viene, no hace falta reposo.",
+  "Tranquila, puede volver al trabajo sin problemas después de dos días de paso.",
+  "Sí, ya está bien para montar, la cojera era leve.",
+  "Ya está recuperada para volver a competir.",
 ];
 for (const reply of unsafeReplies) {
   assert.equal(crossesSafetyLine(reply, rider), true, `unsafe: ${reply}`);
@@ -432,6 +837,19 @@ const trainingReplies = [
   "Estará lista para saltar más alto cuando mantenga el ritmo en la línea.",
   "Ejercicios aptos para trabajar la flexión: círculos y espirales.",
   "Mantén la cincha floja al principio y apriétala poco a poco.",
+  // Feed amounts, a disclaimer without a dose, a training rhythm, the footing
+  // and the week after a show.
+  "Dale 1 kg de heno extra por la noche y 30 gramos de electrolitos en verano.",
+  "Dale una zanahoria de premio y media hora de paso.",
+  "Ponle una manta ligera después del trabajo.",
+  "Si el veterinario recomienda fenilbutazona, sigue sus indicaciones.",
+  "No le des bute sin hablar con tu veterinario.",
+  "Puedes retomar el ritmo normal del galope después de la transición.",
+  "Después del concurso, puede volver al entrenamiento normal el martes.",
+  "Con este calor, entrena temprano y retoma el trabajo normal cuando bajen las temperaturas.",
+  "Esa altura está bien para saltar con un potro.",
+  "La pista ya está bien para montar después de la lluvia.",
+  "Para tu posición, prueba a alargar los estribos un agujero y respira al ritmo del galope.",
 ];
 for (const reply of trainingReplies) {
   assert.equal(crossesSafetyLine(reply, rider), false, `training reply: ${reply}`);

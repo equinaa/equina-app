@@ -317,11 +317,23 @@ assert.deepEqual(neutral.filter((prompt) => mentionsHealthConcern(prompt)), []);
 assert.ok(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "x" })).includes("My note: x"));
 for (const [note, language] of [
   ["Ela estava com dor na pata depois do salto.", "pt"],
+  ["ela ficou mancando dps do galope", "pt"],
   ["Le dolía el lomo al final.", "es"],
+  ["Il mai doare piciorul din fata.", "ro"],
+  ["Iapa a schiopatat la final.", "ro"],
+  ["Fáj a lába neki.", "hu"],
+  ["He was lame behind at the end.", "en"],
 ] as const) {
   assert.deepEqual(assessHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: note }, "Estrela"))), { concern: true, language }, note);
 }
-assert.equal(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "Treino tranquilo, ela foi muito bem." }, "Estrela"))), false);
+for (const note of [
+  "Treino tranquilo, ela foi muito bem.",
+  // Spanish "lame" (licks) and Romanian "lame" (blades) in a note are not English "lame".
+  "Lame el bocado todo el rato, muy relajada.",
+  "Ce lame folosesc la masina de tuns calul?",
+]) {
+  assert.equal(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: note }, "Estrela"))), false, note);
+}
 // The rider's own words are still screened like any message to Ralf.
 assert.ok(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." }))));
 

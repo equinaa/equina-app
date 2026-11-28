@@ -179,26 +179,31 @@ const assessText = (message: string): HealthAssessment => {
 const LINE_LABEL = /^[\p{L} ]{1,24}:\s+/u;
 
 /**
- * Health, injury or lameness language in any language Ralf handles. The
- * whole message is read first. Then any line that is clearly in another
- * language is read on its own, so a Portuguese note inside the app's English
- * ride review ("My note: Ela estava com dor na pata") is read as Portuguese.
+ * Health, injury or lameness language in any language Ralf handles. A line
+ * clearly in another language than the message as a whole is read on its
+ * own, and the rest without it: a Portuguese note inside the app's English
+ * ride review ("My note: Ela estava com dor na pata") is read as Portuguese
+ * and answered in Portuguese, and a Spanish note that says "lame el bocado"
+ * (licks the bit) is not read as English "lame".
  */
 export const assessHealthConcern = (message: string): HealthAssessment => {
-  const whole = assessText(message);
-  if (whole.concern) return whole;
-  const wholeLanguage = guessCoachLanguage(message).language;
   const lines = message.split(/\n+/);
-  if (lines.length < 2) return whole;
+  if (lines.length < 2) return assessText(message);
+  const wholeLanguage = guessCoachLanguage(message).language;
+  const foreign: string[] = [];
+  const rest: string[] = [];
   for (const line of lines) {
     const text = line.replace(LINE_LABEL, "").trim();
-    if (!text) continue;
-    const guess = guessCoachLanguage(text);
-    if (!guess.confident || guess.language === wholeLanguage) continue;
+    const guess = text ? guessCoachLanguage(text) : undefined;
+    if (guess?.confident && guess.language !== wholeLanguage) foreign.push(text);
+    else rest.push(line);
+  }
+  if (!foreign.length) return assessText(message);
+  for (const text of foreign) {
     const own = assessText(text);
     if (own.concern) return own;
   }
-  return whole;
+  return assessText(rest.join("\n"));
 };
 
 export const mentionsHealthConcern = (message: string): boolean => assessHealthConcern(message).concern;
