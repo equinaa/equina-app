@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, StyleSheet, Text, TextInput, View, type ScrollView } from "react-native";
+import { AccessibilityInfo, Alert, StyleSheet, Text, TextInput, View, type ScrollView } from "react-native";
 import { ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react-native";
 import type { PlannedActivity, RideEnd, RideEntry, RideMoodRecord } from "../../backend";
 import { dayHeading } from "../../domain/activity-calendar";
@@ -11,6 +11,10 @@ import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
 import { RalfMedal } from "../coach/RalfMedal";
+import { RideEffortCard } from "../health/RideEffortCard";
+import { ralfMayUseEffort } from "../health/health-settings";
+import { effortForRalf, effortWords, RALF_EFFORT_CONSENT } from "../health/ride-effort";
+import { useRideEffort, type AppleHealthController } from "../health/useAppleHealth";
 import type { RideMood } from "./RideExperience";
 import { CompareStrip, PhasesCard, RideStepper, RideWeekCard, TrendCard, moodWord, type TrendMetric } from "./RideContextCards";
 import {
@@ -33,7 +37,7 @@ import {
   type CompareWords
 } from "./ride-compare";
 import { formatActivityTime, rideTrainingLabel } from "./ride-plan";
-import { rideComparePrompt, rideMinutesLabel, rideReviewFactsFromEntry } from "./ride-review-prompt";
+import { rideComparePrompt, rideEffortForRalf, rideMinutesLabel, rideReviewFactsFromEntry } from "./ride-review-prompt";
 
 const moodLabel = { fresh: "Fresh", focused: "Focused", tender: "Tender" } as const;
 const moods: readonly RideMoodRecord[] = ["fresh", "focused", "tender"];
@@ -85,6 +89,9 @@ export function RideJournalSheet({
   rideActive = false,
   planned = [],
   training,
+  appleHealth,
+  onManageHealth,
+  minimalContext = false,
   onDismiss
 }: {
   visible: boolean;
@@ -101,8 +108,11 @@ export function RideJournalSheet({
   /**
    * Absent where Ralf is not available: the ride still opens, without the
    * question. With a prompt, the question is the comparison the screen built.
+   * With an effort line, the rider allowed their heart rate to go with it:
+   * it travels beside the question, never inside it, so nothing Equina keeps
+   * holds it (rideEffortForRalf).
    */
-  onAskRalf?: (entry: RideEntry, prompt?: string) => void;
+  onAskRalf?: (entry: RideEntry, prompt?: string, effort?: string) => void;
   /** Opens the ride setup filled in with this ride. */
   onRepeat?: (entry: RideEntry) => void;
   /** Opens Add activity on a day ahead, filled in with this ride. */
@@ -117,6 +127,12 @@ export function RideJournalSheet({
   planned?: readonly PlannedActivity[];
   /** The training plan, once read: the week and streak a ride belonged to. */
   training?: RideJournalTraining;
+  /** Apple Health on this iPhone: the rider's effort on each ride. Absent where there is none. */
+  appleHealth?: AppleHealthController;
+  /** Opens Account › Privacy and Ralf, where the effort settings are. */
+  onManageHealth?: () => void;
+  /** Account's Minimal context: Ralf then gets the ride's facts and nothing of the rider's heart rate. */
+  minimalContext?: boolean;
   onDismiss: () => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -183,6 +199,9 @@ export function RideJournalSheet({
           rideActive={rideActive}
           planned={planned}
           training={training}
+          appleHealth={appleHealth}
+          onManageHealth={onManageHealth}
+          minimalContext={minimalContext}
           asking={confirming === open.id}
           deleting={deletingId === open.id}
           busy={Boolean(deletingId)}
@@ -304,6 +323,9 @@ function RideDetail({
   rideActive,
   planned,
   training,
+  appleHealth,
+  onManageHealth,
+  minimalContext,
   asking,
   deleting,
   busy,
@@ -334,6 +356,9 @@ function RideDetail({
   rideActive: boolean;
   planned: readonly PlannedActivity[];
   training?: RideJournalTraining;
+  appleHealth?: AppleHealthController;
+  onManageHealth?: () => void;
+  minimalContext: boolean;
   asking: boolean;
   deleting: boolean;
   /** Any delete in flight, this ride's or another's. */
@@ -346,7 +371,7 @@ function RideDetail({
   onBaseline: (baseline: CompareBaseline) => void;
   onMetric: (metric: TrendMetric) => void;
   onUpdate?: (id: string, patch: RideUpdate) => Promise<unknown>;
-  onAskRalf?: (entry: RideEntry, prompt?: string) => void;
+  onAskRalf?: (entry: RideEntry, prompt?: string, effort?: string) => void;
   onRepeat?: (entry: RideEntry) => void;
   onPlanAgain?: (entry: RideEntry, day: string) => void;
   /** The horse Plan it again schedules for, so the chips check that horse's days. */
@@ -428,18 +453,81 @@ function RideDetail({
     }
   };
 
+  // The rider's heart rate and calories from Apple Health, read as the ride
+  // opens and kept in memory only.
+  const effort = useRideEffort(entry, appleHealth);
+  const effortShown = effort.view.kind === "ready" || effort.view.kind === "reading" ? effort.view.effort : undefined;
+  const effortLine = effortShown && appleHealth && !minimalContext
+    ? effortForRalf(effortShown, { phases: entry.phases, placement: effort.placement })
+    : null;
+  // The rider said yes and Minimal context is off: the card says Ralf gets them.
+  const ralfGetsEffort = Boolean(appleHealth && ralfMayUseEffort(appleHealth.settings, minimalContext));
+  const effortForRalfNow = Boolean(effortLine && ralfGetsEffort);
+  // What the line holds, so the words never promise a heart rate it lacks.
+  const effortSent = effortShown && effortForRalfNow ? effortWords(effortShown) : null;
+
+  // The heart rate goes to Ralf only after a yes, asked the first time it
+  // would: Ralf's replies are written by an AI provider, who would receive it.
+  // The answer is kept on this phone; Account changes it later. The line is
+  // handed on beside the question, so the question shown and kept in Ralf's
+  // history never holds it.
+  const withEffort = (send: (line?: string) => void) => {
+    if (!effortLine || !appleHealth) return send();
+    if (appleHealth.settings.ralfEffort === "allowed") return send(effortLine);
+    if (appleHealth.settings.ralfEffort === "declined") return send();
+    Alert.alert(
+      RALF_EFFORT_CONSENT.title,
+      RALF_EFFORT_CONSENT.message,
+      [
+        {
+          text: RALF_EFFORT_CONSENT.decline,
+          style: "cancel",
+          onPress: () => {
+            appleHealth.update({ ralfEffort: "declined" });
+            send();
+          }
+        },
+        {
+          text: RALF_EFFORT_CONSENT.allow,
+          onPress: () => {
+            appleHealth.update({ ralfEffort: "allowed" });
+            send(effortLine);
+          }
+        }
+      ],
+      { cancelable: false }
+    );
+  };
+
   // Ralf is asked about the difference, with the peers in the message: he
   // reads only the newest rides on his own, without their phases.
   const compared = comparison && comparison.baseline.length > 0 && comparison.averageMinutes !== null ? comparison : null;
   const nextRide = lastRidesPhrase(shownScope, words, 1).replace(/^your last /, "");
+  // The plain review is the one App writes itself, with or without the heart rate.
+  const askPlain = () => {
+    if (!onAskRalf) return;
+    withEffort((line) => onAskRalf(entry, undefined, rideEffortForRalf(line)));
+  };
   const askAbout = (question: string) => {
     if (!onAskRalf) return;
     if (!compared) {
-      onAskRalf(entry);
+      askPlain();
       return;
     }
-    onAskRalf(entry, rideComparePrompt(rideReviewFactsFromEntry(entry, horse), comparisonForRalf(compared, shownScope, words), question));
+    withEffort((line) =>
+      onAskRalf(
+        entry,
+        rideComparePrompt(rideReviewFactsFromEntry(entry, horse), comparisonForRalf(compared, shownScope, words), question),
+        rideEffortForRalf(line)
+      )
+    );
   };
+  // Only this ride's heart rate goes, never the other rides'.
+  const ralfGets = compared
+    ? effortSent
+      ? `Ralf gets this ride with your ${effortSent}, and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}.`
+      : `Ralf gets this ride and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}.`
+    : "";
   const difference = compared && compared.averageMinutes !== null ? compared.minutes - compared.averageMinutes : 0;
   // The question is about this ride's own weekday, the one it is usually ridden on.
   const rideDay = localDayOf(entry.startedAt);
@@ -594,6 +682,10 @@ function RideDetail({
 
       <PhasesCard entry={entry} comparison={comparison} />
 
+      {appleHealth ? (
+        <RideEffortCard entry={entry} effort={effort} horse={horse} onManage={onManageHealth} ralfGetsEffort={ralfGetsEffort} />
+      ) : null}
+
       {week ? <RideWeekCard week={week} streak={streak} horse={horse} onOpenDay={onOpenDay} /> : null}
 
       {onRepeat ? (
@@ -658,14 +750,14 @@ function RideDetail({
             testID={`ride-journal-ask-ralf-${entry.id}`}
             accessibilityRole="button"
             accessibilityLabel="Ask Ralf what changed"
-            accessibilityHint={`Ralf gets this ride and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}.`}
+            accessibilityHint={ralfGets}
             onPress={() => askAbout(`What changed, and what should my next ${nextRide} look like?`)}
             style={styles.ralfRow}
           >
             <RalfMedal size={36} ring={equinaTheme.surfaces.raised} />
             <View style={styles.ralfCopy}>
               <Text style={styles.title}>Ask Ralf what changed</Text>
-              <Text style={styles.meta}>{`Ralf gets this ride and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}.`}</Text>
+              <Text style={styles.meta}>{ralfGets}</Text>
             </View>
             <ChevronRight size={18} color={equinaTheme.text.tertiary} />
           </MotionPressable>
@@ -693,9 +785,13 @@ function RideDetail({
             testID={`ride-journal-ask-ralf-${entry.id}`}
             label="Ask Ralf about this ride"
             variant="secondary"
-            onPress={() => onAskRalf(entry)}
+            onPress={askPlain}
           />
-          <Text style={styles.askHint}>What went well, and the one thing to work on next time.</Text>
+          <Text style={styles.askHint}>
+            {effortSent
+              ? `What went well, and the one thing to work on next time. Ralf gets your ${effortSent} too.`
+              : "What went well, and the one thing to work on next time."}
+          </Text>
         </View>
       ) : null}
 
@@ -797,7 +893,9 @@ function RideDetail({
         </MotionPressable>
       ) : (
         <View style={styles.confirm}>
-          <Text style={styles.confirmText}>Delete this {kind}? It leaves your journal for good.</Text>
+          <Text style={styles.confirmText}>
+            {`Delete this ${kind}? It leaves your journal for good.${appleHealth && !manual ? " Any copy in Apple Health stays there." : ""}`}
+          </Text>
           {deleteError ? <Text accessibilityRole="alert" style={styles.error}>{deleteError}</Text> : null}
           <View style={styles.confirmActions}>
             <MotionPressable

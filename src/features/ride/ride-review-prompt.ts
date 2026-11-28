@@ -15,6 +15,8 @@ import { rideTrainingLabel } from "./ride-plan";
 export const RIDE_REVIEW_PROMPT_LIMIT = 2900;
 /** As much of a rider's note as Ralf reads from the journal on his own. */
 export const RIDE_REVIEW_NOTE_LIMIT = 400;
+/** The heart-rate line travels beside the question; coach-chat refuses one over 400 characters. */
+export const RIDE_REVIEW_EFFORT_LIMIT = 400;
 
 export type RideReviewFacts = {
   /** "Pole work", or the discipline for rides from before the setup sheet. */
@@ -43,6 +45,19 @@ export const rideMinutesLabel = (seconds: number) =>
 // coach-chat cannot save a message holding it (Postgres refuses it as JSON),
 // so the question would fail on that ride every time.
 const cutAt = (text: string, limit: number) => text.slice(0, limit).replace(/[\uD800-\uDBFF]$/, "");
+
+/**
+ * The rider's heart rate and calories for a ride (effortForRalf,
+ * src/features/health/ride-effort.ts), as it is sent beside the question,
+ * never inside it: the question is what Ralf's history keeps, and the heart
+ * rate is never kept by Equina. One line, never over the server's limit.
+ * Undefined for no line, or a blank one.
+ */
+export const rideEffortForRalf = (line?: string | null): string | undefined => {
+  const single = line?.replace(/\s+/g, " ").trim();
+  if (!single) return undefined;
+  return single.length > RIDE_REVIEW_EFFORT_LIMIT ? `${cutAt(single, RIDE_REVIEW_EFFORT_LIMIT - 3).trim()}...` : single;
+};
 
 export const rideReviewFactsFromEntry = (entry: RideEntry, horseName?: string): RideReviewFacts => ({
   training: rideTrainingLabel(entry.trainingType) ?? disciplineLabel(entry.discipline),

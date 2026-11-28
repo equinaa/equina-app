@@ -487,7 +487,9 @@ else process.env.TZ = machineZone;
   assert.match(setup, /requestedDay && requestedDay > openingToday \? requestedStart \?\? 9 \* 60 : opening\.startMinutes/);
 
   // Ralf gets the comparison in the message, and the journal closes first.
-  assert.match(sheet, /rideComparePrompt\(rideReviewFactsFromEntry\(entry, horse\), comparisonForRalf\(compared, shownScope, words\), question\)/);
+  // The rider's heart rate, after a yes, goes beside it and never in it
+  // (tests/coach-ride-effort.test.ts).
+  assert.match(sheet, /rideComparePrompt\(rideReviewFactsFromEntry\(entry, horse\), comparisonForRalf\(compared, shownScope, words\), question\),\s+rideEffortForRalf\(line\)/);
   assert.match(app, /prompt \?\? rideReviewPrompt\(rideReviewFactsFromEntry\(entry, horseId \? horseNames\[horseId\] : undefined\)\)/);
   assert.match(app, /onAskRalf=\{ralfAvailable \? reviewJournalRideWithRalf : undefined\}/, "No Ralf, no card.");
   assert.match(app, /onOpenDay=\{\(day\) => \{\s+setRideJournalOpen\(false\);\s+rideJournal\.clearError\(\);\s+setCalendarDay\(day\);/);

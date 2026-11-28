@@ -37,6 +37,13 @@ export type CoachContextAllowance = {
    * reads "Send only the current question".
    */
   conversationSettings: boolean;
+  /**
+   * The ride's heart rate and calories the phone sent with this question,
+   * after the rider's yes on it. Held back by "Minimal context" like the
+   * rest, whatever the phone sent: a phone whose copy of the switch is out
+   * of date (turned on from the web or another phone) is not trusted for it.
+   */
+  rideEffort: boolean;
 };
 
 /**
@@ -44,7 +51,8 @@ export type CoachContextAllowance = {
  *   sources on, "Minimal context" off.
  * - "Minimal context" wins over the other three, whatever they hold: Account
  *   greys them out while it is on, and keeps their values. It also holds back
- *   the conversation's settings, so the question is all that is sent.
+ *   the conversation's settings and the ride's heart rate, so the question
+ *   is all that is sent.
  * - Rides are those of the horse the conversation is about, never every
  *   horse's. A conversation with no horse (a rider who has none, or a question
  *   about a ride that had none) reads the rides logged with no horse, so one
@@ -57,7 +65,7 @@ export const coachContextFor = (
   conversationHorseId: string | null | undefined,
 ): CoachContextAllowance => {
   if (switches?.reduced_personalization) {
-    return { riderProfile: false, horseId: null, rides: null, conversationSettings: false };
+    return { riderProfile: false, horseId: null, rides: null, conversationSettings: false, rideEffort: false };
   }
   const horseId = conversationHorseId || null;
   return {
@@ -65,5 +73,6 @@ export const coachContextFor = (
     horseId: switches?.use_selected_horse !== false ? horseId : null,
     rides: switches?.use_ride_history !== false ? { horseId } : null,
     conversationSettings: true,
+    rideEffort: true,
   };
 };

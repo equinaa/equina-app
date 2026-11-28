@@ -13,8 +13,10 @@ assert.equal(
 );
 assert.doesNotMatch(ralfAiNotice, /!/);
 
-// The owner has not approved naming the provider, in this line or anywhere
-// else a rider can read.
+// The provider is never named, in this line or anywhere else a rider can
+// read. The owner decided it again for the question that asks whether the
+// rider's heart rate may go to Ralf, and for its switch in Account
+// (2026-11-28): they say "the AI service that writes Ralf's answers".
 const providerNames = /\b(anthropic|claude|openai|chatgpt|gpt-?\d|gemini|mistral|llama|deepseek|grok)\b/i;
 assert.doesNotMatch(ralfAiNotice, providerNames);
 const clientSources = (directory: string): string[] =>
@@ -22,9 +24,24 @@ const clientSources = (directory: string): string[] =>
     const path = join(directory, name);
     return statSync(path).isDirectory() ? clientSources(path) : /\.(ts|tsx)$/.test(name) ? [path] : [];
   });
-for (const path of clientSources(join(root, "src"))) {
+const scanned = clientSources(join(root, "src"));
+for (const path of scanned) {
   assert.doesNotMatch(readFileSync(path, "utf8"), providerNames, `${relative(root, path)} names an AI provider.`);
 }
+// Where the rider decides about their heart rate is read with the rest: every
+// Apple Health file, the Account screen with the switch, and the ride sheet
+// that asks the question.
+const healthSources = clientSources(join(root, "src", "features", "health"));
+assert.ok(healthSources.some((path) => path.endsWith("ride-effort.ts")), "The heart-rate question is in src/features/health.");
+for (const path of [
+  ...healthSources,
+  join(root, "src", "features", "account", "AccountScreen.tsx"),
+  join(root, "src", "features", "ride", "RideJournalSheet.tsx")
+]) {
+  assert.ok(scanned.includes(path), `${relative(root, path)} is read for an AI provider's name.`);
+}
+// iOS shows the purpose strings in app.json in its own dialogs, Apple Health's among them.
+assert.doesNotMatch(readFileSync(join(root, "app.json"), "utf8"), providerNames, "app.json names an AI provider.");
 
 // It sits in the empty state, where a conversation starts. The demo answers on
 // the device and sends nothing, so it does not claim to.

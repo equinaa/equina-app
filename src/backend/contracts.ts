@@ -129,6 +129,26 @@ export type CoachMessageRecord = {
   createdAt: string;
 };
 
+/** One question to coach-chat. */
+export type CoachSendInput = {
+  conversationId?: string;
+  selectedHorseId?: string;
+  /** The question, as the chat shows it and Ralf's history keeps it. */
+  message: string;
+  clientNonce: string;
+  context: { focus: string; load: string; style: string };
+  /**
+   * The rider's own effort numbers for the ride asked about (average and
+   * highest pulse, calories), after the rider's yes on the phone. coach-chat
+   * gives them to the model with this one question and saves them nowhere;
+   * a server from before the field drops it unread. At most 400 characters.
+   */
+  rideEffort?: string;
+};
+
+/** coach-chat refuses a rideEffort longer than this. */
+export const COACH_EFFORT_LIMIT = 400;
+
 export type CoachSendResult = {
   conversation: CoachConversationRecord;
   userMessage: CoachMessageRecord;
