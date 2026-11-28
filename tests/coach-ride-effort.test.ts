@@ -319,13 +319,13 @@ const coachChat = read("supabase/functions/coach-chat/index.ts");
     `Repita a transição para galope 10 vezes e deixe a frequência cardíaca acalmar entre elas.\n\n${EFFORT_LEFT_OUT.pt}`
   );
 
-  // A score is a score: points are one of the figures only in a sentence
-  // about the heart or energy. Elsewhere they stay, even near a difference
-  // between two of the block's heart rates (168 - 142 = 26, 160 - 141 = 19):
-  // RIDE_EFFORT_RULE is what asks for a difference in words.
+  // A score is a score: points and percents in a sentence with a score word
+  // stay, even near a difference between two of the block's heart rates (168
+  // - 142 = 26, 160 - 141 = 19). Without one, points are read as no unit, so
+  // a heart-rate difference written in points goes.
+  assert.equal(scrub("Your canter was about 20 points higher than your trot.", walkTrot), leftOut);
   for (const [reply, language] of [
     ["Your dressage score went up 25 points since last month.", "en"],
-    ["Your canter was about 20 points higher than your trot.", "en"],
     ["A sua nota de dressage subiu 25 pontos desde o mês passado.", "pt"],
     ["A sua nota no galope ficou 20 pontos acima do trote.", "pt"],
     ["Tu nota de doma subió 25 puntos desde el mes pasado.", "es"],
@@ -380,6 +380,355 @@ const coachChat = read("supabase/functions/coach-chat/index.ts");
   // Spelled-out numbers cannot be told reliably: RIDE_EFFORT_RULE forbids them,
   // and the consent says Ralf is asked not to repeat them.
   assert.match(RIDE_EFFORT_RULE, /in digits or in words/);
+
+  // --- One rule: every number's unit kind first (fix round 4) -----------------------
+  // The kind comes from the words after the number, or, with none, from its
+  // shape or the words before it. Only a number with no unit is judged by
+  // the sentence. Each pair below is a reply the scrub once got wrong.
+  type Language = NonNullable<Parameters<typeof replyWithoutEffortNumbers>[2]>;
+  const full = "My heart rate from Apple Health (mine, not my horse's): average 142 bpm, highest 171 bpm, active energy 310 kcal. By phase: Walk 101, Trot 145, Canter 171 bpm.";
+  const calories = "My active energy from Apple Health (mine, not my horse's): 45 kcal.";
+  const stays = (block: string, language: Language, ...replies: string[]) => {
+    for (const reply of replies) assert.equal(scrub(reply, block, language), reply, reply);
+  };
+  const goes = (block: string, language: Language, ...replies: string[]) => {
+    for (const reply of replies) assert.equal(scrub(reply, block, language), EFFORT_LEFT_OUT[language], reply);
+  };
+
+  // A gait's beats, a knocked pole and "every 10 minutes" are counts and times.
+  stays(full, "en",
+    "Count the 3 beats of the canter out loud; it keeps your breathing steady too.",
+    "Keep a clear 4-beat walk for the first 15 minutes.",
+    "Tips:\n- Keep a clear 4-beat walk for the first 15 minutes.\n- Count the 3 beats of the canter out loud.\n\nThen ride 2 laps of canter on each rein.");
+  stays(full, "pt",
+    "O cavalo bateu 2 vezes na mesma vara, por isso baixe-a para 60 cm.",
+    "Hoje ele bateu 3 varas no percurso de 1,10 m; é normal no início.");
+  stays(full, "hu", "Tarts szünetet 10 percenként, hogy a légzésed megnyugodjon.");
+  stays(walkTrot, "en",
+    "Keep a clear 3-beat canter and count out loud.",
+    "The walk has 4 beats; keep all of them even.",
+    "Listen for 2 beats in the trot before you rise.",
+    "Check your position 2 or 3 times a minute in the canter.",
+    "Give a half-halt about 4 times per minute.",
+    "Count the canter beat 3 times, then ask for the walk.");
+  stays(walkTrot, "pt",
+    "O galope tem 3 batimentos; conte-os em voz alta.",
+    "Faça uma meia-paragem umas 4 vezes por minuto.",
+    "Ele bateu 2 vezes na vara, por isso baixe a altura para 80 cm.",
+    "Quando ele bate 2 vezes seguidas na vara, baixe a altura.");
+  stays(walkTrot, "ro", "Galopul are 3 bătăi; numără-le cu voce tare.", "Calul a bătut de 2 ori bara, așa că coboară obstacolul.");
+  // But times counted after a heart's beat are beats, whatever stands between.
+  goes(walkTrot, "en",
+    "Your heart beat more than 160 times in the canter.",
+    "Your heart beat over 160 times in the canter.",
+    "Your heart beat close to 160 times in the canter.",
+    "Your heart beat up to 168 times at the peak.",
+    "Your heart rate went 160 x in the canter.",
+    "Your heart rate reached 160x in the canter.");
+  goes(walkTrot, "pt", "O seu coração bateu mais de 160 vezes no galope.");
+  goes(walkTrot, "es", "Tu corazón latió más de 160 veces en el galope.");
+  goes(walkTrot, "ro", "Inima ta a bătut de peste 160 de ori la galop.");
+  goes(walkTrot, "hu", "A szíved 160-szor vert a vágtában.", "A szíved percenként 160-szor vert a vágtában.");
+
+  // Idioms, hours, heat, the horse's or a feed's energy, and Hungarian
+  // "szívd be" (breathe in) and "szívesen" (gladly) do not name the rider's heart.
+  stays(full, "en",
+    "Learn Prelim 12 by heart before Saturday's show.",
+    "Book a 1 hr lesson for 10 am on Saturday.",
+    "Lesson 12 is all about energy and rhythm.",
+    "Choose a feed under 10 MJ of digestible energy per kg.");
+  stays(full, "pt",
+    "Com este calor, monte antes das 10 da manhã e encurte o galope.",
+    "Com este calor, dê-lhe acesso a 30 litros de água fresca depois do treino.",
+    "Na arena de 20 x 40, mantenha a energia do cavalo para a frente.");
+  stays(full, "es", "Con este calor, monta antes de las 10 de la mañana.", "En la pista de 20 x 40, mantén la energía del caballo hacia delante.");
+  stays(full, "ro", "În manejul de 20 x 40, păstrează energia calului înainte.");
+  stays(full, "hu", "Szívd be a levegőt, és számolj 10-ig, mielőtt vágtát kérsz.", "Szívesen segítek a 12. leckében is.");
+
+  // Breaths, steps, intervals, sets of 10, degrees, hands and "1 min 30" are
+  // counts, times and measures, also where the heart is named.
+  stays(full, "en",
+    "Take 10 slow breaths at the halt and let your heart rate settle.",
+    "Walk 20 steps on a loose rein, then notice how your heart feels.",
+    "Ride 12 canter intervals of 30 seconds and let your heart rate settle in walk between them.",
+    "Do 3 sets of 10, and let your heart rate come down between sets.",
+    "Walk for 10 full minutes after the last canter so your heart rate can come down.",
+    "Over 30°C, shorten the canter and let your heart rate settle in the shade.",
+    "Your 16.2 hh horse has a big canter, so let your heart rate settle between rounds.",
+    "Walk for 1 min 30 after each canter and let your heart rate come down.");
+  stays(full, "pt", "Faça 10 respirações lentas na paragem e deixe o coração acalmar.", "Faça 3 séries de 10 e deixe o coração acalmar entre elas.");
+  stays(full, "es",
+    "Haz 10 respiraciones lentas en la parada y deja que tu corazón se calme.",
+    "Haz 3 series de 10 y deja que el corazón se calme entre ellas.",
+    "Con más de 30 °C, acorta el galope y deja que tu corazón se recupere.");
+  stays(full, "ro", "Fă 10 respirații lente la oprire și lasă inima să se liniștească.", "Fă 3 serii de 10 și lasă pulsul să coboare între ele.");
+  stays(full, "hu", "Vegyél 10 lassú levegőt megálláskor, és hagyd, hogy a szíved megnyugodjon.");
+
+  // Labels, clock times, dates and years.
+  stays(full, "en",
+    "Week 12 of your plan keeps the canter short, so your heart rate stays easy.",
+    "Ride at 10.30 tomorrow, when it is cooler, and see if your heart rate settles faster.",
+    "Ride again on 17 May and check whether your heart rate settles faster.",
+    "At the next show on 14/12, let your heart rate settle before you go in.",
+    "This is the 2026 season's last show, so keep your heart rate easy in the warm-up.");
+  stays(full, "pt",
+    "Na aula 12 vamos trabalhar a respiração e a frequência cardíaca no galope.",
+    "Amanhã às 18h30, faça o aquecimento e repare como o coração acalma mais depressa.",
+    "O próximo concurso é a 6 de dezembro de 2026; até lá, cuide da sua frequência cardíaca no galope.");
+  stays(full, "es",
+    "En la clase 12 trabajaremos la respiración y la frecuencia cardíaca en el galope.",
+    "El próximo concurso es el 6 de diciembre de 2026; hasta entonces, vigila tu pulso en el galope.");
+  stays(full, "ro",
+    "În lecția 12 lucrăm la respirație și la puls în galop.",
+    "Mâine la ora 18, fă încălzirea și observă cât de repede se liniștește inima.",
+    "Următorul concurs e pe 17 mai; până atunci, urmărește-ți pulsul la galop.");
+  stays(full, "hu",
+    "A 12. leckében a pulzusodat figyeljük vágtában.",
+    "A következő verseny 2026. december 6-án lesz; addig figyeld a pulzusodat vágtában.");
+  // "cu 26 mai sus" is still "more", and "140 may be" still a heart rate.
+  assert.equal(scrub("La galop ai fost cu 26 mai sus decât la trap.", full, "ro"), EFFORT_LEFT_OUT.ro);
+  goes(full, "en", "Your trot at 140 may be a little high.");
+
+  // An arena's "20 x 40" is a size, with or without spaces; "160x3" is not.
+  stays(full, "en", "Use the 20 x 40 arena and let your heart rate settle on each long side.");
+  stays(calories, "en", "Use the 20 x 40 arena for the trot work.");
+  stays(calories, "pt", "Use o picadeiro de 20 x 40 para o trabalho a trote.");
+  stays(walkTrot, "en", "Use the 20 x 40 arena for the warm-up.", "Your heart rate settled quickly in the 20 x 40 arena.");
+  goes(walkTrot, "en", "Your HR hit 160x3 in the canter.");
+
+  // Show classes, grams, millilitres, litres, kilos and scores are not figures,
+  // even near one (300 kilos, 310 kcal; 40 to 50 litres, 45 kcal).
+  stays(full, "en",
+    "You're ready to enter the 110 class at the next show on 14 December.",
+    "Add 100 g of linseed to his evening feed.",
+    "Add 150 ml of oil to her feed over 2 weeks.",
+    "A pony of about 300 kilos needs around 6 kg of hay a day.",
+    "He dropped about 25 kilos over winter, so add 1 kg of hay a day.");
+  stays(full, "pt",
+    "Já está pronta para a prova de 110 no concurso de dezembro.",
+    "Junte 100 g de linhaça à ração da noite.",
+    "Baixou cerca de 25 quilos no inverno, por isso junte 1 kg de feno por dia.");
+  stays(full, "es",
+    "Ya estás lista para la prueba de 110 en el concurso de diciembre.",
+    "Añade 100 g de linaza a la ración de la noche.",
+    "Bajó 25 kilos este invierno, así que súbele el heno a 9 kg al día.");
+  stays(full, "ro",
+    "Ești gata pentru proba de 110 la concursul din decembrie.",
+    "Adaugă 100 g de semințe de in la rația de seară.",
+    "A scăzut cu 25 de kilograme iarna asta, așa că mărește fânul la 9 kg pe zi.");
+  stays(full, "hu", "Készen állsz a 110-es pályára a decemberi versenyen.", "Tegyél 100 g lenmagot az esti abrakba.");
+  stays(calories, "en",
+    "Your horse needs 40 to 50 litres of water a day in this heat.",
+    "You finished on a dressage score of 44.5, your best yet.",
+    "Give him 50 g of salt a day in summer.");
+  stays(calories, "pt", "No calor, o cavalo precisa de 40 a 50 litros de água por dia.");
+  stays(calories, "es", "Con el calor, el caballo necesita de 40 a 50 litros de agua al día.");
+  stays(calories, "ro", "Pe căldură, calul are nevoie de 40-50 de litri de apă pe zi.");
+  stays(calories, "hu", "Melegben a lónak napi 40-50 liter víz kell.");
+  // A score word keeps its points a score, also beside the heart.
+  stays(full, "en", "Your score was 68 points, and your heart rate settled faster than last week.");
+  stays(full, "pt", "A sua nota foi de 68 pontos e a frequência cardíaca acalmou mais depressa do que na semana passada.");
+  // Left as it was, for leak safety (owner's call): "beats per minute" is
+  // always a heart rate, a metronome's too.
+  assert.equal(scrub("Use a metronome set to 100 beats per minute to keep the trot rhythm.", full), leftOut);
+
+  // A number takes the next one's unit only across a real range or list of
+  // one size: a figure followed by a time, a count or a share is a figure.
+  goes(full, "en",
+    "Your heart rate peaked at 171, 5 minutes into the canter.",
+    "You hit 171 and 2 minutes of walk brought it back down.",
+    "Your peak was 171 — 95% of your max.",
+    "- Canter: 171 / 3 min",
+    "You peaked at 171 - 5 minutes before the end.",
+    "Your average was 142, 45 minutes in total.",
+    "You burned 310, 45 minutes of steady work.",
+    "You peaked at 171, 26 points above the trot.");
+  goes(full, "pt", "A tua frequência cardíaca chegou a 171, 5 minutos depois de começares o galope.", "Chegaste a 171 a 5 minutos do fim do galope.");
+  goes(full, "es", "Tus pulsaciones llegaron a 171, 5 minutos después de empezar el galope.", "Llegaste a 171 a 5 minutos del final.");
+  goes(full, "ro", "Pulsul a ajuns la 171, la 5 minute după începutul galopului.", "Ai ajuns la 171 și 2 minute de pas te-au calmat.");
+  goes(full, "hu", "Csúcs: 171, 5 perccel a vágta kezdete után.", "A csúcs 171 és 2 perc lépés után visszaesett.");
+  goes(walkTrot, "en",
+    "Your heart rate went over 160 3 times in the canter.",
+    "Your heart rate topped 160, 3 times in the canter.",
+    "The canter averaged 160, 19 points above the trot.",
+    "Your heart rate peaked at 168, 2 minutes into the canter.",
+    "Your heart rate climbed to 168 — 10 minutes into the canter.",
+    "Your heart rate hit 168 and 2 minutes later it was back down.",
+    "You peaked at 168, 20 m before the last fence.",
+    "You burned 45, 3 times what you burned last week.");
+  goes(walkTrot, "pt", "A sua frequência cardíaca passou de 160 3 vezes no galope.", "A frequência cardíaca chegou a 168 a 2 minutos do fim do galope.");
+  goes(walkTrot, "ro", "Pulsul a ajuns la 168 la 2 minute după galop.");
+  goes(walkTrot, "es", "Tu frecuencia cardíaca llegó a 168, 2 minutos después del galope.");
+
+  // Hungarian "körül" (around) is not a lap, "lépésben" (in walk) not steps.
+  goes(full, "hu",
+    "A pulzusod 140 körül volt ügetésben.",
+    "Az átlagod 142 körül volt.",
+    "Nagyjából 140 körül voltál az ügetésben.",
+    "Vágtában 170 körüli értékeket mértél.",
+    "Az energiád 300 körül volt.",
+    "A pulzusod 101 lépésben, ami nyugodt.");
+
+  // A share of the rider's maximum, and a percent that compares in a
+  // sentence about the heart, are figures; a share of the ride is not.
+  goes(full, "en",
+    "Your average heart rate was about 83% of your peak.",
+    "You spent the trot at roughly 85% of your max.",
+    "Your heart rate was 18% higher in the canter than in the trot.",
+    "You rode the trot at 85 percent of your maximum heart rate.",
+    "Keep the trot around 80% HRmax.");
+  goes(full, "pt", "A tua média foi cerca de 83% da tua frequência máxima.", "Ficaste a 85% do teu máximo no trote.");
+  goes(full, "es", "Tu media fue cerca del 83% de tu máximo.");
+  goes(full, "ro", "Media ta a fost cam 83% din pulsul maxim.");
+  goes(full, "hu", "Az átlagod a maximum körülbelül 83%-a volt.");
+  goes(walkTrot, "en", "Your heart rate was about 13% higher in the canter than in the trot.");
+  goes(walkTrot, "pt", "A sua frequência cardíaca ficou cerca de 13% mais alta no galope do que no trote.");
+  stays(full, "en", "Spend about 20% of the ride in canter.", "Gallop at 75% of maximum speed for the last 400 m.");
+  stays(full, "pt", "Passe cerca de 20% do treino a galope.");
+
+  // A difference, however it is written: other verbs, a sign, bold, lists, tables.
+  goes(full, "en",
+    "From trot to canter it jumped 26.",
+    "It spiked by 26 when you picked up the canter.",
+    "The canter gained 26 on the trot.",
+    "The canter ran 26 over the trot.",
+    "There was a jump of 26 between trot and canter.",
+    "The canter was the hardest part (+26 on the trot).",
+    "The canter came in **26** higher than the trot.",
+    "Change between phases:\n- Walk to trot: +44\n- Trot to canter: +26",
+    "| Walk → Trot | +44 |\n| Trot → Canter | +26 |",
+    "Your canter showed a 26-point jump over the trot.");
+  goes(full, "pt", "No galope ficaste 26 a mais do que no trote.", "Do passo para o galope deste um salto de 70.");
+  goes(full, "es", "Hubo un salto de 26 entre el trote y el galope.");
+  goes(full, "ro", "Galopul a fost cu 26 peste trap.", "A fost un salt de 26 între trap și galop.");
+  goes(full, "hu", "Vágtában az érték 26-tal nőtt az ügetéshez képest.");
+  // Points with no score word are read as no unit, so a difference in points goes.
+  goes(walkTrot, "en", "The canter was 19 points higher than the trot.", "From trot to canter you went up about 19 points.");
+  goes(walkTrot, "pt", "O galope ficou 19 pontos acima do trote.");
+
+  // Glued to "max", "avg" or "Ø", or with "HR" after it, a number is a heart rate.
+  goes(full, "en",
+    "Your canter hit max171 bpm.",
+    "Ø142 bpm over the whole ride.",
+    "Summary: avg142, max171.",
+    "You touched 171 HR at the top of the canter.",
+    "Max 171 HR in the canter.",
+    "Your 142 HR average was steady.");
+  goes(full, "pt", "Resumo: méd142, máx171.", "Chegaste a 171 FC no galope.");
+  // A bound in heart-rate range, however far from the block's figures.
+  goes(full, "en",
+    "Aim to stay below 130 in the trot next time.",
+    "Try not to go past 160 in the canter.",
+    "You were over 160 for most of the canter.");
+  goes(full, "pt", "Tenta não passar dos 160 no galope.", "Fica abaixo de 130 no trote.");
+  goes(full, "hu", "Próbálj ügetésben 125 alatt maradni.");
+  // Kilojoules spelled out.
+  goes(full, "en", "That works out to roughly 1297 kilojoules.");
+  goes(full, "pt", "Isso dá cerca de 1297 quilojoules.");
+
+  // In a sentence about the heart, a number below 40 stays when the word
+  // after it names what it counts, and goes when nothing is counted.
+  stays(walkTrot, "en",
+    "Your heart rate climbed in the canter, so ride 10 downward transitions first.",
+    "Your heart rate climbed in the canter, so ride 10 upward transitions first.",
+    "Your heart rate stayed steady over 12 ground poles.",
+    "Your heart rate rose, so ride 12 smooth transitions to settle.",
+    "Your heart rate rose, so add 15 forward strides in trot.",
+    "Your heart rate was high, so walk for 20 full minutes.",
+    "Your heart rate rose; walk 10 or so minutes.",
+    "Your heart rate was high, so do 10 slow, quiet transitions.",
+    "Let your heart rate settle in walk, then count to 10 before you pick up the trot.",
+    "Your heart rate was highest at fence 12, so give him a breather there next time.",
+    "Keep the energy up until fence 12, then let him come back.",
+    "With your heart rate steadier, your test score rose 12 points.");
+  stays(walkTrot, "pt",
+    "Com este calor, faça séries de 10 e descanse à sombra.",
+    "A frequência cardíaca subiu, por isso faça 10 transições descendentes.");
+  stays(walkTrot, "es", "Con este calor, haz series de 10 y descansa a la sombra.");
+  stays(walkTrot, "hu", "A pulzusod emelkedett, ezért csinálj 10 lefelé átmenetet.");
+  goes(full, "en",
+    "The trot-to-canter change in your heart rate was 26.",
+    "Your heart rate recovery was 30 in the first minute.",
+    "Your heart rate stayed within 10 of your average.",
+    "Your heart rate rose a further 26 in the canter.",
+    "It took 2 minutes for your heart rate to drop 30.",
+    "Your heart rate climbed by a further 26.",
+    "Your heart rate was 26 more in the canter than in the trot.");
+  goes(full, "pt", "A sua frequência cardíaca subiu mais 26 no galope.");
+  goes(full, "es", "Tu frecuencia cardíaca subió otros 26 en el galope.");
+
+  // A sentence that starts with a figure is judged on its own, so the step
+  // before it stays, in every language.
+  for (const [reply, step, language] of [
+    ["Walk for 10 minutes to cool down. 142 bpm was your average.", "Walk for 10 minutes to cool down.", "en"],
+    ["Ride 3 sets of 5 transitions on each rein. 171 was your peak in the canter.", "Ride 3 sets of 5 transitions on each rein.", "en"],
+    ["Faz 10 minutos de passo no fim. 171 bpm foi o teu pico.", "Faz 10 minutos de passo no fim.", "pt"],
+    ["Faz 10 minutos de passo no fim. 171 foi o teu pico no galope.", "Faz 10 minutos de passo no fim.", "pt"],
+    ["Camina 10 minutos al final. 310 kcal fue el gasto.", "Camina 10 minutos al final.", "es"],
+    ["Fă 10 minute la pas la final. 171 a fost vârful.", "Fă 10 minute la pas la final.", "ro"],
+    ["Lovagolj még 10 percet lépésben. 171 volt a csúcs.", "Lovagolj még 10 percet lépésben.", "hu"],
+    ["Lovagolj még 10 percet lépésben. 310 kcal-t égettél el.", "Lovagolj még 10 percet lépésben.", "hu"]
+  ] as const) {
+    assert.equal(scrub(reply, full, language), `${step}\n\n${EFFORT_LEFT_OUT[language]}`, reply);
+  }
+  // "approx. 10 min" is one sentence, not two.
+  assert.equal(scrub("Walk approx. 10 min. Your heart rate was approx. 142 bpm. Then trot.", full), `Walk approx. 10 min. Then trot.\n\n${leftOut}`);
+
+  // A table, a heading or a bold line left with nothing under it goes too.
+  for (const [shape, language] of [
+    ["| Phase | Avg HR |\n|---|---|\n| Walk | 101 |\n| Trot | 145 |\n| Canter | 171 |", "en"],
+    ["| Fase | FC media |\n|---|---|\n| Paso | 101 |\n| Trote | 145 |\n| Galope | 171 |", "es"],
+    ["| Jármód | Pulzus |\n|---|---|\n| Lépés | 101 |\n| Ügetés | 145 |\n| Vágta | 171 |", "hu"],
+    ["**Your heart rate**\n- Walk: 101\n- Trot: 145\n- Canter: 171", "en"],
+    ["### Heart rate\nWalk 101, trot 145, canter 171.", "en"],
+    ["### Heart rate\n\nWalk 101, trot 145, canter 171.", "en"],
+    ["**A sua frequência cardíaca:**\n- Passo: 101\n- Trote: 145", "pt"],
+    ["### Frequência cardíaca\nPasso 101, trote 145, galope 171.", "pt"]
+  ] as const) {
+    assert.equal(
+      scrub(`Nice work today.\n\n${shape}\n\nNext ride, add 10 more minutes of walk.`, full, language),
+      `Nice work today.\n\nNext ride, add 10 more minutes of walk.\n\n${EFFORT_LEFT_OUT[language]}`,
+      shape
+    );
+  }
+  // A heading over what stays keeps it.
+  const kept = "### Next ride\nWalk 10 minutes, then trot.\n\nYour heart rate averaged 142 bpm.";
+  assert.equal(scrub(kept, full), `### Next ride\nWalk 10 minutes, then trot.\n\n${leftOut}`);
+
+  // Without Intl.Segmenter, a line splits after each full stop: nothing is
+  // lost, and the rider's credit is not spent on a failed save.
+  {
+    const intl = Intl as unknown as { Segmenter: unknown };
+    const segmenter = intl.Segmenter;
+    intl.Segmenter = class {
+      constructor() {
+        throw new RangeError("No sentence data.");
+      }
+    };
+    try {
+      assert.equal(scrub("Walk for 10 minutes. Your heart rate averaged 142 bpm. Then trot.", full), `Walk for 10 minutes. Then trot.\n\n${leftOut}`);
+      assert.equal(scrub("Ride 3 transitions every 20 minutes.", full), "Ride 3 transitions every 20 minutes.");
+    } finally {
+      intl.Segmenter = segmenter;
+    }
+  }
+
+  // The cut keeps coach_messages.body within 6000 characters and never ends
+  // on half of one written in two UTF-16 units.
+  {
+    const room = 6000 - leftOut.length - 2;
+    const long = `Your heart rate averaged 142 bpm.\n${"a".repeat(room - 1)}\u{1F40E}${"b".repeat(200)}`.slice(0, 6000);
+    const cut = scrub(long, full);
+    assert.ok(Array.from(cut).length <= 6000, "Within what coach_messages.body holds.");
+    assert.doesNotMatch(cut, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/, "No half character.");
+    assert.ok(cut.endsWith(`\u{1F40E}\n\n${leftOut}`));
+  }
+  // A long run of spaces is read in linear time.
+  {
+    const started = performance.now();
+    for (const space of [" ", " "]) scrub(`1${space.repeat(5998)}x`, full);
+    assert.ok(performance.now() - started < 200, "No backtracking over a run of spaces.");
+  }
 
   // A provider's error body, should it ever echo the request, is logged masked.
   assert.equal(maskEffortNumbers('{"error":"bad input: average 142 bpm, 310 kcal","max_tokens":600}', line), '{"error":"bad input: average # bpm, # kcal","max_tokens":600}');
