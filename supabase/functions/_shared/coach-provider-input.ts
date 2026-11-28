@@ -37,31 +37,55 @@ export const RIDE_EFFORT_RULE =
 // A space inside a sentence, a no-break one included ("142 bpm").
 const SP = String.raw`[   ]`;
 
-// The units that make a number a heart rate or an energy figure, in the
-// languages Ralf answers in (English, Portuguese, Spanish, Romanian,
-// Hungarian). "Times a minute" is a heart rate; "times" alone is a count.
+// Every number has a unit kind, read from the words right after it (see
+// holdsEffort). These are the units of each kind, in the languages Ralf
+// answers in (English, Portuguese, Spanish, Romanian, Hungarian).
+// Heart rate. "Times a minute" is a heart rate; "times" alone is a count.
 const HEART_UNIT = String.raw`(?:bpm|ppm|lpm|b\/min|\/${SP}*(?:min\p{L}*|perc)|(?:heart)?beats?|batimentos?|latidos?|pulsaciones|pulsa[țţt]ii|b[ăa]t[ăa]i|ütés\p{L}*|(?:times?|vezes|veces|ori|sz[oöe]r)${SP}+(?:(?:a|per|por|pe|each|every|cada)${SP}+)?minut\p{L}*|sz[oöe]r${SP}+percenként|percenként)`;
 const ENERGY_UNIT = String.raw`(?:kcal|kj|cal|kilo-?calor\p{L}*|quilocalor\p{L}*|calor\p{L}*|kilokalór\p{L}*|kalór\p{L}*)`;
-// The units that make it something else: time, distance, a count, a share.
-// "in" is left out on purpose: "140 in the trot" is a heart rate. A minute is
-// spelled out, so "150 minimum" and "150 min/max" are not minutes.
-const OTHER_UNIT = String.raw`(?:min(?:s|ut(?:e|es|o|os|ul|ele|i))?(?!\.?${SP}*\/${SP}*m[aá]x)|h|hrs?|hours?|horas?|ore|óra\p{L}*|perc\p{L}*|s|secs?|seconds?|segundos?|secunde|másodperc\p{L}*|m|mm|cm|km|ft|feet|foot|inches|metres?|meters?|metros?|metri|méter\p{L}*|yards?|strides?|foulées?|passadas?|passos?|pasos?|trancos?|pa[șş]i|lépés\p{L}*|%|percent|per${SP}?cent|por${SP}?cento|por${SP}?ciento|procent\p{L}*|százalék\p{L}*|points?|pontos?|puntos?|puncte|pont\p{L}*|weeks?|days?|semanas?|dias?|días|zile|săptămân\p{L}*|nap\p{L}*|hét\p{L}*|hete\p{L}*|months?|meses|luni|hónap\p{L}*|years?|anos?|años|ani|év\p{L}*|times?|vezes|veces|ori|x|×|sz[oöe]r|alkalommal|poles?|varas?|barras?|fences?|jumps?|obstáculos?|saltos?|obstacole|sărituri|akadály\p{L}*|ugrás\p{L}*|transitions?|transições|transiciones|tranzi[țţ]ii|átmenet\p{L}*|sets?|series|séries|reps?|repetitions?|repetições|repeticiones|repetări|ismétlés\p{L}*|laps?|voltas?|vueltas?|ture|tururi|kör\p{L}*|circles?|círculos?|cercuri|rides?|treinos?|entrenos?|entrenamientos?|antrenamente|sessions?|sessões|sesiones|sesiuni|edzés\p{L}*|lessons?|aulas?|clases|lecții|kg|lbs?|km\/h|mph|degrees?|graus|grados|grade|fok\p{L}*|°|st|nd|rd|th|º|ª)`;
-const COUNTS = /^(?:times?|vezes|veces|ori|x|×|sz[oöe]r|alkalommal)$/iu;
-// Points are a score, unless the sentence is about the heart or a difference
-// holds on to them: "about 20 points higher in the canter".
-const POINTS = String.raw`(?:points?|pontos?|puntos?|puncte|pont\p{L}*)`;
-const POINTS_ONLY = new RegExp(String.raw`^${POINTS}$`, "iu");
-// A word between the number and its unit: "10 more minutes", "15 fewer strides".
+// A score: "68 points".
+const POINTS_UNIT = String.raw`(?:points?|pontos?|puntos?|puncte|pont\p{L}*)`;
+const PACE_UNIT = String.raw`(?:km${SP}*\/${SP}*h|kph|mph|m${SP}*\/${SP}*(?:min|s))`;
+const PERCENT_UNIT = String.raw`(?:%|percent|per${SP}?cent|por${SP}?cento|por${SP}?ciento|procent\p{L}*|százalék\p{L}*)`;
+// A minute is spelled out, so "150 minimum" and "150 min/max" are not minutes.
+const TIME_UNIT = String.raw`(?:min(?:s|ut(?:e|es|o|os|ul|ele|i))?(?!\.?${SP}*\/${SP}*m[aá]x)|h|hrs?|hours?|horas?|ore|óra\p{L}*|perc\p{L}*|s|secs?|seconds?|segundos?|secunde|másodperc\p{L}*|weeks?|days?|semanas?|dias?|días|zile|săptămân\p{L}*|nap\p{L}*|hét\p{L}*|hete\p{L}*|months?|meses|luni|hónap\p{L}*|years?|anos?|años|ani|év\p{L}*)`;
+// Distance and height. "in" is left out on purpose: "140 in the trot" is a heart rate.
+const DISTANCE_UNIT = String.raw`(?:m|mm|cm|km|ft|feet|foot|inches|metres?|meters?|metros?|metri|méter\p{L}*|yards?)`;
+// A count, or a place in one: "10 times", "10x", "12 transitions", "the 3rd
+// fence". An "x" before a number is a product, not a count: in "160 x 3" the
+// 160 has no unit.
+const COUNT_UNIT = String.raw`(?:times?|vezes|veces|ori|[x×](?!${SP}*\d)|sz[oöe]r|alkalommal|strides?|foulées?|passadas?|passos?|pasos?|trancos?|pa[șş]i|lépés\p{L}*|poles?|varas?|barras?|fences?|jumps?|obstáculos?|saltos?|obstacole|sărituri|akadály\p{L}*|ugrás\p{L}*|transitions?|transições|transiciones|tranzi[țţ]ii|átmenet\p{L}*|sets?|series|séries|reps?|repetitions?|repetições|repeticiones|repetări|ismétlés\p{L}*|laps?|voltas?|vueltas?|ture|tururi|kör\p{L}*|circles?|círculos?|cercuri|rides?|treinos?|entrenos?|entrenamientos?|antrenamente|sessions?|sessões|sesiones|sesiuni|edzés\p{L}*|lessons?|aulas?|clases|lecții|st|nd|rd|th|º|ª)`;
+// Weight and angle.
+const MEASURE_UNIT = String.raw`(?:kg|lbs?|degrees?|graus|grados|grade|fok\p{L}*|°)`;
+// Words that may sit between a number and its unit and leave it the unit's: a
+// quantifier ("10 more minutes", "15 fewer strides"), a word that describes
+// what is counted ("20 easy minutes", "10 walk-trot transitions"), and
+// Romanian "de" ("20 de minute").
 const QUANTIFIER = String.raw`(?:more|fewer|less|extra|additional|other|mais|menos|más|[îi]n${SP}+plus|több|kevesebb)`;
+const GAIT_WORD = String.raw`(?:walk|trot|canter|gallop|halt|lépés|ügetés|vágta|galopp)`;
+const DESCRIBING = String.raw`(?:${GAIT_WORD}(?:-${GAIT_WORD})*|easy|slow|quiet|steady|calm|relaxed|gentle|short|long|light|könnyű|lassú|nyugodt|rövid|hosszú)`;
+const BETWEEN = String.raw`(?:(?:${QUANTIFIER}|${DESCRIBING}|de)${SP}+){0,2}`;
 // A date is not a figure: "17 November", "17 de novembro", "November 17".
 // May (and Romanian "mai", "more") is left out: "140 may be high" is one.
 const MONTH = String.raw`(?:january|february|march|april|june|july|august|september|october|november|december|janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|enero|febrero|marzo|mayo|junio|julio|septiembre|setiembre|octubre|noviembre|diciembre|ianuarie|februarie|martie|aprilie|iunie|iulie|septembrie|octombrie|noiembrie|decembrie|január|február|március|április|május|június|július|augusztus|szeptember|október)`;
 
-const unitAt = (pattern: string, quantified = true) =>
-  new RegExp(String.raw`^${SP}*-?${SP}*${quantified ? String.raw`(?:${QUANTIFIER}${SP}+)?` : ""}(${pattern})(?![\p{L}\p{N}])`, "iu");
-const HEART_AFTER = unitAt(HEART_UNIT);
-const ENERGY_AFTER = unitAt(ENERGY_UNIT);
-const OTHER_AFTER = unitAt(OTHER_UNIT);
+const unitAt = (pattern: string, between = true) =>
+  new RegExp(String.raw`^${SP}*-?${SP}*${between ? BETWEEN : ""}(?:${pattern})(?![\p{L}\p{N}])`, "iu");
+
+type UnitKind = "none" | "heart" | "energy" | "points" | "pace" | "percent" | "time" | "distance" | "count" | "measure" | "date";
+// In this order: "156 times a minute" is a heart rate before "times" is a
+// count, and "20 percent" a share before "perc" is a Hungarian minute.
+const UNITS: ReadonlyArray<readonly [UnitKind, RegExp]> = [
+  ["heart", unitAt(HEART_UNIT)],
+  ["energy", unitAt(ENERGY_UNIT)],
+  ["pace", unitAt(PACE_UNIT)],
+  ["percent", unitAt(PERCENT_UNIT)],
+  ["points", unitAt(POINTS_UNIT)],
+  ["time", unitAt(TIME_UNIT)],
+  ["distance", unitAt(DISTANCE_UNIT)],
+  ["count", unitAt(COUNT_UNIT)],
+  ["measure", unitAt(MEASURE_UNIT)],
+];
 const MONTH_AFTER = unitAt(String.raw`(?:de${SP}+)?${MONTH}`, false);
 const MONTH_BEFORE = new RegExp(String.raw`(?<![\p{L}])${MONTH}${SP}+$`, "iu");
 // A year is not a figure either: "in 2024", "desde 2023", "2024-ben".
@@ -73,13 +97,12 @@ const SIZE_AFTER = /^[x×]\d/u;
 const DECADE_AFTER = /^['’]?s(?![\p{L}\p{N}])/u;
 // "HR171", "FC142": a number glued to letters is a figure only after these.
 const HEART_PREFIX = /(?:^|[^\p{L}])(?:hr|fc|bpm|puls\p{L}*|pulzus\p{L}*)$/iu;
-// Words that make a number a difference, only when they hold on to it:
-// "about 20 higher than the trot", "20 points above", "20 more than", "rose
-// by 28", "climbed 28", "a gap of 20". The same words elsewhere in the
-// sentence are coaching: "add 10 more minutes", "keep the warm-up under 15",
-// "rise for 20 more".
+// Words that make a number with no unit a difference, only when they hold on
+// to it: "about 20 higher than the trot", "20 more than", "rose by 28",
+// "climbed 28", "a gap of 20". The same words elsewhere in the sentence are
+// coaching: "keep the warm-up under 15", "rise for 20 more".
 const COMPARED_AFTER = new RegExp(
-  String.raw`^(?:-\p{L}{1,4})?${SP}*(?:${POINTS}${SP}*)?(?:higher|lower|above|below|faster|slower|greater|(?:up|down)${SP}+(?:from|on)|(?:more|less|fewer)${SP}+than|mais${SP}+(?:alt|baix|rápid|lent)\p{L}*|(?:mais|menos)${SP}+(?:do${SP}+)?que|acima|abaixo|más${SP}+(?:alt|baj|rápid|lent)\p{L}*|(?:más|menos)${SP}+que|por${SP}+(?:encima|debajo)|mai${SP}+(?:mare|mic|sus|jos|ridicat|scăzut|rapid|lent)\p{L}*|mai${SP}+(?:mult|pu[țţt]in)${SP}+dec[âa]t|magasabb|alacsonyabb|nagyobb|kisebb|gyorsabb|lassabb)(?![\p{L}])`,
+  String.raw`^(?:-\p{L}{1,4})?${SP}*(?:higher|lower|above|below|faster|slower|greater|(?:up|down)${SP}+(?:from|on)|(?:more|less|fewer)${SP}+than|mais${SP}+(?:alt|baix|rápid|lent)\p{L}*|(?:mais|menos)${SP}+(?:do${SP}+)?que|acima|abaixo|más${SP}+(?:alt|baj|rápid|lent)\p{L}*|(?:más|menos)${SP}+que|por${SP}+(?:encima|debajo)|mai${SP}+(?:mare|mic|sus|jos|ridicat|scăzut|rapid|lent)\p{L}*|mai${SP}+(?:mult|pu[țţt]in)${SP}+dec[âa]t|magasabb|alacsonyabb|nagyobb|kisebb|gyorsabb|lassabb)(?![\p{L}])`,
   "iu",
 );
 // "rose 28", "went up by 28", "was up about 20", "subiu cerca de 28", "a crescut cu 28".
@@ -91,6 +114,12 @@ const DIFFERENCE = String.raw`(?:gap|difference|diferen[çc]a|diferencia|diferen
 const ABOUT = String.raw`(?:about|around|roughly|some|nearly|almost|just|only|cerca${SP}+de|uns|umas|unos|unas|aproximadamente|aprox\.?|circa|vreo|aproape|kb\.?|körülbelül|mintegy|közel)`;
 const COMPARED_BEFORE = new RegExp(
   String.raw`(?<![\p{L}])(?:${CHANGED}|${CHANGES_BY}|${DIFFERENCE})(?:${SP}+${ABOUT})?${SP}*~?${SP}*$`,
+  "iu",
+);
+// "Your heart beat about 160 times", "o coração bateu 160 vezes": the times a
+// heart beats are beats, a heart-rate unit, not a count.
+const BEAT_BEFORE = new RegExp(
+  String.raw`(?<![\p{L}])(?:beat|beats|beating|bateu|batia|batendo|bate|latió|latía|latiendo|bătut|bătea)(?:${SP}+(?:${ABOUT}|de))?${SP}+$`,
   "iu",
 );
 
@@ -123,6 +152,8 @@ type Token = {
   after: string;
   /** A word that makes it a difference holds on to it (COMPARED_AFTER, COMPARED_BEFORE). */
   compared: boolean;
+  /** A heart's "beat" comes right before it (BEAT_BEFORE). */
+  beaten: boolean;
 };
 
 /** The figures the effort block gives, as the phone writes it (ride-effort.ts, effortForRalf). */
@@ -166,15 +197,16 @@ const tokensOf = (sentence: string): Token[] =>
     const year = !parts.length && /^\d{4}$/.test(whole) && value >= 1900 && value <= 2099 && (YEAR_BEFORE.test(before) || YEAR_AFTER.test(after));
     const dated = year || MONTH_AFTER.test(after) || MONTH_BEFORE.test(before) || SIZE_AFTER.test(after);
     const compared = COMPARED_AFTER.test(after) || COMPARED_BEFORE.test(before);
-    return [{ start, end, value, parts, glued, decade, dated, after, compared }];
+    const beaten = BEAT_BEFORE.test(before);
+    return [{ start, end, value, parts, glued, decade, dated, after, compared, beaten }];
   });
 
-type UnitKind = "effort" | "other" | "count" | "points" | null;
-const unitOf = (after: string): UnitKind => {
-  if (HEART_AFTER.test(after) || ENERGY_AFTER.test(after)) return "effort";
-  const other = OTHER_AFTER.exec(after);
-  if (other) return COUNTS.test(other[1]!) ? "count" : POINTS_ONLY.test(other[1]!) ? "points" : "other";
-  return null;
+/** A number's own unit kind, from the words right after it. */
+const kindOf = (token: Token): UnitKind => {
+  // "HR171", "FC142".
+  if (token.glued) return "heart";
+  const kind = UNITS.find(([, pattern]) => pattern.test(token.after))?.[0] ?? (token.dated ? "date" : "none");
+  return kind === "count" && token.beaten ? "heart" : kind;
 };
 
 /** "about 20 higher than the trot": near a difference between two of the block's heart rates. */
@@ -198,51 +230,46 @@ const near = (value: number, figures: EffortFigures, token: Token) => {
 };
 
 /**
- * Whether a sentence holds one of the rider's heart-rate or calorie figures,
- * as written or near it:
- * - any number with a heart-rate or energy unit ("142 bpm", "142.0 bpm",
- *   "8 kcal", "156 times a minute", "HR171"), whatever its value;
- * - in a sentence about the heart or energy, any number of two digits or more
- *   that no other unit claims ("your heart rate was around 140", "20 points
- *   higher", "150 minimum");
- * - anywhere else, a number of two digits or more that no other unit claims
- *   and that is within 10 of one of the block's heart rates ("peaking near
- *   170", "the 140s", "under 150 min/max"), near its calories ("about 300"),
- *   or, with a word that makes it a difference holding on to it, near a
- *   difference between two of its heart rates ("about 20 higher than the
- *   trot", "20 points above", "rose by 28").
- * A number with another unit after it, or after the range it ends, a word
- * like "more" between them included ("20 minutes", "10 more minutes", "a 120
- * cm fence", "100 to 110 cm", "3 transitions"), or a date ("17 November", "in
- * 2024"), is not one, whatever its value. A single digit with no unit is never
- * one: "Phase 1", "1 more lap".
+ * Whether a sentence holds one of the rider's heart-rate or calorie figures.
+ *
+ * The rule: every number has a unit kind, read from the words right after it
+ * ("10 times", "20 minutes"), a quantifier, a describing word or Romanian
+ * "de" between them included ("10 more minutes", "10 walk-trot transitions",
+ * "20 de minute"). A number of a range or a list takes the kind of its last
+ * number ("100 to 110 cm", "101, 128 and 156 bpm"). The kind decides first:
+ * - heart or energy ("142 bpm", "156 times a minute", "your heart beat 160
+ *   times", "HR171", "8 kcal"): always one of the figures, whatever its value;
+ * - time, count, distance or height, pace, percent, weight or angle, and a
+ *   date or a year ("repeat it 10 times", "20 minutes", "a 120 cm fence",
+ *   "17 November", "in 2024"): never one, whatever else the sentence says;
+ * - points: a score, so never one, except in a sentence about the heart or
+ *   energy, where it is read as no unit ("your heart rate was 20 points
+ *   higher in the canter");
+ * - none: the only kind the sentence decides. A single digit is never one
+ *   ("Phase 1"). A number of two digits or more is one in a sentence about
+ *   the heart or energy ("your heart rate was around 140", "150 minimum"),
+ *   and anywhere else when it is within 10 of one of the block's heart rates
+ *   ("peaking near 170", "the 140s", "under 150 min/max"), near its calories
+ *   ("about 300"), or, with a word that makes it a difference holding on to
+ *   it, near a difference between two of its heart rates ("about 20 higher
+ *   than the trot", "rose by 28").
  */
 const holdsEffort = (sentence: string, figures: EffortFigures): boolean => {
   const tokens = tokensOf(sentence);
   if (!tokens.length) return false;
   const aboutHeart = HEART_WORDS.test(fold(sentence));
-  // A range or a list shares the unit after its last number.
-  const runUnit: UnitKind[] = new Array(tokens.length).fill(null);
-  for (let index = tokens.length - 1; index >= 0; index -= 1) {
-    const token = tokens[index]!;
-    const next = tokens[index + 1];
-    const own = unitOf(token.after);
-    const joined = next && !own && JOINER.test(sentence.slice(token.end, next.start));
-    runUnit[index] = own ?? (joined ? runUnit[index + 1]! : null);
+  const kinds = tokens.map(kindOf);
+  for (let index = tokens.length - 2; index >= 0; index -= 1) {
+    if (kinds[index] === "none" && JOINER.test(sentence.slice(tokens[index]!.end, tokens[index + 1]!.start))) {
+      kinds[index] = kinds[index + 1]!;
+    }
   }
   return tokens.some((token, index) => {
-    const unit = runUnit[index];
-    if (unit === "effort" || token.glued) return true;
-    if (unit === "other" || token.dated) return false;
-    // A single digit with no unit is never one.
+    const kind = kinds[index] === "points" && aboutHeart ? "none" : kinds[index];
+    if (kind === "heart" || kind === "energy") return true;
+    if (kind !== "none") return false;
     const values = [token.value, ...token.parts].filter((value) => value >= 10);
-    // A count or a score, in a sentence not about the heart: only a score
-    // that is a difference ("20 points higher than your trot").
-    if ((unit === "count" || unit === "points") && !aboutHeart) {
-      return unit === "points" && values.some((value) => differenceOf(value, figures, token));
-    }
-    if (aboutHeart && values.length) return true;
-    return values.some((value) => near(value, figures, token));
+    return aboutHeart ? values.length > 0 : values.some((value) => near(value, figures, token));
   });
 };
 

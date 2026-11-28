@@ -212,10 +212,13 @@ const coachChat = read("supabase/functions/coach-chat/index.ts");
     ["Warm-up was 128-156bpm and you burned ~310 calories.", line],
     ["Ride 3 transitions every 20 minutes, 15 minutes of walk, 1,310 kcal.", line],
     ["It peaked at 156/min.", line],
-    // Points and "minimum" are no way round it.
+    // Points in a sentence about the heart, and "minimum", are no way round it.
     ["Your heart rate was about 20 points higher in the canter.", walkTrot],
-    ["Your canter was about 20 points higher than your trot.", walkTrot],
+    ["Your heart rate in the canter was 19 points above the trot.", walkTrot],
     ["Keep your heart rate at 150 minimum.", walkTrot],
+    // The times a heart beats are beats, not a count, and "x 3" is no unit.
+    ["Your heart beat about 160 times in the canter.", walkTrot],
+    ["Your HR hit 160 x 3 in the canter.", walkTrot],
     ["Stay under 150 min/max.", walkTrot],
     // A difference is told by the word that holds on to the number.
     ["The canter was 19 more than the trot.", walkTrot],
@@ -232,6 +235,8 @@ const coachChat = read("supabase/functions/coach-chat/index.ts");
   assert.equal(scrub("El galope quedó 19 por encima del trote.", walkTrot, "es"), EFFORT_LEFT_OUT.es);
   assert.equal(scrub("Galopul a fost cu 19 mai mare decât trapul.", walkTrot, "ro"), EFFORT_LEFT_OUT.ro);
   assert.equal(scrub("A vágta 19-cel magasabb volt, mint az ügetés.", walkTrot, "hu"), EFFORT_LEFT_OUT.hu);
+  assert.equal(scrub("A sua frequência cardíaca ficou uns 20 pontos acima no galope.", walkTrot, "pt"), EFFORT_LEFT_OUT.pt);
+  assert.equal(scrub("O seu coração bateu cerca de 160 vezes no galope.", walkTrot, "pt"), EFFORT_LEFT_OUT.pt);
 
   // Numbers that are not the rider's stay, even when they equal one of the
   // block's: another unit after them, or after the range they end, a date,
@@ -279,6 +284,53 @@ const coachChat = read("supabase/functions/coach-chat/index.ts");
     ["Haz 10 minutos más de paso al final.", "es"],
     ["Fă 10 minute în plus la pas.", "ro"],
     ["Sétálj még 10 percet a végén.", "hu"]
+  ] as const) {
+    assert.equal(scrub(reply, walkTrot, language), reply, reply);
+  }
+
+  // A number's own unit decides first. A count, a time, a distance or a pace
+  // is never one of the rider's figures, even in a sentence that names the
+  // heart: the next step stays whole, and no line says anything was left out.
+  for (const [reply, language] of [
+    ["Repeat the canter transition 10 times, and let your heart rate settle between them.", "en"],
+    ["Ride 10 walk-trot transitions and let your heart rate settle between them.", "en"],
+    ["Your heart rate rose in the canter; do 10x walk-trot transitions to warm up.", "en"],
+    ["Your heart rate was high, so add 20 easy minutes of walk.", "en"],
+    ["Ride 3 x 10 minutes of trot with your heart rate easy.", "en"],
+    ["Your heart rate climbed in the canter, so trot 20 more minutes on a 20 m circle.", "en"],
+    ["Your heart rate stayed steady over the 120 cm fences.", "en"],
+    ["Keep the canter at 350 m/min so your heart rate settles.", "en"],
+    ["Repita a transição para galope 10 vezes e deixe a frequência cardíaca acalmar entre elas.", "pt"],
+    ["A sua frequência cardíaca subiu no galope, por isso faça mais 10 minutos de passo.", "pt"],
+    ["Faça 12 transições de passo para trote e deixe o coração acalmar.", "pt"],
+    ["Repite la transición al galope 10 veces y deja que tu frecuencia cardíaca se calme.", "es"],
+    ["Repetă tranziția la galop de 10 ori și lasă pulsul să se liniștească.", "ro"],
+    ["Pulsul a crescut la galop, așa că fă 20 de minute la pas.", "ro"],
+    ["Ismételd a vágtaátmenetet 10-szer, és hagyd, hogy a pulzusod megnyugodjon.", "hu"]
+  ] as const) {
+    assert.equal(scrub(reply, walkTrot, language), reply, reply);
+  }
+  assert.equal(
+    scrub("Your heart rate averaged 142 bpm. Repeat the canter transition 10 times, and let your heart rate settle between them.", walkTrot),
+    `Repeat the canter transition 10 times, and let your heart rate settle between them.\n\n${leftOut}`
+  );
+  assert.equal(
+    scrub("A sua frequência cardíaca ficou em 142 bpm. Repita a transição para galope 10 vezes e deixe a frequência cardíaca acalmar entre elas.", walkTrot, "pt"),
+    `Repita a transição para galope 10 vezes e deixe a frequência cardíaca acalmar entre elas.\n\n${EFFORT_LEFT_OUT.pt}`
+  );
+
+  // A score is a score: points are one of the figures only in a sentence
+  // about the heart or energy. Elsewhere they stay, even near a difference
+  // between two of the block's heart rates (168 - 142 = 26, 160 - 141 = 19):
+  // RIDE_EFFORT_RULE is what asks for a difference in words.
+  for (const [reply, language] of [
+    ["Your dressage score went up 25 points since last month.", "en"],
+    ["Your canter was about 20 points higher than your trot.", "en"],
+    ["A sua nota de dressage subiu 25 pontos desde o mês passado.", "pt"],
+    ["A sua nota no galope ficou 20 pontos acima do trote.", "pt"],
+    ["Tu nota de doma subió 25 puntos desde el mes pasado.", "es"],
+    ["Scorul tău la dresaj a crescut cu 25 de puncte față de luna trecută.", "ro"],
+    ["A díjlovas pontszámod 25 ponttal nőtt a múlt hónap óta.", "hu"]
   ] as const) {
     assert.equal(scrub(reply, walkTrot, language), reply, reply);
   }
