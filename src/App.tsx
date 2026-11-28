@@ -154,6 +154,7 @@ import { localDayOf, localToday, startOfPreviousMonth } from "./domain/local-day
 import { activitiesByDay } from "./domain/activity-calendar";
 import { ActivityCalendarScreen } from "./features/calendar/ActivityCalendarScreen";
 import { HomeWeekStrip } from "./features/calendar/HomeWeekStrip";
+import { RalfMedal } from "./features/coach/RalfMedal";
 import { usePlannedActivities } from "./features/calendar/usePlannedActivities";
 import { syncPlannedReminders } from "./features/calendar/planned-reminders";
 import { plannedReminders } from "./features/calendar/planned-schedule";
@@ -3130,6 +3131,7 @@ function EquinaApp() {
                 horseRideEntries={homeHorseRides}
                 horseRideName={summaryHorseName}
                 riderName={riderDisplayName}
+                riderPhoto={accountController.snapshot.profile.avatarUrl}
                 arrivingFromOnboarding={onboardingTransitioning}
                 sharedRide={sharedRide}
                 showRecap={lastRideRecapVisible}
@@ -3712,17 +3714,18 @@ function EquinaApp() {
 
 // Ralf in a tab's header: a word, not just an icon, because riders look for
 // him by name.
+/** Ralf as a medal, the app icon's treatment with his sparkle, a green dot for online, and his name. */
 function RalfButton({ onPress }: { onPress: () => void }) {
   return (
     <MotionPressable
       testID="ralf-button"
       accessibilityRole="button"
-      accessibilityLabel={`Ask ${equinaCoach.name}`}
+      accessibilityLabel={`Ask ${equinaCoach.name}, online`}
       hitSlop={4}
       onPress={onPress}
       style={styles.ralfButton}
     >
-      <Sparkles size={16} color={equinaTheme.colors.brass} strokeWidth={1.9} />
+      <RalfMedal size={36} />
       <Text style={styles.ralfButtonText}>{equinaCoach.name}</Text>
     </MotionPressable>
   );
@@ -4010,6 +4013,7 @@ function DockTabItem({
 const shownHeroPhotos = new Set<string>();
 
 function HomeScreen({
+  riderPhoto,
   horse,
   horseLastRide,
   rideEntries,
@@ -4047,6 +4051,8 @@ function HomeScreen({
   onOpenProfile,
   onShareRide
 }: {
+  /** The rider's own photo, when they have one: the avatar shows it instead of initials. */
+  riderPhoto?: string;
   /** Without the rider's latest ride: Home speaks of its horse's own (horseLastRide). */
   horse: Omit<HorseState, "lastRide">;
   /** Home's horse's latest ride, for Up next; for a rider with no horse, their latest ride. */
@@ -4343,6 +4349,21 @@ function HomeScreen({
   return (
     <View style={[styles.screen, styles.homeScreen]}>
       <View style={styles.homeTopBar}>
+        {/* The rider on the left, their greeting beside them; Ralf alone on the right. */}
+        <Pressable
+          testID="profile-button"
+          accessibilityRole="button"
+          accessibilityLabel="Open account"
+          hitSlop={6}
+          style={({ pressed }) => [styles.homeProfileButton, pressed && styles.tabItemPressed]}
+          onPress={onOpenProfile}
+        >
+          {riderPhoto ? (
+            <Image source={{ uri: riderPhoto }} style={styles.homeProfilePhoto} accessibilityIgnoresInvertColors />
+          ) : (
+            <Text style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
+          )}
+        </Pressable>
         <View style={styles.homeGreetingCopy}>
           <Text numberOfLines={2} style={styles.homeGreeting}>{greeting}, {riderFirstName}</Text>
           {onOpenHorses ? (
@@ -4363,19 +4384,7 @@ function HomeScreen({
             </Text>
           )}
         </View>
-        <View style={styles.headerActions}>
-          {onOpenRalf ? <RalfButton onPress={() => onOpenRalf()} /> : null}
-          <Pressable
-            testID="profile-button"
-            accessibilityRole="button"
-            accessibilityLabel="Open account"
-            hitSlop={6}
-            style={({ pressed }) => [styles.homeProfileButton, pressed && styles.tabItemPressed]}
-            onPress={onOpenProfile}
-          >
-            <Text style={styles.homeProfileInitial}>{riderName.trim().slice(0, 2).toUpperCase()}</Text>
-          </Pressable>
-        </View>
+        {onOpenRalf ? <RalfButton onPress={() => onOpenRalf()} /> : null}
       </View>
 
       <Animated.View style={[styles.homeStage, viewportHeight < 720 && styles.homeStageCompact, heroStyle]}>
@@ -8699,17 +8708,18 @@ const styles = StyleSheet.create({
   },
   ralfButton: {
     minHeight: 44,
-    paddingHorizontal: 14,
+    paddingLeft: 4,
+    paddingRight: 14,
     borderRadius: 22,
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: 8,
     backgroundColor: equinaTheme.material.quiet
   },
   ralfButtonText: {
     color: equinaTheme.text.primary,
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: "600"
   },
   headerActions: {
@@ -8829,10 +8839,15 @@ const styles = StyleSheet.create({
   homeProfileButton: {
     width: 44,
     height: 44,
-    borderRadius: equinaTheme.radius.control,
+    borderRadius: 22,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: equinaTheme.material.selected
+  },
+  homeProfilePhoto: {
+    width: 44,
+    height: 44
   },
   homeProfileInitial: {
     color: equinaTheme.colors.brass,

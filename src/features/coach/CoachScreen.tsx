@@ -37,6 +37,7 @@ import { KeyboardAvoidingContainer } from "../../ui/keyboard/KeyboardAvoidingCon
 import { selectionHaptic, warningHaptic } from "../../ui/motion/haptics";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
+import { RalfMedal } from "./RalfMedal";
 import { equinaTheme } from "../../ui/theme/theme";
 import type { AccountMode } from "../account/account-types";
 import { ralfAiNotice } from "./coach-copy";
@@ -227,6 +228,7 @@ export function CoachScreen({
             ? <X size={21} color={equinaTheme.text.primary} />
             : <ChevronLeft size={21} color={equinaTheme.text.primary} />}
         </MotionPressable>
+        <RalfMedal size={34} />
         <View style={styles.identity}>
           <Text numberOfLines={1} style={styles.name}>Ralf</Text>
           <Text numberOfLines={1} style={styles.context}>
