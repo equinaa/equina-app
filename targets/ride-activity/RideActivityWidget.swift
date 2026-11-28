@@ -205,15 +205,19 @@ struct CompactTime: View {
     if ride.paused && !ride.done {
       Image(systemName: "pause.fill")
     } else if ride.live {
-      Text(timerInterval: ride.phaseRange, countsDown: true)
+      // A phase is 90 minutes at most: minutes and seconds, "90:00" at the
+      // longest, never an hour that would not fit the island.
+      Text(timerInterval: ride.phaseRange, countsDown: true, showsHours: false)
         .multilineTextAlignment(.trailing)
-        .frame(width: 40, alignment: .trailing)
+        .frame(width: 44, alignment: .trailing)
     } else if ride.paused {
       Text(clockText(ride.state.elapsedMs))
     } else {
+      // The clock runs past the plan until Finish, and nothing of the app
+      // runs to measure it again: room for an hour is always kept, H:MM:SS.
       Text(timerInterval: ride.clockRange, countsDown: false)
         .multilineTextAlignment(.trailing)
-        .frame(width: 40, alignment: .trailing)
+        .frame(width: 54, alignment: .trailing)
     }
   }
 }
@@ -255,7 +259,7 @@ struct PhaseLine: View {
         }
         Spacer(minLength: 8)
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-          Text(timerInterval: ride.phaseRange, countsDown: true)
+          Text(timerInterval: ride.phaseRange, countsDown: true, showsHours: false)
             .font(.title3.weight(.semibold).monospacedDigit())
             .multilineTextAlignment(.trailing)
             .frame(width: 72, alignment: .trailing)

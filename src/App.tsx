@@ -2103,15 +2103,14 @@ function EquinaApp() {
 
   // A tap on the ride on the lock screen or in the Dynamic Island opens
   // equina://ride. Mid-ride that brings the ride screen to the front, the way
-  // a tapped phase alert does: it is Home's, and nothing is drawn over it. A
-  // tap that launched the app comes before the stored ride is read; bringing
-  // that ride back opens it on Home anyway. With no ride, the app opens where
-  // it was. Read through a ref: registered once, it sees the latest state.
+  // a tapped phase alert does (bringRideToFront). A tap that launched the app
+  // comes before the stored ride is read; bringing that ride back opens it on
+  // Home anyway. With no ride, the app opens where it was. Read through a
+  // ref: registered once, it sees the latest state.
   const openRideLinkRef = useRef(() => {});
   openRideLinkRef.current = () => {
     if (!rideActiveRef.current) return;
-    closeRalf();
-    setTab("home");
+    bringRideToFront();
   };
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -2134,8 +2133,11 @@ function EquinaApp() {
 
   // The sheets are Modals, and a second one does not open over the first:
   // whatever is over the app closes before a tap opens its own screen. A
-  // horse still being created stays, so its save is not lost.
-  const closeOverlaysForTap = () => {
+  // horse still being created stays, so its save is not lost: a notification
+  // tap waits for it (tapGateOpen). `keepSaves` is for a tap that does not
+  // wait (the running ride's): a sheet still saving stays up then, its result
+  // and any error with it.
+  const closeOverlaysForTap = ({ keepSaves = false }: { keepSaves?: boolean } = {}) => {
     closeRalf();
     setLastRideRecapVisible(false);
     setRideSetupOpen(false);
@@ -2144,10 +2146,20 @@ function EquinaApp() {
     closeCalendar();
     setRideJournalOpen(false);
     setHorseSwitcherOpen(false);
-    setHorseCreatorOpen(false);
+    if (!keepSaves || horseRecords.saving !== "horse:create") setHorseCreatorOpen(false);
     setStreakOpen(false);
-    setTrainingPlanOpen(false);
-    setTimeOffHorseId("");
+    if (!keepSaves || !trainingPlan.saving) {
+      setTrainingPlanOpen(false);
+      setTimeOffHorseId("");
+    }
+  };
+
+  // The running ride, in front: the ride screen is Home's while a ride runs,
+  // and the sheets opened mid-ride from another tab (Stable's plan, time
+  // off) are App-level Modals that would stay over it. They close first.
+  const bringRideToFront = () => {
+    closeOverlaysForTap({ keepSaves: true });
+    setTab("home");
   };
 
   // Carries out where a tap leads (notification-routes.ts decides it).
@@ -2166,10 +2178,7 @@ function EquinaApp() {
       return;
     }
     if (target.screen === "ride") {
-      // The ride screen is Home's while a ride runs, and nothing else is
-      // drawn over it.
-      closeRalf();
-      setTab("home");
+      bringRideToFront();
       return;
     }
     closeOverlaysForTap();

@@ -420,7 +420,14 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   assert.equal((widget.match(/\.widgetURL\(rideURL\)/g) ?? []).length, 2, "Lock screen and Dynamic Island.");
   assert.match(widget, /stale: context\.isStale/);
   assert.match(widget, /Text\(timerInterval: ride\.clockRange, countsDown: false\)/, "The ride clock counts up by itself.");
-  assert.match(widget, /Text\(timerInterval: ride\.phaseRange, countsDown: true\)/, "The phase counts down by itself.");
+  assert.match(widget, /Text\(timerInterval: ride\.phaseRange, countsDown: true, showsHours: false\)/, "The phase counts down by itself.");
+  // A phase is 90 minutes at most: never "1:29:59", which the island and the
+  // lock screen would clip. The ride clock passes an hour, and keeps room for it.
+  assert.doesNotMatch(widget, /Text\(timerInterval: ride\.phaseRange, countsDown: true\)/, "Every phase countdown is minutes and seconds.");
+  const compact = widget.slice(widget.indexOf("struct CompactTime: View {"), widget.indexOf("struct PhaseLine: View {"));
+  assert.match(compact, /showsHours: false\)\s+\.multilineTextAlignment\(\.trailing\)\s+\.frame\(width: 44, alignment: \.trailing\)/, "\"90:00\" fits, with room.");
+  assert.match(compact, /Text\(timerInterval: ride\.clockRange, countsDown: false\)\s+\.multilineTextAlignment\(\.trailing\)\s+\.frame\(width: 54, alignment: \.trailing\)/, "\"1:00:00\" fits.");
+  assert.doesNotMatch(compact, /frame\(width: 40,/);
   assert.match(widget, /ProgressView\(timerInterval: ride\.rideRange, countsDown: false/, "The whole-ride bar fills by itself.");
   assert.match(widget, /compactLeading: \{[\s\S]+compactTrailing: \{[\s\S]+minimal: \{/);
   // The compact views, which the Apple Watch Smart Stack shows too, name a
@@ -493,7 +500,14 @@ const at = (...minutes: number[]) => minutes.map((value) => t0 + value * minute)
   assert.match(app, /Linking\.addEventListener\("url", \(\{ url \}\) => open\(url\)\)/);
   assert.match(app, /void Linking\.getInitialURL\(\)\.then\(open, \(\) => undefined\);/);
   assert.match(app, /if \(isRideActivityLink\(url\)\) openRideLinkRef\.current\(\);/);
-  assert.match(app, /openRideLinkRef\.current = \(\) => \{\s+if \(!rideActiveRef\.current\) return;\s+closeRalf\(\);\s+setTab\("home"\);\s+\};/, "Mid-ride, the ride screen comes to the front.");
+  assert.match(app, /openRideLinkRef\.current = \(\) => \{\s+if \(!rideActiveRef\.current\) return;\s+bringRideToFront\(\);\s+\};/, "Mid-ride, the ride screen comes to the front.");
+  // In front means nothing over it: the sheets opened mid-ride from Stable
+  // close first, a phase alert's tap too, except one whose save is running.
+  assert.match(app, /const bringRideToFront = \(\) => \{\s+closeOverlaysForTap\(\{ keepSaves: true \}\);\s+setTab\("home"\);\s+\};/);
+  assert.match(app, /if \(target\.screen === "ride"\) \{\s+bringRideToFront\(\);\s+return;\s+\}/);
+  const overlays = app.slice(app.indexOf("const closeOverlaysForTap = "), app.indexOf("const bringRideToFront = "));
+  assert.match(overlays, /if \(!keepSaves \|\| horseRecords\.saving !== "horse:create"\) setHorseCreatorOpen\(false\);/, "A horse still saving keeps its sheet.");
+  assert.match(overlays, /if \(!keepSaves \|\| !trainingPlan\.saving\) \{\s+setTrainingPlanOpen\(false\);\s+setTimeOffHorseId\(""\);/, "So does a plan still saving.");
 }
 
 console.log("Ride live activity passed.");
