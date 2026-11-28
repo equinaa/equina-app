@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { requireOptionalNativeModule } from "expo";
 import { Platform } from "react-native";
 import { joinSpoken } from "./voice-text";
 
@@ -7,12 +8,16 @@ type SpeechModule = SpeechPackage["ExpoSpeechRecognitionModule"];
 
 // The package loads its native module as it is imported, and a build made
 // before it was added has none: read it once, and treat a missing one as no voice.
+// Ask Expo first. Requiring the package without its native module is not an
+// error a try/catch sees: Metro reports a module that fails to load at run
+// time as fatal (a red screen in development, a closed app in a release).
 let loaded: SpeechModule | null | undefined;
 const speechModule = (): SpeechModule | null => {
   if (loaded !== undefined) return loaded;
   // Not on the web (the browser would send the audio away), and on Android
   // only from 13: before it the library falls back to the network service.
   if (Platform.OS === "web" || (Platform.OS === "android" && Number(Platform.Version) < 33)) return (loaded = null);
+  if (!requireOptionalNativeModule("ExpoSpeechRecognition")) return (loaded = null);
   try {
     loaded = (require("expo-speech-recognition") as SpeechPackage).ExpoSpeechRecognitionModule;
   } catch {

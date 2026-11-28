@@ -22,6 +22,13 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
   assert.match(hook, /module\.isRecognitionAvailable\(\) && module\.supportsOnDeviceRecognition\(\)/);
   assert.match(hook, /if \(Platform\.OS === "web" \|\| /, "Not on the web, where the browser would send the audio away.");
   // A build without the native module (made before it was added) runs on, without a mic.
+  // Expo is asked first: Metro reports a failing run-time require as fatal, past any try/catch.
+  assert.match(hook, /if \(!requireOptionalNativeModule\("ExpoSpeechRecognition"\)\) return \(loaded = null\);\s+try \{/);
+  assert.equal(
+    readFileSync(join(process.cwd(), "node_modules/expo-speech-recognition/build/ExpoSpeechRecognitionModule.js"), "utf8").includes('requireNativeModule("ExpoSpeechRecognition")'),
+    true,
+    "The package's native module is still called ExpoSpeechRecognition.",
+  );
   assert.match(hook, /try \{\s+loaded = \(require\("expo-speech-recognition"\) as SpeechPackage\)\.ExpoSpeechRecognitionModule;\s+\} catch \{\s+loaded = null;/);
   // Let go before the permission answer: it does not start after all; let go
   // before the native session began: stopped as soon as it does.
