@@ -77,6 +77,7 @@ export function RideSetupSheet({
   phases: initialPhases,
   memory,
   day: requestedDay,
+  startMinutes: requestedStart,
   onContinue,
   onLog,
   onSchedule,
@@ -100,6 +101,12 @@ export function RideSetupSheet({
    * ended by now.
    */
   day?: string;
+  /**
+   * Add activity on a day ahead only: the time to open on, minutes after
+   * midnight. A ride planned again from the journal keeps the hour it was
+   * ridden at; without one a day ahead opens on a morning ride.
+   */
+  startMinutes?: number;
   onContinue?: (plan: RidePlan) => void;
   /** Saves a logged activity. The sheet stays open, with what was entered, if it fails. */
   onLog?: (activity: LoggedActivity) => Promise<void>;
@@ -154,7 +161,7 @@ export function RideSetupSheet({
     setDay(requestedDay ?? opening.day);
     // A day ahead from the calendar opens on a morning ride, not on now.
     const openingToday = localDayOf(Date.now()) as string;
-    setStartMinutes(requestedDay && requestedDay > openingToday ? 9 * 60 : opening.startMinutes);
+    setStartMinutes(requestedDay && requestedDay > openingToday ? requestedStart ?? 9 * 60 : opening.startMinutes);
     setMood(undefined);
     setNote("");
     setSaving(inFlight.current);

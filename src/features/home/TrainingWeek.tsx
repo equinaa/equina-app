@@ -18,8 +18,12 @@ export const weekStateWords = {
 } as const;
 const stateWords = weekStateWords;
 
-/** Monday to Sunday: a flame on a day trained, an outline on one still planned, a dot on a rest day. */
-export function WeekRow({ week, size = "compact" }: { week: readonly WeekDay[]; size?: "compact" | "large" }) {
+/**
+ * Monday to Sunday: a flame on a day trained, an outline on one still
+ * planned, a dot on a rest day. `marked` rings one day in brass: the ride a
+ * past week is shown for.
+ */
+export function WeekRow({ week, size = "compact", marked }: { week: readonly WeekDay[]; size?: "compact" | "large"; marked?: string }) {
   const large = size === "large";
   const mark = large ? 40 : 32;
   return (
@@ -28,17 +32,18 @@ export function WeekRow({ week, size = "compact" }: { week: readonly WeekDay[]; 
         <View
           key={day.day}
           accessible
-          accessibilityLabel={`${dayNames[day.weekday - 1]}${day.isToday ? ", today" : ""}: ${stateWords[day.state]}`}
+          accessibilityLabel={`${dayNames[day.weekday - 1]}${day.isToday ? ", today" : ""}${day.day === marked ? ", this ride" : ""}: ${stateWords[day.state]}`}
           style={styles.weekDay}
         >
-          <Text style={[styles.weekLetter, day.isToday && styles.weekLetterToday]}>{letters[day.weekday - 1]}</Text>
+          <Text style={[styles.weekLetter, (day.isToday || day.day === marked) && styles.weekLetterToday]}>{letters[day.weekday - 1]}</Text>
           <View
             style={[
               styles.weekMark,
               { width: mark, height: mark, borderRadius: mark / 2 },
               day.state === "ridden" && styles.weekMarkRidden,
               day.state === "planned" && styles.weekMarkPlanned,
-              day.state === "missed" && styles.weekMarkMissed
+              day.state === "missed" && styles.weekMarkMissed,
+              day.day === marked && styles.weekMarkMarked
             ]}
           >
             {day.state === "rest" ? (
@@ -219,6 +224,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(247,243,234,0.36)"
   },
   weekMarkMissed: { opacity: 0.55 },
+  weekMarkMarked: { borderWidth: 1.5, borderColor: equinaTheme.colors.brass },
   restDot: {
     width: 4,
     height: 4,

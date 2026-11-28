@@ -271,6 +271,9 @@ export function useTrainingPlan({
   return {
     versions,
     timeOff,
+    // When every ride ended, for a past ride's streak on its own horse,
+    // which need not be Home's (the journal's ride in context).
+    completions,
     addTimeOff,
     endTimeOff,
     removeTimeOff,
