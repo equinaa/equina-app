@@ -1,5 +1,6 @@
 import { Platform, TurboModuleRegistry } from "react-native";
 import {
+  APPLE_HEALTH_SOURCE,
   coveringRideWorkout,
   healthSourceLabel,
   kcalFrom,
@@ -7,6 +8,7 @@ import {
   ownRideWorkouts,
   primaryReadings,
   workoutCoversRide,
+  workoutIsRide,
   type HealthWorkout
 } from "./health-workouts";
 import { READING_REACH_MS, type RideEffortReading } from "./ride-effort";
@@ -102,6 +104,27 @@ export const appleHealthAsked = async (): Promise<boolean | null> => {
   }
 };
 
+export type RideSavingStatus = "unavailable" | "not-asked" | "allowed" | "denied";
+
+/**
+ * Whether Equina may save workouts. Apple tells this, unlike what it may
+ * read: "not-asked" until its sheet was answered, then "allowed" or
+ * "denied". Asking again does nothing once it was answered: the rider then
+ * changes it in the Health app. Works with the iPhone locked.
+ */
+export const rideSavingStatus = (): RideSavingStatus => {
+  const healthkit = healthKit();
+  if (!healthkit) return "unavailable";
+  try {
+    const status = healthkit.authorizationStatusFor(WORKOUT);
+    if (status === healthkit.AuthorizationStatus.sharingAuthorized) return "allowed";
+    if (status === healthkit.AuthorizationStatus.sharingDenied) return "denied";
+    return "not-asked";
+  } catch {
+    return "unavailable";
+  }
+};
+
 /** Shows Apple's sheet. True once it was answered, whatever the answer. */
 export const connectAppleHealth = async () => {
   const healthkit = healthKit();
@@ -167,11 +190,12 @@ export const appleHealthReadable = () => {
  * when there is one (its heart rate and calories), otherwise the heart-rate
  * readings and the active calories it holds for those minutes anyway.
  *
- * When a watch workout is the ride itself (workoutCoversRide) and Equina also
- * saved the ride, the copy Equina saved is removed, so the ride is in Fitness
- * once: the watch often saves its workout a moment after Finish, too late to
- * be seen then. useAppleHealth.ts does the same as the app opens, for rides
- * whose card is never opened.
+ * When another app's Equestrian Sports workout is the ride itself
+ * (workoutIsRide) and Equina also saved the ride, the copy Equina saved is
+ * removed, so the ride is in Fitness once, as a ride: the watch often saves
+ * its workout a moment after Finish, too late to be seen then.
+ * useAppleHealth.ts does the same as the app opens, for rides whose card is
+ * never opened. A workout of another type over the ride never removes it.
  *
  * Null when it cannot be read now: no Apple Health, or the iPhone is locked
  * (Apple Health is encrypted while it is), which is not the same as nothing.
@@ -191,11 +215,14 @@ export const readRideEffort = async (ride: {
     const match = matchRideWorkout(workouts.map((each) => each.workout), ride, own);
     // Only a workout that is the ride itself stands in for it: one that
     // shares just part of it (a watch started late) keeps Equina's copy, and
-    // its own readings would leave the rest of the ride out.
+    // its own readings would leave the rest of the ride out. Its calories
+    // only when the two are the same stretch of time (workoutCoversRide);
+    // Equina's copy goes only for an Equestrian Sports one (workoutIsRide).
     const covers = match !== null && workoutCoversRide(match, ride);
-    const matchProxy = match && covers ? workouts.find((each) => each.workout.uuid === match.uuid)?.proxy : undefined;
+    const isRide = match !== null && workoutIsRide(match, ride);
+    const matchProxy = match && (covers || isRide) ? workouts.find((each) => each.workout.uuid === match.uuid)?.proxy : undefined;
 
-    if (covers && ride.syncIdentifier) {
+    if (isRide && ride.syncIdentifier) {
       for (const copy of ownRideWorkouts(workouts.map((each) => each.workout), own, ride.syncIdentifier)) {
         void healthkit.deleteObjects(WORKOUT, { uuid: copy.uuid }).catch(() => 0);
       }
@@ -227,16 +254,26 @@ export const readRideEffort = async (ride: {
 
     // A workout's own total when it is the ride; otherwise what Apple Health
     // counts for those minutes, each source once.
-    const kcal = match && covers && match.kcal !== undefined
+    const kcalSource = match && covers && match.kcal !== undefined ? healthSourceLabel(match) : undefined;
+    const kcal = match && kcalSource !== undefined
       ? match.kcal
       : await activeKcalDuring(healthkit, ride).catch(() => undefined);
-    const sourceLabel = match ? healthSourceLabel(match) : picked.label;
+    // The chip names where the numbers shown came from: the heart rate's
+    // source, the workout's app when it gave the calories alone, and Apple
+    // Health when the two came from different places.
+    const fromWorkout = Boolean(match && picked.sourceKey === match.bundleIdentifier);
+    const sourceLabel = picked.readings.length
+      ? fromWorkout || kcalSource === undefined
+        ? picked.label
+        : APPLE_HEALTH_SOURCE
+      : kcalSource;
 
     return {
-      capture: match ? "watch-workout" : "samples",
+      capture: fromWorkout ? "watch-workout" : "samples",
       ...(sourceLabel ? { sourceLabel } : {}),
       heartRate: picked.readings,
-      ...(kcal !== undefined ? { activeKcal: kcal } : {})
+      ...(kcal !== undefined ? { activeKcal: kcal } : {}),
+      ...(kcal !== undefined && kcalSource ? { kcalSource } : {})
     };
   } catch {
     return null;
@@ -250,8 +287,8 @@ export type RideWorkoutSave = "saved" | "skipped" | "not-allowed" | "unavailable
  * its start and end, and its active calories when Apple Health already holds
  * them for those minutes (never a number Equina made up). The sync
  * identifier makes a second save of the same ride replace nothing and add
- * nothing; a watch workout that already is the ride (coveringRideWorkout)
- * means it is not saved at all. Saving works with the iPhone locked; checking
+ * nothing; another app's Equestrian Sports workout that already is the ride
+ * (coveringRideWorkout) means it is not saved at all. Saving works with the iPhone locked; checking
  * first needs it unlocked, and a locked phone saves without the check
  * (removeRideCopyIfCovered tidies up later).
  */
@@ -286,9 +323,9 @@ export const saveRideWorkout = async (ride: { start: number; end: number; syncId
 export type RideCopyCheck = "removed" | "kept" | "unreadable";
 
 /**
- * Removes the workout Equina saved for a ride once another app's workout
- * (the watch's, most often) is the ride itself, so the ride is in Fitness
- * once. "removed" when Equina's copy is gone or was already gone, "kept"
+ * Removes the workout Equina saved for a ride once another app's Equestrian
+ * Sports workout (the watch's, most often) is the ride itself, so the ride
+ * is in Fitness once. "removed" when Equina's copy is gone or was already gone, "kept"
  * while no such workout is there, "unreadable" while the iPhone is locked or
  * Apple Health cannot be reached: then it is asked again later.
  */

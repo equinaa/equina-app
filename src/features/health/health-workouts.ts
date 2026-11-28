@@ -71,12 +71,33 @@ export const matchRideWorkout = (
 export const workoutCoversRide = (workout: HealthWorkout, ride: Span) =>
   overlap(workout, ride) >= 0.8 * Math.max(ride.end - ride.start, workout.end - workout.start);
 
+/** Time a workout runs past the ride, before and after it together, that still makes it the ride: tacking up, untacking. */
+export const RIDE_WORKOUT_EXTRA_MS = 15 * 60_000;
+
 /**
- * Another app's workout that is the ride itself, give or take: only then is
+ * Another app's workout that is the ride itself: an Equestrian Sports one,
+ * the ride's whole time or nearly (95%), with no more than a quarter of an
+ * hour around it, or half the ride's length for a long ride. A watch started
+ * while mounting and stopped after dismounting is the ride; one over two
+ * rides back to back, or a show day, is not. Any other type of workout never
+ * stands in for the ride, however well it lines up: Fitness keeps the ride
+ * as Equestrian Sports. workoutCoversRide stays the rule for calories.
+ */
+export const workoutIsRide = (workout: HealthWorkout, ride: Span) => {
+  if (workout.activityType !== EQUESTRIAN_SPORTS) return false;
+  if (workoutCoversRide(workout, ride)) return true;
+  const rideMs = ride.end - ride.start;
+  const shared = overlap(workout, ride);
+  const extra = workout.end - workout.start - shared;
+  return rideMs > 0 && shared >= 0.95 * rideMs && extra <= Math.max(RIDE_WORKOUT_EXTRA_MS, 0.5 * rideMs);
+};
+
+/**
+ * Another app's workout that is the ride itself (workoutIsRide): only then is
  * Equina's own copy not needed, and only then is it removed or never saved.
  * A workout that merely matches (a watch started late, a long hike around the
- * ride) leaves Equina's copy where it is: two workouts in Fitness are better
- * than a ride that is not there at all.
+ * ride, a walk or "Other" over it) leaves Equina's copy where it is: two
+ * workouts in Fitness are better than a ride that is not there as a ride.
  */
 export const coveringRideWorkout = (
   workouts: readonly HealthWorkout[],
@@ -84,7 +105,7 @@ export const coveringRideWorkout = (
   ownBundleIdentifier: string
 ): HealthWorkout | null => {
   const match = matchRideWorkout(workouts, ride, ownBundleIdentifier);
-  return match && workoutCoversRide(match, ride) ? match : null;
+  return match && workoutIsRide(match, ride) ? match : null;
 };
 
 /** Equina's own saved copies of a ride, found by the ride's sync identifier. */
@@ -95,7 +116,7 @@ export const ownRideWorkouts = (workouts: readonly HealthWorkout[], ownBundleIde
  * What the card's chip says the numbers came from. A device's own name in
  * Apple Health is often a person's ("Ana's Apple Watch"), so it is never
  * shown: a watch is "Apple Watch", a strap or an app by its model or app name,
- * and anything else "Apple Health".
+ * and anything else "Apple Health" (APPLE_HEALTH_SOURCE).
  */
 export const healthSourceLabel = ({
   productType,
@@ -108,20 +129,27 @@ export const healthSourceLabel = ({
   const personal = (name?: string) => !name || /['’]s\b/i.test(name) || name.length > 30;
   if (deviceName && !personal(deviceName) && !/^iphone/i.test(productType ?? "")) return deviceName;
   if (bundleIdentifier && !bundleIdentifier.startsWith("com.apple.") && sourceName && !personal(sourceName)) return sourceName;
-  return "Apple Health";
+  return APPLE_HEALTH_SOURCE;
 };
+
+/** What the chip says when no device or app can be named. */
+export const APPLE_HEALTH_SOURCE = "Apple Health";
+
+/** The chip, as VoiceOver reads it: never "From Apple Health, through Apple Health". */
+export const sourceChipSpoken = (label: string) =>
+  label === APPLE_HEALTH_SOURCE ? "From Apple Health" : `From ${label}, through Apple Health`;
 
 export type SourcedReading = HeartRateReading & { sourceKey: string; label: string };
 
 /**
  * One source's readings, so two devices worn at once never zigzag into one
  * line: the workout's own source when it has readings, else the source with
- * the most readings in the ride.
+ * the most readings in the ride. Which source it was comes back with them.
  */
 export const primaryReadings = (
   readings: readonly SourcedReading[],
   preferredSourceKey?: string
-): { readings: HeartRateReading[]; label?: string } => {
+): { readings: HeartRateReading[]; label?: string; sourceKey?: string } => {
   const counts = new Map<string, number>();
   for (const reading of readings) counts.set(reading.sourceKey, (counts.get(reading.sourceKey) ?? 0) + 1);
   const key = preferredSourceKey && counts.has(preferredSourceKey)
@@ -129,7 +157,7 @@ export const primaryReadings = (
     : [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
   if (key === undefined) return { readings: [] };
   const own = readings.filter((reading) => reading.sourceKey === key);
-  return { readings: own.map(({ at, bpm }) => ({ at, bpm })), label: own[0]?.label };
+  return { readings: own.map(({ at, bpm }) => ({ at, bpm })), label: own[0]?.label, sourceKey: key };
 };
 
 /** Energy as Apple Health hands it over, in kcal. A unit Equina does not know is left out. */

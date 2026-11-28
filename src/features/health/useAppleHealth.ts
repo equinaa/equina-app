@@ -10,11 +10,13 @@ import {
   connectAppleHealth,
   readRideEffort,
   removeRideCopyIfCovered,
-  saveRideWorkout
+  rideSavingStatus,
+  saveRideWorkout,
+  type RideSavingStatus
 } from "./apple-health";
 import { defaultHealthSettings, healthSettings, type HealthSettings } from "./health-settings";
 import { rideSyncIdentifier } from "./health-workouts";
-import { savedRideWorkouts } from "./saved-ride-workouts";
+import { missedRideWorkouts, savedRideWorkouts, type SavedRideCheck } from "./saved-ride-workouts";
 import { summarizeRideEffort, type PhasePlacement, type RideEffort } from "./ride-effort";
 
 export type AppleHealthController = {
@@ -22,6 +24,14 @@ export type AppleHealthController = {
   available: boolean;
   settings: HealthSettings;
   update: (patch: Partial<HealthSettings>) => void;
+  /**
+   * Whether Apple Health lets Equina save workouts, read again as the app
+   * comes back to the front (it is changed in the Health app) and after
+   * Apple's sheet. Shared by Account and the ride card.
+   */
+  savingStatus: RideSavingStatus;
+  /** Apple's sheet, from the ride card or Account; then the rides it held back are saved. */
+  connect: () => Promise<void>;
 };
 
 /**
@@ -32,6 +42,7 @@ export type AppleHealthController = {
 export function useAppleHealth(userId: string | undefined): AppleHealthController {
   const [available] = useState(() => appleHealthAvailable());
   const [settings, setSettings] = useState<HealthSettings>(defaultHealthSettings);
+  const [savingStatus, setSavingStatus] = useState<RideSavingStatus>(() => (available ? rideSavingStatus() : "unavailable"));
 
   useEffect(() => {
     setSettings(defaultHealthSettings);
@@ -56,10 +67,16 @@ export function useAppleHealth(userId: string | undefined): AppleHealthControlle
   // Equina's copy of a ride goes once the watch's own workout for it is in
   // Apple Health: looked for as the app opens and each time it comes back to
   // the front, whatever the effort card's switch, and whether or not the
-  // ride is ever opened in the journal.
+  // ride is ever opened in the journal. The rides Apple Health held back are
+  // saved then too, once it allows it (the rider may have just done so in
+  // the Health app).
   useEffect(() => {
     if (!userId || !available) return;
-    const tidy = () => void tidyRideCopies(userId).catch(() => undefined);
+    const tidy = () => {
+      setSavingStatus(rideSavingStatus());
+      void tidyRideCopies(userId).catch(() => undefined);
+      void saveMissedRides(userId).catch(() => undefined);
+    };
     tidy();
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") tidy();
@@ -67,8 +84,31 @@ export function useAppleHealth(userId: string | undefined): AppleHealthControlle
     return () => subscription.remove();
   }, [available, userId]);
 
-  return { available: available && Boolean(userId), settings, update };
+  const connect = useCallback(async () => {
+    await connectAppleHealth();
+    if (!available) return;
+    setSavingStatus(rideSavingStatus());
+    if (userId) await saveMissedRides(userId).catch(() => undefined);
+  }, [available, userId]);
+
+  return { available: available && Boolean(userId), settings, update, savingStatus, connect };
 }
+
+/**
+ * One pass over the timed rides Apple Health did not let Equina save (its
+ * sheet not shown yet, or saving refused), kept for a week: each is saved
+ * now if it allows it, and goes once saved, once a watch workout already is
+ * the ride, or once Account's switch is off. Nothing is asked while none waits.
+ */
+export const saveMissedRides = async (userId: string) => {
+  const settings = await healthSettings.load(userId);
+  await missedRideWorkouts.tidy(userId, Date.now(), async (entry): Promise<SavedRideCheck> => {
+    if (!settings.saveRides) return "removed";
+    const saved = await saveRideWorkout(entry);
+    if (saved === "saved") await savedRideWorkouts.add(userId, { ...entry, savedAt: Date.now() });
+    return saved === "not-allowed" ? "kept" : saved === "unavailable" ? "unreadable" : "removed";
+  });
+};
 
 /**
  * One pass over the rides this phone saved to Apple Health in the last day
@@ -83,7 +123,8 @@ export const tidyRideCopies = async (userId: string) => {
 /**
  * A ride the clock timed, saved to Apple Health as it is finished, when the
  * rider allowed saving workouts in Apple's sheet and has not turned it off in
- * Account. Never for a ride added by hand: its minutes are typed, not measured.
+ * Account; before they allowed it, once they do (saveMissedRides). Never for
+ * a ride added by hand: its minutes are typed, not measured.
  */
 export const saveFinishedRideToAppleHealth = async (userId: string, ride: { startedAt: string; completedAt: string }) => {
   if (!appleHealthAvailable()) return;
@@ -97,6 +138,9 @@ export const saveFinishedRideToAppleHealth = async (userId: string, ride: { star
   // The watch's own workout usually arrives after Finish: the ride is looked
   // at again later (tidyRideCopies), with its times and nothing else.
   if (saved === "saved") await savedRideWorkouts.add(userId, { syncIdentifier, start, end, savedAt: Date.now() });
+  // Apple Health has not allowed saving yet (its sheet comes with the ride
+  // card's Connect, after this first ride): kept to save once it does.
+  if (saved === "not-allowed") await missedRideWorkouts.add(userId, { syncIdentifier, start, end, savedAt: Date.now() });
 };
 
 export type RideEffortView =
@@ -189,7 +233,9 @@ export function useRideEffort(entry: RideEntry, health: AppleHealthController | 
         setView(earlier ? { kind: "ready", effort: earlier.effort } : { kind: "unreadable" });
         return;
       }
-      const effort = summarizeRideEffort(reading, { start, end }, placed);
+      // Without this phone's timeline the phases are only placed by their
+      // minutes: the whole ride counts, a break included (summarizeRideEffort).
+      const effort = summarizeRideEffort(reading, { start, end }, placed, { exact: Boolean(timeline) });
       remember(key, { effort, windows: placed, placement: where });
       setView({ kind: "ready", effort });
     })();
@@ -208,8 +254,8 @@ export function useRideEffort(entry: RideEntry, health: AppleHealthController | 
   }, [enabled]);
 
   const connect = useCallback(() => {
-    void connectAppleHealth().then(() => setRound((count) => count + 1));
-  }, []);
+    void (health ? health.connect() : connectAppleHealth()).then(() => setRound((count) => count + 1));
+  }, [health]);
   const dismiss = useCallback(() => health?.update({ connectDismissed: true }), [health]);
   const checkAgain = useCallback(() => setRound((count) => count + 1), []);
 

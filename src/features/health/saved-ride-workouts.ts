@@ -10,8 +10,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
  * syncs, usually after the rider tapped Finish, so the check made as the ride
  * is saved cannot see it. This list lets the app look again later and remove
  * Equina's copy once the watch's is there, whether or not the ride's effort
- * card is ever opened. After a day the watch has synced or never will, and
- * the entry goes.
+ * card is ever opened. After a day the watch has synced or never will: the
+ * entry is looked at once more, the next time the app can, and goes.
+ *
+ * A second list, the same shape, keeps the rides that could not be saved
+ * because Apple Health did not allow it yet (its sheet not shown, or saving
+ * refused), for a week: they are saved once it does.
  */
 
 export type SavedRideWorkout = {
@@ -30,6 +34,12 @@ export const SAVED_RIDE_CHECK_MS = 24 * 60 * 60 * 1000;
 /** A day of rides is a handful; this only keeps a broken clock from growing the list. */
 export const MAX_SAVED_RIDE_WORKOUTS = 20;
 
+/** An entry past its time is looked at once more; one that cannot be looked at goes after this many times its time. */
+export const RIDE_ENTRY_HARD_LIMIT = 7;
+
+/** How long a ride Apple Health did not let Equina save waits to be saved. */
+export const MISSED_RIDE_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
 export type SavedRideWorkoutsStorage = {
   getItem: (key: string) => Promise<string | null>;
   setItem: (key: string, value: string) => Promise<void>;
@@ -37,6 +47,7 @@ export type SavedRideWorkoutsStorage = {
 };
 
 export const savedRideWorkoutsKey = (userId: string) => `equina.apple-health-saved-rides.v1:${userId}`;
+export const missedRideWorkoutsKey = (userId: string) => `equina.apple-health-missed-rides.v1:${userId}`;
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 
@@ -68,41 +79,53 @@ export const withSavedRideWorkout = (list: readonly SavedRideWorkout[], entry: S
   [...list.filter((each) => each.syncIdentifier !== entry.syncIdentifier), entry].slice(-MAX_SAVED_RIDE_WORKOUTS);
 
 /**
- * Still worth checking: saved less than a day ago. A save stamped far in the
- * future (the clock was moved back) is not, or it would never expire.
+ * Still worth checking: saved less than a day ago (or the list's own time).
+ * A save stamped far in the future (the clock was moved back) is not, or it
+ * would never expire.
  */
-export const savedRideStillChecked = (entry: SavedRideWorkout, now: number) =>
-  Math.abs(now - entry.savedAt) < SAVED_RIDE_CHECK_MS;
+export const savedRideStillChecked = (entry: SavedRideWorkout, now: number, checkFor = SAVED_RIDE_CHECK_MS) =>
+  Math.abs(now - entry.savedAt) < checkFor;
 
 /**
- * One pass over the list: an entry over a day old is dropped unchecked; every
- * other one is checked, and dropped once Equina's copy is gone. One that is
- * still alone, or cannot be read now, stays for the next pass. Once the
- * iPhone turns out to be locked, the rest wait too: they would be unreadable
- * just the same.
+ * One pass over the list. Every entry is checked, and dropped once it is
+ * done with ("removed"): Equina's copy gone, or the missed ride saved. One
+ * that is not done yet ("kept") stays while it is still in its time, and
+ * after it goes: an entry past its time is checked once more, so a watch
+ * workout that synced while the app was away is still found. One that cannot
+ * be checked now ("unreadable") stays for the next pass, up to
+ * RIDE_ENTRY_HARD_LIMIT times its time, and once the iPhone turns out to be
+ * locked the rest wait too: they would be unreadable just the same.
  */
 export const tidySavedRideWorkouts = async (
   list: readonly SavedRideWorkout[],
   now: number,
-  check: (entry: SavedRideWorkout) => Promise<SavedRideCheck>
+  check: (entry: SavedRideWorkout) => Promise<SavedRideCheck>,
+  checkFor = SAVED_RIDE_CHECK_MS
 ): Promise<SavedRideWorkout[]> => {
   const next: SavedRideWorkout[] = [];
   let readable = true;
   for (const entry of list) {
-    if (!savedRideStillChecked(entry, now)) continue;
+    if (!savedRideStillChecked(entry, now, RIDE_ENTRY_HARD_LIMIT * checkFor)) continue;
     if (!readable) {
       next.push(entry);
       continue;
     }
     const outcome = await check(entry).catch((): SavedRideCheck => "unreadable");
     if (outcome === "removed") continue;
-    if (outcome === "unreadable") readable = false;
-    next.push(entry);
+    if (outcome === "unreadable") {
+      readable = false;
+      next.push(entry);
+      continue;
+    }
+    if (savedRideStillChecked(entry, now, checkFor)) next.push(entry);
   }
   return next;
 };
 
-export function createSavedRideWorkoutsStore(storage: SavedRideWorkoutsStorage) {
+export function createSavedRideWorkoutsStore(
+  storage: SavedRideWorkoutsStorage,
+  { keyOf = savedRideWorkoutsKey, checkFor = SAVED_RIDE_CHECK_MS }: { keyOf?: (userId: string) => string; checkFor?: number } = {}
+) {
   // Read, change, write: one at a time, or a ride saved during a check is lost.
   let queue: Promise<unknown> = Promise.resolve();
   const inTurn = <T>(task: () => Promise<T>): Promise<T> => {
@@ -113,7 +136,7 @@ export function createSavedRideWorkoutsStore(storage: SavedRideWorkoutsStorage) 
 
   const read = async (userId: string) => {
     try {
-      return parseSavedRideWorkouts(await storage.getItem(savedRideWorkoutsKey(userId)));
+      return parseSavedRideWorkouts(await storage.getItem(keyOf(userId)));
     } catch {
       return [];
     }
@@ -121,8 +144,8 @@ export function createSavedRideWorkoutsStore(storage: SavedRideWorkoutsStorage) 
 
   const write = async (userId: string, list: readonly SavedRideWorkout[]) => {
     try {
-      if (list.length) await storage.setItem(savedRideWorkoutsKey(userId), JSON.stringify(list));
-      else await storage.removeItem(savedRideWorkoutsKey(userId));
+      if (list.length) await storage.setItem(keyOf(userId), JSON.stringify(list));
+      else await storage.removeItem(keyOf(userId));
     } catch {
       // No storage: this ride's copy is left to the effort card, as before.
     }
@@ -139,7 +162,7 @@ export function createSavedRideWorkoutsStore(storage: SavedRideWorkoutsStorage) 
     inTurn(async () => {
       const list = await read(userId);
       if (!list.length) return list;
-      const next = await tidySavedRideWorkouts(list, now, check);
+      const next = await tidySavedRideWorkouts(list, now, check, checkFor);
       if (next.length !== list.length) await write(userId, next);
       return next;
     });
@@ -147,5 +170,12 @@ export function createSavedRideWorkoutsStore(storage: SavedRideWorkoutsStorage) 
   return { add, tidy, list: (userId: string) => inTurn(() => read(userId)) };
 }
 
-/** This phone's list. */
+/** This phone's list of rides saved in the last day. */
 export const savedRideWorkouts = createSavedRideWorkoutsStore(AsyncStorage);
+
+/**
+ * This phone's list of timed rides Apple Health did not let Equina save yet,
+ * for a week. "removed" from a check means the ride is done with: saved, or
+ * no longer to be saved.
+ */
+export const missedRideWorkouts = createSavedRideWorkoutsStore(AsyncStorage, { keyOf: missedRideWorkoutsKey, checkFor: MISSED_RIDE_KEEP_MS });

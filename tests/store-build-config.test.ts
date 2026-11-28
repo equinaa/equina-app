@@ -201,8 +201,8 @@ for (const [profile, config] of Object.entries(easJson.build)) {
   // sheet, and App Review reads them against what the app does. Read: heart
   // rate, active energy and workouts (all three are asked for) for each
   // ride's time, kept on the phone unless the rider lets Ralf use them for a
-  // question, and never stored by Equina. Save: each ride as an Equestrian
-  // workout. Without them the plugin writes "wants to read your health
+  // question, and never stored by Equina. Save: the rides the rider times,
+  // as Equestrian Sports workouts (never one added by hand). Without them the plugin writes "wants to read your health
   // data", which says neither.
   const health = options("@kingstinct/react-native-healthkit");
   for (const purpose of [health.NSHealthShareUsageDescription, health.NSHealthUpdateUsageDescription]) {
@@ -216,7 +216,7 @@ for (const [profile, config] of Object.entries(easJson.build)) {
     health.NSHealthShareUsageDescription,
     "Equina reads your heart rate, active energy and workouts from Apple Health for the time of each ride, to show your effort. It stays on your iPhone unless you share it with Ralf."
   );
-  assert.equal(health.NSHealthUpdateUsageDescription, "Equina saves each ride to Apple Health as an Equestrian workout.");
+  assert.equal(health.NSHealthUpdateUsageDescription, "Equina saves the rides you time to Apple Health as Equestrian Sports workouts.");
   assert.equal(health.background, false, "No background delivery entitlement: nothing is read while Equina is closed.");
 
   // With the strings in place the image picker plugin no longer removes these itself.

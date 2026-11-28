@@ -28,6 +28,12 @@ export type RideEffortReading = {
   heartRate: readonly HeartRateReading[];
   /** A total for the ride when Apple Health has one: a workout's, or the sum over the ride. */
   activeKcal?: number;
+  /**
+   * Who estimated those calories, when one source did: the workout's app or
+   * device ("Apple Watch", "Equilab"). Unset for Apple Health's sum over the
+   * ride, which counts every source (the iPhone, a ring, a watch) once.
+   */
+  kcalSource?: string;
   /** Energy readings, prorated by their overlap with the ride when there is no total. */
   energy?: readonly EnergyReading[];
 };
@@ -49,6 +55,8 @@ export type RideEffortPoint = { at: number; bpm: number };
 export type RideEffort = {
   capture: EffortCapture;
   sourceLabel?: string;
+  /** Who estimated the calories, when one source did (RideEffortReading). */
+  kcalSource?: string;
   /** The ride, start to end on the wall clock. */
   window: RideWindow;
   /** Readings that count: inside the ridden time, or within a minute of it. */
@@ -201,9 +209,20 @@ const downsample = (readings: HeartRateReading[], start: number, step: number): 
 export const summarizeRideEffort = (
   reading: RideEffortReading,
   window: RideWindow,
-  phases: readonly RidePhaseWindows[]
+  phases: readonly RidePhaseWindows[],
+  {
+    exact = true
+  }: {
+    /**
+     * The phases' windows are the clock's own (timed on this phone). False
+     * when they are only each phase's minutes laid back to back from the
+     * start: a break then sits somewhere unknown, so the whole ride counts as
+     * ridden, and the windows only say which phase a reading belongs to.
+     */
+    exact?: boolean;
+  } = {}
 ): RideEffort => {
-  const ridden = riddenWindows(window, phases);
+  const ridden = exact ? riddenWindows(window, phases) : window.end > window.start ? [{ ...window }] : [];
   const riddenMs = ridden.reduce((sum, each) => sum + (each.end - each.start), 0);
   const phaseWindows = phases.map((phase) => ({
     phaseIndex: phase.phaseIndex,
@@ -276,7 +295,9 @@ export const summarizeRideEffort = (
         const most = phaseWindows
           .map((phase) => ({ phaseIndex: phase.phaseIndex, ms: overlapWith(gap, phase.windows) }))
           .sort((a, b) => b.ms - a.ms)[0];
-        longestGap = { ms, phaseIndex: most && most.ms > 0 ? most.phaseIndex : null };
+        // Without the clock's windows a gap may be the break itself: it is
+        // named for no phase.
+        longestGap = { ms, phaseIndex: exact && most && most.ms > 0 ? most.phaseIndex : null };
       }
     }
   }
@@ -284,6 +305,7 @@ export const summarizeRideEffort = (
   return {
     capture: reading.capture,
     ...(reading.sourceLabel ? { sourceLabel: reading.sourceLabel } : {}),
+    ...(reading.kcalSource && kcalOf(reading, window) !== null ? { kcalSource: reading.kcalSource } : {}),
     window: { ...window },
     readings: counted.length,
     avgBpm,
@@ -352,10 +374,11 @@ export const noEffortMessage = ({
   now: number;
 }): EffortMessage & { waiting: boolean } => {
   const span = `${clockLabel(window.start)} to ${clockLabel(window.end)}`;
+  // No reading at all, so no source to name: a watch, a strap or nothing.
   if (!manual && now >= window.end && now - window.end < WATCH_WAIT_MS) {
     return {
-      title: "Waiting for your Apple Watch",
-      body: "Heart rate usually arrives a few minutes after the ride.",
+      title: "No heart rate yet",
+      body: "It can take a few minutes to reach Apple Health after the ride.",
       waiting: true
     };
   }
@@ -369,9 +392,25 @@ export const noEffortMessage = ({
 };
 
 /** For readings minutes apart: how to get the full line next time. */
-export const WORKOUT_TIP = "For the full line, start an Equestrian Sports workout on your watch when you ride.";
+export const WORKOUT_TIP = "For the full line, start an Equestrian Sports workout on your Apple Watch when you ride, if you wear one.";
 export const SPARSE_NOTE = "Measured every few minutes, so short efforts may not show.";
-export const KCAL_NOTE = "Calories are your watch's estimate.";
+/** Apple Health's own sum over the ride: every source that recorded energy, the iPhone included. */
+export const KCAL_NOTE = "Calories are an estimate from Apple Health.";
+
+/** Whose estimate the calories are, by where they came from; never a guess that it was a watch. */
+export const kcalNote = (kcalSource?: string) => {
+  if (kcalSource === "Apple Watch") return "Calories are your Apple Watch's estimate.";
+  if (kcalSource && kcalSource !== "Apple Health") return `Calories are ${kcalSource}'s estimate.`;
+  return KCAL_NOTE;
+};
+
+/** What the ride's effort holds, in words: "heart rate and calories", "heart rate", or "calories". */
+export const effortWords = (effort: Pick<RideEffort, "avgBpm" | "activeKcal">) =>
+  effort.avgBpm !== null && effort.activeKcal !== null
+    ? "heart rate and calories"
+    : effort.avgBpm !== null
+      ? "heart rate"
+      : "calories";
 
 /** The small print under the card: only the notes that apply. */
 export const effortFootnotes = (
@@ -388,7 +427,7 @@ export const effortFootnotes = (
   }
   if (state === "sparse") notes.push(SPARSE_NOTE);
   if (state === "sparse" || state === "few") notes.push(WORKOUT_TIP);
-  if (effort.activeKcal !== null) notes.push(KCAL_NOTE);
+  if (effort.activeKcal !== null) notes.push(kcalNote(effort.kcalSource));
   return notes;
 };
 
@@ -477,6 +516,7 @@ export const effortForRalf = (
   if (byPhase.length && state !== "few") {
     line += ` By phase: ${byPhase.join(", ")} bpm.`;
     if (placement === "typed") line += " The phase heart rates follow minutes I typed afterwards.";
+    if (placement === "estimated") line += " The phase heart rates follow each phase's minutes, not the clock, so after a pause they may be off.";
   }
   if (effort.readings > 0 && (state === "sparse" || state === "few")) line += " Measured every few minutes, not during a workout.";
   const single = line.replace(/\s+/g, " ").trim();
@@ -496,7 +536,7 @@ export const RALF_EFFORT_SWITCH_DETAIL = "From Apple Health, only in the rides y
  * numbers, as App Review 5.1.2(i) asks, without naming it, and what happens
  * to them: they go with that one question and Equina keeps none of them
  * (coach-chat hands them to the model, saves only the question, and takes
- * them out of the reply before saving it). The answer is kept on this phone
+ * the sentences that hold them out of the reply before saving it). The answer is kept on this phone
  * (health-settings.ts) and Account › Privacy and Ralf changes it.
  */
 export const RALF_EFFORT_CONSENT = {
@@ -504,8 +544,10 @@ export const RALF_EFFORT_CONSENT = {
   message:
     "When you ask Ralf about a ride, Equina can add your heart rate and calories from it: the average, the highest and each phase's average, never the full line. " +
     "These numbers are sent with that one question to the AI service that writes Ralf's answers. " +
-    "Equina does not save them, and Ralf's reply does not repeat them. " +
-    "Ralf talks about training effort, not medical matters. You can turn this off in Account, Privacy and Ralf.",
+    "Equina does not save them: Ralf is asked not to repeat them, and Equina takes out any his reply holds before saving it. " +
+    "Ralf talks about training effort, not medical matters. You can change this anytime in Account, Privacy and Ralf.",
   allow: "Allow",
-  notNow: "Not now"
+  // Kept as the answer, so the question is not asked again: "Don't allow"
+  // says so, where "Not now" would promise to ask later.
+  decline: "Don't allow"
 } as const;

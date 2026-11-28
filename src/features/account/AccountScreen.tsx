@@ -710,6 +710,14 @@ function NotificationSettings({
   );
 }
 
+/** What the Save rides row says, by what Apple Health allows. */
+export const healthSaveDetail = (status: AppleHealthController["savingStatus"]) =>
+  status === "denied"
+    ? "Off in the Health app: allow Equina to save workouts there"
+    : status === "not-asked"
+      ? "Each ride you time, as an Equestrian Sports workout. Apple Health asks first."
+      : "Each ride you time, as an Equestrian Sports workout";
+
 function PrivacySettings({
   snapshot,
   mode,
@@ -795,9 +803,17 @@ function PrivacySettings({
           <SettingsRow
             testID="account-health-save"
             title="Save rides to Apple Health"
-            detail="Each ride you time, as an Equestrian Sports workout"
-            switchValue={appleHealth.settings.saveRides}
-            onToggle={(saveRides) => appleHealth.update({ saveRides })}
+            detail={healthSaveDetail(appleHealth.savingStatus)}
+            // On only when it works: the rider's own choice here, and Apple
+            // Health letting Equina save. Off asks Apple first; refused there,
+            // it can only be changed in the Health app.
+            switchValue={appleHealth.settings.saveRides && appleHealth.savingStatus === "allowed"}
+            onToggle={(saveRides) => {
+              if (!saveRides) return appleHealth.update({ saveRides: false });
+              if (appleHealth.savingStatus === "denied") return void Linking.openURL("x-apple-health://").catch(() => undefined);
+              appleHealth.update({ saveRides: true });
+              if (appleHealth.savingStatus !== "allowed") void appleHealth.connect();
+            }}
           />
           <SettingsRow
             testID="account-health-access"

@@ -13,7 +13,7 @@ import { equinaTheme } from "../../ui/theme/theme";
 import { RalfMedal } from "../coach/RalfMedal";
 import { RideEffortCard } from "../health/RideEffortCard";
 import { ralfMayUseEffort } from "../health/health-settings";
-import { effortForRalf, RALF_EFFORT_CONSENT } from "../health/ride-effort";
+import { effortForRalf, effortWords, RALF_EFFORT_CONSENT } from "../health/ride-effort";
 import { useRideEffort, type AppleHealthController } from "../health/useAppleHealth";
 import type { RideMood } from "./RideExperience";
 import { CompareStrip, PhasesCard, RideStepper, RideWeekCard, TrendCard, moodWord, type TrendMetric } from "./RideContextCards";
@@ -460,7 +460,11 @@ function RideDetail({
   const effortLine = effortShown && appleHealth && !minimalContext
     ? effortForRalf(effortShown, { phases: entry.phases, placement: effort.placement })
     : null;
-  const effortForRalfNow = Boolean(effortLine && appleHealth && ralfMayUseEffort(appleHealth.settings, minimalContext));
+  // The rider said yes and Minimal context is off: the card says Ralf gets them.
+  const ralfGetsEffort = Boolean(appleHealth && ralfMayUseEffort(appleHealth.settings, minimalContext));
+  const effortForRalfNow = Boolean(effortLine && ralfGetsEffort);
+  // What the line holds, so the words never promise a heart rate it lacks.
+  const effortSent = effortShown && effortForRalfNow ? effortWords(effortShown) : null;
 
   // The heart rate goes to Ralf only after a yes, asked the first time it
   // would: Ralf's replies are written by an AI provider, who would receive it.
@@ -476,7 +480,7 @@ function RideDetail({
       RALF_EFFORT_CONSENT.message,
       [
         {
-          text: RALF_EFFORT_CONSENT.notNow,
+          text: RALF_EFFORT_CONSENT.decline,
           style: "cancel",
           onPress: () => {
             appleHealth.update({ ralfEffort: "declined" });
@@ -518,8 +522,11 @@ function RideDetail({
       )
     );
   };
+  // Only this ride's heart rate goes, never the other rides'.
   const ralfGets = compared
-    ? `Ralf gets this ride and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}${effortForRalfNow ? ", with your heart rate and calories" : ""}.`
+    ? effortSent
+      ? `Ralf gets this ride with your ${effortSent}, and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}.`
+      : `Ralf gets this ride and ${lastRidesPhrase(shownScope, words, compared.baseline.length)}.`
     : "";
   const difference = compared && compared.averageMinutes !== null ? compared.minutes - compared.averageMinutes : 0;
   // The question is about this ride's own weekday, the one it is usually ridden on.
@@ -675,7 +682,9 @@ function RideDetail({
 
       <PhasesCard entry={entry} comparison={comparison} />
 
-      {appleHealth ? <RideEffortCard entry={entry} effort={effort} horse={horse} onManage={onManageHealth} /> : null}
+      {appleHealth ? (
+        <RideEffortCard entry={entry} effort={effort} horse={horse} onManage={onManageHealth} ralfGetsEffort={ralfGetsEffort} />
+      ) : null}
 
       {week ? <RideWeekCard week={week} streak={streak} horse={horse} onOpenDay={onOpenDay} /> : null}
 
@@ -779,8 +788,8 @@ function RideDetail({
             onPress={askPlain}
           />
           <Text style={styles.askHint}>
-            {effortForRalfNow
-              ? "What went well, and the one thing to work on next time. Ralf gets your heart rate and calories too."
+            {effortSent
+              ? `What went well, and the one thing to work on next time. Ralf gets your ${effortSent} too.`
               : "What went well, and the one thing to work on next time."}
           </Text>
         </View>

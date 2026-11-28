@@ -18,12 +18,14 @@ import { selectionHaptic } from "../../ui/motion/haptics";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
 import { equinaTheme } from "../../ui/theme/theme";
 import { effortChartLayout, ribbonFits } from "./effort-chart";
+import { sourceChipSpoken } from "./health-workouts";
 import {
   effortChartSteps,
   effortFootnotes,
   effortInsight,
   effortPhaseName,
   effortStatsSpoken,
+  effortWords,
   noEffortMessage,
   rideEffortState,
   type RideEffort
@@ -49,13 +51,19 @@ export function RideEffortCard({
   entry,
   effort: controller,
   horse,
-  onManage
+  onManage,
+  ralfGetsEffort = false
 }: {
   entry: RideEntry;
   effort: RideEffortController;
   horse?: string;
   /** Account › Privacy and Ralf, where showing, saving and Ralf's use are turned off. */
   onManage?: () => void;
+  /**
+   * The rider said yes to Ralf getting these numbers and Minimal context is
+   * off (ralfMayUseEffort): "only you" then says Ralf gets them too.
+   */
+  ralfGetsEffort?: boolean;
 }) {
   const { view } = controller;
   const manual = entry.source === "manual";
@@ -63,14 +71,20 @@ export function RideEffortCard({
   const shown = view.kind === "ready" ? view.effort : view.kind === "reading" ? view.effort : undefined;
   const state = shown ? rideEffortState(shown) : null;
 
-  // Said once per ride, as the reading lands.
+  // Said once per ride, as the reading lands: the card's own title when there
+  // is nothing, or what was added ("Calories added to this ride").
+  const spokenNow = !shown || view.kind !== "ready"
+    ? null
+    : state === "none"
+      ? noEffortMessage({ window: shown.window, manual, now: Date.now() }).title
+      : `${capitalized(effortWords(shown))} added to this ride`;
   useEffect(() => {
-    if (view.kind !== "ready") return;
-    const key = `${entry.id}:${state}`;
+    if (!spokenNow) return;
+    const key = `${entry.id}:${spokenNow}`;
     if (announced.current === key) return;
     announced.current = key;
-    AccessibilityInfo.announceForAccessibility(state === "none" ? "No heart rate found for this ride" : "Heart rate added to this ride");
-  }, [entry.id, state, view.kind]);
+    AccessibilityInfo.announceForAccessibility(spokenNow);
+  }, [entry.id, spokenNow]);
 
   if (view.kind === "off") return null;
 
@@ -81,7 +95,9 @@ export function RideEffortCard({
         <Text style={styles.body}>
           Wear your Apple Watch when you ride and Equina shows your heart rate across each phase and your active calories, from Apple Health. Rides you time are saved there as workouts.
         </Text>
-        <Text style={styles.body}>{`It's your heart rate, not ${horse ? `${horse}'s` : "your horse's"}. Only you see it, on this iPhone.`}</Text>
+        <Text style={styles.body}>
+          {`It's your heart rate, not ${horse ? `${horse}'s` : "your horse's"}. ${ralfGetsEffort ? "Only you see it. Ralf gets it when you ask about a ride." : "Only you see it, on this iPhone."}`}
+        </Text>
         <EquinaButton testID="ride-effort-connect-button" label="Connect Apple Health" onPress={controller.connect} />
         <MotionPressable
           testID="ride-effort-not-now"
@@ -135,8 +151,10 @@ export function RideEffortCard({
     );
   }
 
-  return <EffortDetails entry={entry} effort={shown} controller={controller} onManage={onManage} />;
+  return <EffortDetails entry={entry} effort={shown} controller={controller} onManage={onManage} ralfGetsEffort={ralfGetsEffort} />;
 }
+
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 function CheckAgain({ onPress, busy = false }: { onPress: () => void; busy?: boolean }) {
   return (
@@ -161,12 +179,14 @@ function EffortDetails({
   entry,
   effort,
   controller,
-  onManage
+  onManage,
+  ralfGetsEffort
 }: {
   entry: RideEntry;
   effort: RideEffort;
   controller: RideEffortController;
   onManage?: () => void;
+  ralfGetsEffort: boolean;
 }) {
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale > STACK_ABOVE_FONT_SCALE;
@@ -186,7 +206,7 @@ function EffortDetails({
         <Text accessibilityRole="header" style={styles.sectionLabel}>Your effort</Text>
         {effort.sourceLabel ? (
           <Text
-            accessibilityLabel={`From ${effort.sourceLabel}, through Apple Health`}
+            accessibilityLabel={sourceChipSpoken(effort.sourceLabel)}
             numberOfLines={1}
             style={styles.chip}
           >
@@ -196,7 +216,9 @@ function EffortDetails({
       </View>
       <View style={styles.privacy}>
         <Lock size={12} strokeWidth={2} color={equinaTheme.text.secondary} />
-        <Text style={styles.meta}>Only you see this</Text>
+        <Text style={[styles.meta, styles.privacyText]}>
+          {ralfGetsEffort ? "Only you see this. Ralf gets it when you ask about a ride." : "Only you see this"}
+        </Text>
         {onManage ? (
           <>
             <Text style={styles.meta}> · </Text>
@@ -480,6 +502,9 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 4,
     marginVertical: -equinaTheme.spacing.sm
+  },
+  privacyText: {
+    flexShrink: 1
   },
   manage: {
     minHeight: equinaTheme.accessibility.minimumTapTarget,

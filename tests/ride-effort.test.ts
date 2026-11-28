@@ -11,7 +11,9 @@ import {
   effortInsight,
   effortPhaseName,
   effortStatsSpoken,
+  effortWords,
   KCAL_NOTE,
+  kcalNote,
   MAX_SERIES_POINTS,
   mergeWindows,
   noEffortMessage,
@@ -28,6 +30,7 @@ import {
   type RideEffortReading
 } from "../src/features/health/ride-effort";
 import { defaultRidePhases, rideTrainingTypes, type RidePhaseWindows } from "../src/features/ride/ride-plan";
+import { approximatePhaseWindows } from "../src/features/ride/ride-timeline";
 import {
   RIDE_REVIEW_EFFORT_LIMIT,
   rideComparePrompt,
@@ -263,9 +266,10 @@ const sparseEffort = summarizeRideEffort({ capture: "samples", sourceLabel: "App
   assert.equal(effortInsight(nothing, windows, phases), null);
   const span = `${clockLabel(ride.start)} to ${clockLabel(ride.end)}`;
   // Equina cannot tell "not allowed" from "nothing there", and a watch syncs late.
+  // No reading, so no source to name: never "your Apple Watch" to a rider who may not wear one.
   assert.deepEqual(noEffortMessage({ window: ride, manual: false, now: ride.end + 10 * minute }), {
-    title: "Waiting for your Apple Watch",
-    body: "Heart rate usually arrives a few minutes after the ride.",
+    title: "No heart rate yet",
+    body: "It can take a few minutes to reach Apple Health after the ride.",
     waiting: true
   });
   assert.deepEqual(noEffortMessage({ window: ride, manual: false, now: ride.end + WATCH_WAIT_MS }), {
@@ -342,6 +346,64 @@ assert.deepEqual(effortChartSteps(denseEffort, windows, phases), [
   const trot = narrow.bands[1]!;
   assert.ok(trot.width < MIN_LABELLED_BAND && trot.avg && trot.avg.label === null, "A band too narrow keeps its line and drops its number.");
   assert.equal(ribbonFits(narrow.bands, 1), false);
+}
+
+// --- A ride with no timeline on this phone, and a break -----------------------------
+
+// Timed on another phone, or before the timeline: the phases' minutes laid
+// back to back from the start. Their minutes leave the break out, the ride's
+// start and end do not, so the last stretch would fall past the last phase.
+{
+  const start = t0;
+  const end = t0 + 80 * minute;
+  // Walk 30 min, a 20 min break, then the trot's 30 min.
+  const entry = {
+    startedAt: new Date(start).toISOString(),
+    completedAt: new Date(end).toISOString(),
+    phases: [
+      { title: "Pre warm-up", detail: "Walk", plannedSeconds: 1800, actualSeconds: 1800 },
+      { title: "Warm-up", detail: "Trot", plannedSeconds: 1800, actualSeconds: 1800 }
+    ]
+  };
+  const placed = approximatePhaseWindows(entry);
+  assert.deepEqual(placed.map((phase) => phase.windows), [[{ start, end: start + 30 * minute }], [{ start: start + 30 * minute, end: start + 60 * minute }]]);
+  // Walk, then standing during the break, then trot, and a canter at the end.
+  const readings = readingsOver(start, end, 30 * second, (at) =>
+    at < start + 30 * minute ? 120 : at < start + 50 * minute ? 80 : at < start + 61 * minute ? 130 : 170
+  );
+  const estimated = summarizeRideEffort(workout(readings), { start, end }, placed, { exact: false });
+  assert.equal(estimated.maxBpm, 170, "The canter after the break counts.");
+  const lastRun = estimated.series[estimated.series.length - 1]!;
+  assert.ok(lastRun[lastRun.length - 1]!.at > end - 2 * minute, "The line reaches the ride's end.");
+  assert.ok(estimated.readings > 155, "Every reading of the ride's time counts.");
+  assert.notEqual(estimated.longestGap?.phaseIndex, 1, "A gap is never pinned on a phase the clock did not place.");
+  // As the clock's own windows, the same placement would drop the end.
+  const asTimed = summarizeRideEffort(workout(readings), { start, end }, placed);
+  assert.equal(asTimed.maxBpm, 130, "The windows alone stop at the sum of the minutes.");
+  // And Ralf is told the phase lines may be off.
+  assert.match(
+    effortForRalf(estimated, { phases: entry.phases, placement: "estimated" }) ?? "",
+    /The phase heart rates follow each phase's minutes, not the clock, so after a pause they may be off\.$/
+  );
+}
+
+// --- Whose calories, and what the line holds ----------------------------------------
+
+{
+  assert.equal(kcalNote("Apple Watch"), "Calories are your Apple Watch's estimate.");
+  assert.equal(kcalNote("Equilab"), "Calories are Equilab's estimate.");
+  assert.equal(kcalNote(), KCAL_NOTE, "Apple Health's sum over the ride: every source, the iPhone included.");
+  assert.equal(kcalNote("Apple Health"), KCAL_NOTE);
+  assert.equal(KCAL_NOTE, "Calories are an estimate from Apple Health.");
+  assert.doesNotMatch(KCAL_NOTE, /watch/i, "No watch assumed.");
+  const fromApp = summarizeRideEffort({ capture: "watch-workout", sourceLabel: "Equilab", kcalSource: "Equilab", heartRate: [], activeKcal: 210 }, ride, windows);
+  assert.deepEqual(effortFootnotes(fromApp, { placement: "timed", phases }), [WORKOUT_TIP, "Calories are Equilab's estimate."]);
+  assert.equal(summarizeRideEffort({ capture: "samples", kcalSource: "Equilab", heartRate: [] }, ride, windows).kcalSource, undefined, "No calories, no source for them.");
+  assert.match(WORKOUT_TIP, /on your Apple Watch when you ride, if you wear one\.$/);
+
+  assert.equal(effortWords(denseEffort), "heart rate and calories");
+  assert.equal(effortWords({ avgBpm: 120, activeKcal: null }), "heart rate");
+  assert.equal(effortWords({ avgBpm: null, activeKcal: 80 }), "calories");
 }
 
 // --- Ralf ----------------------------------------------------------------------------
@@ -431,11 +493,14 @@ for (const training of rideTrainingTypes) {
   assert.match(RALF_EFFORT_CONSENT.message, /These numbers are sent with that one question to the AI service that writes Ralf's answers\./);
   // Equina keeps none of them: coach-chat saves the question alone, and
   // takes them out of the reply before it saves that.
-  assert.match(RALF_EFFORT_CONSENT.message, /Equina does not save them, and Ralf's reply does not repeat them\./);
+  assert.match(RALF_EFFORT_CONSENT.message, /Equina does not save them: Ralf is asked not to repeat them, and Equina takes out any his reply holds before saving it\./);
+  assert.doesNotMatch(RALF_EFFORT_CONSENT.message, /reply does not repeat them/, "Never a promise about what the model writes.");
   assert.equal(RALF_EFFORT_SWITCH_DETAIL, "From Apple Health, only in the rides you ask about. Sent to the AI service that writes Ralf's answers.");
   assert.match(RALF_EFFORT_CONSENT.message, /never the full line/);
   assert.match(RALF_EFFORT_CONSENT.message, /Account, Privacy and Ralf/);
-  assert.deepEqual([RALF_EFFORT_CONSENT.allow, RALF_EFFORT_CONSENT.notNow], ["Allow", "Not now"]);
+  // The answer is kept either way, and Account changes it both ways.
+  assert.match(RALF_EFFORT_CONSENT.message, /You can change this anytime in Account, Privacy and Ralf\./);
+  assert.deepEqual([RALF_EFFORT_CONSENT.allow, RALF_EFFORT_CONSENT.decline], ["Allow", "Don't allow"]);
 }
 
 // The card's words: sentence case, no exclamation marks, Apple Health by its name.
