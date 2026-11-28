@@ -110,6 +110,15 @@ import { ShopThreadList } from "./features/messaging/ShopThreadList";
 import { useConnectedShopCatalog } from "./features/messaging/useConnectedShopCatalog";
 import { clearShopDrafts, useShopConversation } from "./features/messaging/useShopConversation";
 import { usePushRegistration } from "./features/notifications/usePushRegistration";
+import { useNotificationTaps } from "./features/notifications/useNotificationTaps";
+import { NotificationNoticeCard } from "./features/notifications/NotificationNoticeCard";
+import {
+  tapNeeds,
+  tapTarget,
+  type NotificationTap,
+  type TapNotice,
+  type TapTarget
+} from "./features/notifications/notification-routes";
 import {
   HorseEditorSheet,
   RecordEditorSheet
@@ -151,7 +160,7 @@ import { useClub } from "./features/club/useClub";
 import { RideSummaryCard } from "./features/ride/RideSummaryCard";
 import { summarise, type RidePeriod } from "./domain/ride-stats";
 import { localDayOf, localToday, startOfPreviousMonth } from "./domain/local-day";
-import { activitiesByDay } from "./domain/activity-calendar";
+import { activitiesByDay, firstLoggableDay } from "./domain/activity-calendar";
 import { ActivityCalendarScreen } from "./features/calendar/ActivityCalendarScreen";
 import { HomeWeekStrip } from "./features/calendar/HomeWeekStrip";
 import { RalfMedal } from "./features/coach/RalfMedal";
@@ -971,13 +980,6 @@ function EquinaApp() {
   const [rideActive, setRideActive] = useState(false);
   // Set on the setup sheet; its Start training starts the clock.
   const [rideSetupOpen, setRideSetupOpen] = useState(false);
-  // The setup sheet opened for one particular ride instead of the next one:
-  // a ride repeated from the journal. Cleared when the sheet closes.
-  const [rideSetupOverride, setRideSetupOverride] = useState<{
-    horseId: string;
-    trainingType: RideTrainingType;
-    phases: RidePhasePlan[];
-  } | null>(null);
   const [addActivityOpen, setAddActivityOpen] = useState(false);
   // The day picked in the calendar for Add activity; none from Home's button.
   const [addActivityDay, setAddActivityDay] = useState<string | undefined>(undefined);
@@ -991,6 +993,28 @@ function EquinaApp() {
   } | null>(null);
   // The calendar, open on a day.
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
+  // A tapped notification, until the app can tell where it leads: signed in,
+  // through the door, and with what that route needs read (or 8 seconds
+  // gone, offline at the yard). The newest tap replaces one still waiting.
+  const [pendingTap, setPendingTap] = useState<NotificationTap | null>(null);
+  const [tapWaitOver, setTapWaitOver] = useState(false);
+  // What the tapped notification said, on the screen it opened.
+  const [tapNotice, setTapNotice] = useState<{ on: "calendar" | "rideSetup" | "home"; notice: TapNotice } | null>(null);
+  // The scheduled activity a tapped reminder was for, marked out in the calendar.
+  const [calendarFocusId, setCalendarFocusId] = useState<string | undefined>(undefined);
+  // The setup sheet opened for one particular ride instead of Home's next
+  // one: the ride a tapped training-day reminder named, or a ride repeated
+  // from the journal with its own phases. Keyed, so the sheet starts over
+  // for each; cleared when the sheet closes.
+  const [rideSetupOverride, setRideSetupOverride] = useState<{
+    key: string;
+    horseId?: string;
+    trainingType: RideTrainingType;
+    phases?: RidePhasePlan[];
+  } | null>(null);
+  // Whether a ride kept on the phone has been looked for: until then a tap
+  // cannot know if a ride is running.
+  const [activeRideChecked, setActiveRideChecked] = useState(false);
   const [rideJournalOpen, setRideJournalOpen] = useState(false);
   const [deletingRideId, setDeletingRideId] = useState("");
   const [horseSwitcherOpen, setHorseSwitcherOpen] = useState(false);
@@ -1123,6 +1147,12 @@ function EquinaApp() {
     setAddActivityDay(undefined);
     setActivityOverride(null);
     setCalendarDay(null);
+    // A tap waiting, and what one opened, were the last account's.
+    setPendingTap(null);
+    setTapNotice(null);
+    setCalendarFocusId(undefined);
+    setRideSetupOverride(null);
+    setActiveRideChecked(false);
     setRideJournalOpen(false);
     setHorseSwitcherOpen(false);
     setHorseCreatorOpen(false);
@@ -1215,6 +1245,7 @@ function EquinaApp() {
       if (stored) restoreRide(stored);
       // Nothing to bring back, or one too old or unreadable, now removed.
       else if (!rideActiveRef.current) void cancelStaleRideAlerts();
+      setActiveRideChecked(true);
     }
   );
   // Every horse the rider has, not only the one selected in the Stable: a
@@ -1306,13 +1337,22 @@ function EquinaApp() {
   const nextTraining = todayTraining ?? rememberedTraining;
   // One tap starts the clock, so the setup is never reopened for a ride in
   // progress: the draft is always the next ride's.
-  const rideSetupDraft = rideSetupOverride ?? {
+  const rideSetupDraft = {
     // Home's horse -- the last one picked -- and the remembered one only
     // before the Stable has loaded. Today's planned training is this horse's.
     horseId: horseRecords.selectedHorseId || rideSetupMemory.memory?.horseId,
     trainingType: nextTraining,
     phases: phasesFor(rideSetupMemory.memory, nextTraining)
   };
+  // The sheet opened from a training-day reminder or a repeated ride sets up
+  // that ride; Home's own words stay on Home's next ride.
+  const rideSetupSheetDraft = rideSetupOverride
+    ? {
+        horseId: rideSetupOverride.horseId ?? rideSetupDraft.horseId,
+        trainingType: rideSetupOverride.trainingType,
+        phases: rideSetupOverride.phases ?? phasesFor(rideSetupMemory.memory, rideSetupOverride.trainingType)
+      }
+    : rideSetupDraft;
   // The word after TODAY on Home, from the same week as the plan card. In the
   // demo there is no plan: the rider's discipline stays.
   const homeToday: HomeToday = homeTodayFor({
@@ -1479,17 +1519,17 @@ function EquinaApp() {
   const pushRegistration = usePushRegistration({
     backend: equinaSession.backend,
     enabled: accountMode === "connected" && equinaSession.capabilities.pushNotifications,
-    authenticated: equinaSession.phase === "authenticated",
-    onOpenConversation: (conversationId) => {
-      setPendingShopConversationId(conversationId);
-      setShopMode("browse");
-      setShopBuyerView("conversation");
-      // Mid-ride the ride stays in front: the ride screen lives on Home, and
-      // leaving it would stop the phase alerts while the clock runs on. The
-      // conversation waits in the Shop for when the rider opens it.
-      if (rideActiveRef.current) return;
-      setTab("gear");
-    }
+    authenticated: equinaSession.phase === "authenticated"
+  });
+  // Every notification tap, the one that launched the app from closed
+  // included. Here, above the early returns, so it listens from the first
+  // render; the tap waits in pendingTap until it can be placed (below).
+  useNotificationTaps({
+    onTap: (tap) => {
+      setPendingTap(tap);
+      setTapWaitOver(false);
+    },
+    rideRunning: rideActive
   });
   const screenAnim = useRef(new Animated.Value(1)).current;
   const onboardingArrival = useRef(new Animated.Value(0)).current;
@@ -1808,11 +1848,17 @@ function EquinaApp() {
     setRideSetupOpen(true);
   };
 
+  // A reminder's ride and words belong to the one opening they came with.
+  const closeRideSetupExtras = () => {
+    setRideSetupOverride(null);
+    setTapNotice((current) => (current?.on === "rideSetup" ? null : current));
+  };
+
   // Start training starts the clock and the first phase in the same tap, so
   // the rider can put the phone away straight after.
   const confirmRideSetup = (plan: RidePlan) => {
     setRideSetupOpen(false);
-    setRideSetupOverride(null);
+    closeRideSetupExtras();
     if (rideActive) return;
     setRidePlan(plan);
     setRideRun(startRun(readyRun(), Date.now()));
@@ -2028,6 +2074,135 @@ function EquinaApp() {
     setRalfOpen(false);
   };
 
+  // Notification taps ---------------------------------------------------------
+
+  // Closing the calendar ends what a tap put in it.
+  const closeCalendar = () => {
+    setCalendarDay(null);
+    setCalendarFocusId(undefined);
+    setTapNotice((current) => (current?.on === "calendar" ? null : current));
+  };
+
+  // The sheets are Modals, and a second one does not open over the first:
+  // whatever is over the app closes before a tap opens its own screen. A
+  // horse still being created stays, so its save is not lost.
+  const closeOverlaysForTap = () => {
+    closeRalf();
+    setLastRideRecapVisible(false);
+    setRideSetupOpen(false);
+    closeRideSetupExtras();
+    setAddActivityOpen(false);
+    closeCalendar();
+    setRideJournalOpen(false);
+    setHorseSwitcherOpen(false);
+    setHorseCreatorOpen(false);
+    setStreakOpen(false);
+    setTrainingPlanOpen(false);
+    setTimeOffHorseId("");
+  };
+
+  // Carries out where a tap leads (notification-routes.ts decides it).
+  const openTapTarget = (target: TapTarget, tapKey: string) => {
+    if (target.screen === "stay") return;
+    if (target.screen === "shopConversation") {
+      setPendingShopConversationId(target.conversationId);
+      setShopMode("browse");
+      setShopBuyerView("conversation");
+      // Mid-ride the ride stays in front: the ride screen lives on Home, and
+      // leaving it would stop the phase alerts while the clock runs on. The
+      // conversation waits in the Shop for when the rider opens it.
+      if (rideActiveRef.current) return;
+      closeOverlaysForTap();
+      setTab("gear");
+      return;
+    }
+    if (target.screen === "ride") {
+      // The ride screen is Home's while a ride runs, and nothing else is
+      // drawn over it.
+      closeRalf();
+      setTab("home");
+      return;
+    }
+    closeOverlaysForTap();
+    setTab("home");
+    if (target.screen === "rideSetup") {
+      setRideSetupOverride({
+        key: tapKey,
+        ...(target.horseId ? { horseId: target.horseId } : {}),
+        trainingType: plannedTraining(target.trainingType)
+      });
+      setTapNotice({ on: "rideSetup", notice: target.notice });
+      startRide();
+      return;
+    }
+    if (target.screen === "calendar") {
+      setCalendarFocusId(target.focusId);
+      setTapNotice({ on: "calendar", notice: target.notice });
+      setCalendarDay(target.day);
+      return;
+    }
+    setTapNotice({ on: "home", notice: target.notice });
+  };
+
+  // Where a tap can be placed: an account signed in and through the door,
+  // with the ride kept on the phone looked for. Onboarding, the beta door and
+  // a password reset come first; the demo has no notifications of its own.
+  const tapGateOpen =
+    equinaSession.phase === "authenticated" &&
+    accountCreated &&
+    !betaDoor &&
+    !equinaSession.recoveryRequired &&
+    activeRideChecked &&
+    // A horse still saving keeps its sheet up: iOS will not present another
+    // sheet over it, so the tap waits until the save settles.
+    horseRecords.saving !== "horse:create";
+  // What the tap's route needs read first. A failed read counts as read: the
+  // notification's own words are shown either way.
+  const tapNeed = pendingTap ? tapNeeds(pendingTap) : null;
+  const tapDataIn =
+    !ridePersistence ||
+    (tapNeed === "plan"
+      ? (trainingPlan.loaded || trainingPlan.failed) && horseRecords.horsesLoaded
+      : tapNeed === "planned"
+        ? plannedActivities.loaded
+        : true);
+  // Offline at the yard a read can hang: after 8 seconds the tap is placed
+  // with whatever is in.
+  useEffect(() => {
+    if (!pendingTap || !tapGateOpen || tapDataIn || tapWaitOver) return;
+    const timer = setTimeout(() => setTapWaitOver(true), 8000);
+    return () => clearTimeout(timer);
+  }, [pendingTap, tapGateOpen, tapDataIn, tapWaitOver]);
+  useEffect(() => {
+    if (!pendingTap) return;
+    if (equinaSession.phase === "demo") {
+      setPendingTap(null);
+      return;
+    }
+    if (!tapGateOpen || (!tapDataIn && !tapWaitOver)) return;
+    const tap = pendingTap;
+    // Taken first, so nothing below can place it twice.
+    setPendingTap(null);
+    openTapTarget(
+      tapTarget(tap, {
+        today: localToday(),
+        rideActive: rideActiveRef.current,
+        calendar: ridePersistence,
+        planOn: ridePersistence && trainingPlan.loaded && horseRecords.horsesListed ? trainingPlan.rideDay : null,
+        planned: ridePersistence && plannedActivities.loaded
+          ? { items: plannedActivities.items, complete: !plannedActivities.error, since: firstLoggableDay(localToday()) }
+          : null
+      }),
+      tap.key
+    );
+    // The tap is placed with the state of this render; the rest only says when.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingTap, tapGateOpen, tapDataIn, tapWaitOver, equinaSession.phase]);
+  // Home's notice is about the tap that opened Home; another tab ends it.
+  useEffect(() => {
+    if (tab !== "home") setTapNotice((current) => (current?.on === "home" ? null : current));
+  }, [tab]);
+
   // A horse that was archived or is no longer shared cannot be Ralf's subject:
   // the server refuses it.
   const knownHorseId = (horseId?: string) => (horseId && horseNames[horseId] ? horseId : undefined);
@@ -2072,8 +2247,10 @@ function EquinaApp() {
     const trainingType = repeat.trainingType ?? rideSetupDraft.trainingType;
     setRideJournalOpen(false);
     rideJournal.clearError();
+    const horseId = rideHorseFor(entry) ?? rideSetupDraft.horseId;
     setRideSetupOverride({
-      horseId: rideHorseFor(entry) ?? rideSetupDraft.horseId ?? "",
+      key: `repeat:${entry.id}:${Date.now()}`,
+      ...(horseId ? { horseId } : {}),
       trainingType,
       phases: repeat.phases ?? phasesFor(rideSetupMemory.memory, trainingType)
     });
@@ -3452,6 +3629,16 @@ function EquinaApp() {
             badges={{ community: club.unreadActivity > 0 }}
           />
         )}
+
+        {/* A tapped notification with nowhere better to open says what it was, just above the dock. */}
+        {tapNotice?.on === "home" && tab === "home" && !ralfOpen ? (
+          <NotificationNoticeCard
+            notice={tapNotice.notice}
+            onDismiss={() => setTapNotice(null)}
+            testID="home-notification-notice"
+            style={styles.homeTapNotice}
+          />
+        ) : null}
               </>
             )}
           </Animated.View>
@@ -3460,14 +3647,17 @@ function EquinaApp() {
         <RideSetupSheet
           visible={rideSetupOpen}
           horses={rideHorses}
-          horseId={rideSetupDraft.horseId}
-          trainingType={rideSetupDraft.trainingType}
-          phases={rideSetupDraft.phases}
+          horseId={rideSetupSheetDraft.horseId}
+          trainingType={rideSetupSheetDraft.trainingType}
+          phases={rideSetupSheetDraft.phases}
           memory={rideSetupMemory.memory}
+          notice={tapNotice?.on === "rideSetup" ? tapNotice.notice : null}
+          onDismissNotice={() => setTapNotice(null)}
+          openedFor={rideSetupOverride?.key}
           onContinue={confirmRideSetup}
           onDismiss={() => {
             setRideSetupOpen(false);
-            setRideSetupOverride(null);
+            closeRideSetupExtras();
           }}
         />
 
@@ -3556,13 +3746,16 @@ function EquinaApp() {
           onRemove={async (item) => {
             await plannedActivities.remove(item.id);
           }}
+          notice={tapNotice?.on === "calendar" ? tapNotice.notice : null}
+          focusId={calendarFocusId}
+          onDismissNotice={() => setTapNotice(null)}
           onAddActivity={(day) => {
-            setCalendarDay(null);
+            closeCalendar();
             rideJournal.clearError();
             setAddActivityDay(day);
             setAddActivityOpen(true);
           }}
-          onClose={() => setCalendarDay(null)}
+          onClose={closeCalendar}
         />
 
         <TrainingPlanSheet
@@ -8710,6 +8903,13 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 3,
     backgroundColor: nightTheme.frame
+  },
+  homeTapNotice: {
+    position: "absolute",
+    left: floatingDockMetrics.horizontal,
+    right: floatingDockMetrics.horizontal,
+    bottom: floatingDockMetrics.bottom + floatingDockMetrics.height + equinaTheme.spacing.sm,
+    zIndex: 5
   },
   onboardingLayer: {
     ...StyleSheet.absoluteFillObject,

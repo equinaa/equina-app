@@ -468,12 +468,13 @@ else process.env.TZ = machineZone;
 
   // Repeat this ride opens the setup sheet through the override the
   // notification branch also uses, and every way the sheet closes clears it.
-  assert.match(app, /const rideSetupDraft = rideSetupOverride \?\? \{/);
+  assert.match(app, /const rideSetupSheetDraft = rideSetupOverride\s+\? \{[\s\S]{0,200}phases: rideSetupOverride\.phases \?\? phasesFor/, "The sheet takes the repeated ride's own phases.");
   const repeat = app.slice(app.indexOf("const repeatJournalRide = "), app.indexOf("const planJournalRideAgain = "));
   assert.match(repeat, /setRideJournalOpen\(false\);[\s\S]*setRideSetupOverride\(\{[\s\S]*setRideSetupOpen\(true\);/, "The journal closes, then the sheet opens filled in.");
   assert.match(repeat, /if \(rideActive\) return;/);
-  assert.match(app, /const confirmRideSetup = \(plan: RidePlan\) => \{\s+setRideSetupOpen\(false\);\s+setRideSetupOverride\(null\);/);
-  assert.match(app, /onDismiss=\{\(\) => \{\s+setRideSetupOpen\(false\);\s+setRideSetupOverride\(null\);\s+\}\}/);
+  assert.match(app, /const confirmRideSetup = \(plan: RidePlan\) => \{\s+setRideSetupOpen\(false\);\s+closeRideSetupExtras\(\);/);
+  assert.match(app, /const closeRideSetupExtras = \(\) => \{\s+setRideSetupOverride\(null\);/);
+  assert.match(app, /onDismiss=\{\(\) => \{\s+setRideSetupOpen\(false\);\s+closeRideSetupExtras\(\);\s+\}\}/);
   assert.match(app, /setRideSetupOpen\(false\);\s+setRideSetupOverride\(null\);\s+setAddActivityOpen\(false\);/, "Signing out drops it too.");
 
   // Plan it again goes through Add activity's own day and schedule mode,

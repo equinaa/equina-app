@@ -1,32 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import type { EquinaBackend } from "../../backend";
 
+/**
+ * This phone's push token for Shop messages, registered while the rider has
+ * human messages on. A tap on one is opened by useNotificationTaps, with
+ * every other notification: two listeners would each act on the same tap.
+ */
 export function usePushRegistration({
   backend,
   enabled,
-  authenticated,
-  onOpenConversation
+  authenticated
 }: {
   backend: EquinaBackend | null;
   enabled: boolean;
   authenticated: boolean;
-  onOpenConversation: (conversationId: string) => void;
 }) {
   const [deviceId, setDeviceId] = useState("");
   const [status, setStatus] = useState<"idle" | "registering" | "ready" | "denied" | "error">("idle");
-
-  useEffect(() => {
-    if (Platform.OS === "web") return;
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
-      if (data?.route === "shop-conversation" && typeof data.conversationId === "string") {
-        onOpenConversation(data.conversationId);
-      }
-    });
-    return () => subscription.remove();
-  }, [onOpenConversation]);
 
   const register = useCallback(async () => {
     if (!backend || !enabled || !authenticated || Platform.OS === "web") return false;
