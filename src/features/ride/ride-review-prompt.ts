@@ -15,6 +15,8 @@ import { rideTrainingLabel } from "./ride-plan";
 export const RIDE_REVIEW_PROMPT_LIMIT = 2900;
 /** As much of a rider's note as Ralf reads from the journal on his own. */
 export const RIDE_REVIEW_NOTE_LIMIT = 400;
+/** The heart-rate line is a summary; it can never crowd out the ride's own facts. */
+export const RIDE_REVIEW_EFFORT_LIMIT = 400;
 
 export type RideReviewFacts = {
   /** "Pole work", or the discipline for rides from before the setup sheet. */
@@ -32,6 +34,12 @@ export type RideReviewFacts = {
   note?: string;
   /** Added by hand with Add activity: the minutes are the rider's, not the clock's. */
   logged: boolean;
+  /**
+   * The rider's heart rate and calories for the ride, in one plain line
+   * (effortForRalf, src/features/health/ride-effort.ts). Only ever set after
+   * the rider allowed it: Ralf's replies are written by an AI provider.
+   */
+  effort?: string;
 };
 
 /** "<1 min" for a ride the timer barely saw, as the journal says it, not "0 min". */
@@ -127,6 +135,9 @@ const sessionPrompt = (
     if (facts.totalPhases > 0) lines.push(`I reached ${facts.completedPhases} of ${facts.totalPhases} phases.`);
   }
   for (const phase of facts.phases ?? []) lines.push(phaseLine(phase, facts.logged));
+  // After the phases it is split by, one line, never more than the cap.
+  const effort = facts.effort?.replace(/\s+/g, " ").trim();
+  if (effort) lines.push(effort.length > RIDE_REVIEW_EFFORT_LIMIT ? `${cutAt(effort, RIDE_REVIEW_EFFORT_LIMIT).trim()}...` : effort);
   if (facts.mood) lines.push(`${facts.horseName ?? "My horse"} felt ${facts.mood}.`);
   // Older rides keep a focus of their own ("Rhythm"); newer ones repeat the training.
   const focus = facts.focus?.trim();

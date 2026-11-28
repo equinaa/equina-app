@@ -51,6 +51,8 @@ import { SettingsRow } from "../../ui/settings/SettingsRow";
 import { installedVersionLine } from "../../ui/states/installed-version";
 import { equinaTheme } from "../../ui/theme/theme";
 import { trainingFocusByDiscipline } from "../coach/coach-types";
+import { RALF_EFFORT_SWITCH_DETAIL } from "../health/ride-effort";
+import type { AppleHealthController } from "../health/useAppleHealth";
 import { PlanScreen } from "../plans/PlanScreen";
 import { deletionBillingNote, legalLinks } from "../plans/paywall-copy";
 import { planRowValue } from "../plans/plan-rules";
@@ -108,7 +110,8 @@ export function AccountScreen({
   onCancelDeletion,
   onSignOut,
   onClose,
-  onBackStep
+  onBackStep,
+  appleHealth
 }: {
   mode: AccountMode;
   /** Buying, selling or messaging is on, so its settings mean something. */
@@ -160,6 +163,8 @@ export function AccountScreen({
    * null elsewhere, where the arrow and Back close Account.
    */
   onBackStep?: (step: (() => void) | null) => void;
+  /** Apple Health on this iPhone: its switches in Privacy and Ralf. Absent where there is none. */
+  appleHealth?: AppleHealthController;
 }) {
   const [route, setRoute] = useState<AccountRoute>(initialRoute);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
@@ -286,6 +291,7 @@ export function AccountScreen({
           onExport={() => void exportData()}
           onOpenExport={() => void openExport()}
           onClearHistory={() => setConfirmAction("coach-history")}
+          appleHealth={appleHealth}
         />
       ) : route === "security" ? (
         <SecuritySettings
@@ -713,13 +719,15 @@ function PrivacySettings({
   onSave,
   onExport,
   onOpenExport,
-  onClearHistory
+  onClearHistory,
+  appleHealth
 }: {
   snapshot: AccountSnapshot;
   mode: AccountMode;
   marketplaceOpen: boolean;
   disabled: boolean;
   exportReady: boolean;
+  appleHealth?: AppleHealthController;
   onSave: (
     patch: Partial<Omit<UserPreferencesRecord, "userId" | "version" | "updatedAt">>
   ) => Promise<void>;
@@ -758,7 +766,44 @@ function PrivacySettings({
           disabled={disabled}
           onToggle={(reducedPersonalization) => void onSave({ reducedPersonalization })}
         />
+        {appleHealth ? (
+          // Kept on this iPhone, not on the server: the heart rate never
+          // leaves the phone except inside a question the rider asks.
+          <SettingsRow
+            testID="account-ralf-heart-rate"
+            title="Heart rate and calories"
+            detail={RALF_EFFORT_SWITCH_DETAIL}
+            switchValue={appleHealth.settings.ralfEffort === "allowed" && !values.reducedPersonalization}
+            disabled={values.reducedPersonalization}
+            onToggle={(allowed) => appleHealth.update({ ralfEffort: allowed ? "allowed" : "declined" })}
+          />
+        ) : null}
       </SettingsGroup>
+
+      {appleHealth ? (
+        <SettingsGroup title="Apple Health">
+          <SettingsRow
+            testID="account-health-effort"
+            title="Show my effort on rides"
+            detail="Heart rate and calories, read on this iPhone when a ride opens"
+            switchValue={appleHealth.settings.showEffort}
+            onToggle={(showEffort) => appleHealth.update({ showEffort, ...(showEffort ? { connectDismissed: false } : {}) })}
+          />
+          <SettingsRow
+            testID="account-health-save"
+            title="Save rides to Apple Health"
+            detail="Each ride you time, as an Equestrian Sports workout"
+            switchValue={appleHealth.settings.saveRides}
+            onToggle={(saveRides) => appleHealth.update({ saveRides })}
+          />
+          <SettingsRow
+            testID="account-health-access"
+            title="Apple Health access"
+            detail="What Equina may read and save is chosen in the Health app"
+            onPress={() => void Linking.openURL("x-apple-health://").catch(() => undefined)}
+          />
+        </SettingsGroup>
+      ) : null}
 
       <SettingsGroup title="Your data">
         <SettingsRow

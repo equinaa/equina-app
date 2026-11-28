@@ -60,6 +60,14 @@
           "recordAudioAndroid": false,
           "enableBackgroundPlayback": false
         }
+      ],
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Equina reads your heart rate and active energy from Apple Health for the time of each ride, to show your effort. It stays on your iPhone.",
+          "NSHealthUpdateUsageDescription": "Equina saves each ride to Apple Health as an Equestrian workout.",
+          "background": false
+        }
       ]
     ],
     "ios": {

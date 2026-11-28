@@ -43,6 +43,7 @@ import "./ralf-notice.test";
 import "./ralf-thinking.test";
 import "./ralf-new-conversation.test";
 import "./photo-types.test";
+import "./ride-effort.test";
 // Top-level await inside, so it is imported rather than hoisted.
 await import("./voice-input.test");
 await import("./horse-selection.test");
@@ -53,6 +54,7 @@ await import("./club-social.test");
 await import("./ride-setup.test");
 await import("./ride-journal.test");
 await import("./ride-timeline.test");
+await import("./apple-health.test");
 await import("./add-activity.test");
 await import("./upload-flow.test");
 await import("./own-profile-photo.test");

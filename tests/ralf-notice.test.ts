@@ -13,8 +13,11 @@ assert.equal(
 );
 assert.doesNotMatch(ralfAiNotice, /!/);
 
-// The owner has not approved naming the provider, in this line or anywhere
-// else a rider can read.
+// The provider is not named in this line, nor anywhere else a rider can read,
+// with one exception the owner decided on (2026-11-28): the question that
+// asks whether the rider's heart rate may go to Ralf, and its switch in
+// Account, name who would receive it. That name is written once, in
+// RALF_AI_PROVIDER, and only there.
 const providerNames = /\b(anthropic|claude|openai|chatgpt|gpt-?\d|gemini|mistral|llama|deepseek|grok)\b/i;
 assert.doesNotMatch(ralfAiNotice, providerNames);
 const clientSources = (directory: string): string[] =>
@@ -22,8 +25,12 @@ const clientSources = (directory: string): string[] =>
     const path = join(directory, name);
     return statSync(path).isDirectory() ? clientSources(path) : /\.(ts|tsx)$/.test(name) ? [path] : [];
   });
+const namedOnce = 'export const RALF_AI_PROVIDER = "Anthropic";';
+const effortCopy = join(root, "src", "features", "health", "ride-effort.ts");
+assert.equal(readFileSync(effortCopy, "utf8").split(namedOnce).length - 1, 1, "The heart-rate question names the provider, once.");
 for (const path of clientSources(join(root, "src"))) {
-  assert.doesNotMatch(readFileSync(path, "utf8"), providerNames, `${relative(root, path)} names an AI provider.`);
+  const source = readFileSync(path, "utf8");
+  assert.doesNotMatch(path === effortCopy ? source.replace(namedOnce, "") : source, providerNames, `${relative(root, path)} names an AI provider.`);
 }
 
 // It sits in the empty state, where a conversation starts. The demo answers on

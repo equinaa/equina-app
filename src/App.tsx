@@ -208,6 +208,7 @@ import { restoreRun, rideAlertsOrphanedIn, type ActiveRide } from "./features/ri
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { useRideCues } from "./features/ride/useRideCues";
 import { saveRideTimeline } from "./features/ride/ride-timeline";
+import { forgetRideEfforts, saveFinishedRideToAppleHealth, useAppleHealth } from "./features/health/useAppleHealth";
 import {
   careLoggedOn,
   disciplineFromHorse,
@@ -1183,6 +1184,7 @@ function EquinaApp() {
     onSignOut: async () => {
       await clearShopDrafts(equinaSession.session?.user.id);
       await clearActiveRide(equinaSession.session?.user.id);
+      forgetRideEfforts();
       await clearOnboardingDraft();
       await equinaSession.signOut();
       resetAccountUi();
@@ -1207,6 +1209,8 @@ function EquinaApp() {
     onPersist: equinaSession.refreshAccount
   });
   const rideSetupMemory = useRideSetupMemory(equinaSession.session?.user.id);
+  // Apple Health on an iPhone whose build has it: every plan, any age.
+  const appleHealth = useAppleHealth(accountMode === "connected" ? equinaSession.session?.user.id : undefined);
   // The rider's own horse photo is known to exist but has no URL yet: Home
   // holds a dark stage instead of a stock picture that the photo then replaces.
   // Ends once the horse list is in, photo or not, so a failure never leaves
@@ -1907,6 +1911,9 @@ function EquinaApp() {
     const timeline = ridePlan ? phaseWindows(finishedRun, ridePlan.phases) : null;
     const riderId = equinaSession.session?.user.id;
     if (timeline && riderId) void saveRideTimeline(riderId, session.startedAt, timeline);
+    // Saved to Apple Health as an Equestrian Sports workout, when the rider
+    // allowed it; a watch workout over the same time is left to stand alone.
+    if (riderId && appleHealth.available) void saveFinishedRideToAppleHealth(riderId, session).catch(() => undefined);
 
     // The recap is shown immediately from local state and reconciled once the
     // write lands, so a slow network never blocks the rider's own summary.
@@ -3626,6 +3633,7 @@ function EquinaApp() {
                 onSignOut={accountController.signOut}
                 onClose={closeAccount}
                 onBackStep={reportAccountBackStep}
+                appleHealth={appleHealth.available ? appleHealth : undefined}
               />
             )}
           </ScrollView>
@@ -3837,6 +3845,13 @@ function EquinaApp() {
           training={trainingPlan.loaded
             ? { versions: trainingPlan.versions, timeOff: trainingPlan.timeOff, completions: trainingPlan.completions }
             : undefined}
+          appleHealth={appleHealth.available ? appleHealth : undefined}
+          onManageHealth={() => {
+            setRideJournalOpen(false);
+            rideJournal.clearError();
+            openAccountAt("privacy");
+          }}
+          minimalContext={accountController.snapshot.preferences.reducedPersonalization}
           onDismiss={() => {
             setRideJournalOpen(false);
             rideJournal.clearError();
