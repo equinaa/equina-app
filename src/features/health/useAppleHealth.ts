@@ -111,6 +111,16 @@ export const saveMissedRides = async (userId: string) => {
 };
 
 /**
+ * A ride deleted from the journal is not saved to Apple Health later: its
+ * entry leaves the list of rides Apple Health held back, as its timeline
+ * leaves the phone.
+ */
+export const forgetMissedRide = async (userId: string, startedAt: string) => {
+  const syncIdentifier = rideSyncIdentifier(startedAt);
+  if (syncIdentifier) await missedRideWorkouts.forget(userId, syncIdentifier);
+};
+
+/**
  * One pass over the rides this phone saved to Apple Health in the last day
  * (saved-ride-workouts.ts). Only while the iPhone is unlocked: Apple Health
  * cannot be read before, and every ride would look alone in it.

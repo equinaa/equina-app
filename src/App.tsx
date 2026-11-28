@@ -208,7 +208,7 @@ import { restoreRun, rideAlertsOrphanedIn, type ActiveRide } from "./features/ri
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { useRideCues } from "./features/ride/useRideCues";
 import { saveRideTimeline } from "./features/ride/ride-timeline";
-import { forgetRideEfforts, saveFinishedRideToAppleHealth, useAppleHealth } from "./features/health/useAppleHealth";
+import { forgetMissedRide, forgetRideEfforts, saveFinishedRideToAppleHealth, useAppleHealth } from "./features/health/useAppleHealth";
 import {
   careLoggedOn,
   disciplineFromHorse,
@@ -2043,6 +2043,8 @@ function EquinaApp() {
       if (deleted && localLastRide && Date.parse(localLastRide.completedAt) === Date.parse(deleted.completedAt)) {
         setLocalLastRide(null);
       }
+      // A ride Apple Health held back is not saved there once it is deleted.
+      if (deleted) void forgetMissedRide(deleted.riderId, deleted.startedAt).catch(() => undefined);
     } finally {
       setDeletingRideId("");
     }

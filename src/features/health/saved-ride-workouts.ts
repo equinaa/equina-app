@@ -167,7 +167,15 @@ export function createSavedRideWorkoutsStore(
       return next;
     });
 
-  return { add, tidy, list: (userId: string) => inTurn(() => read(userId)) };
+  /** This ride's entry gone, as the ride is deleted from the journal. Nothing is written when it had none. */
+  const forget = (userId: string, syncIdentifier: string) =>
+    inTurn(async () => {
+      const list = await read(userId);
+      const next = list.filter((each) => each.syncIdentifier !== syncIdentifier);
+      if (next.length !== list.length) await write(userId, next);
+    });
+
+  return { add, tidy, forget, list: (userId: string) => inTurn(() => read(userId)) };
 }
 
 /** This phone's list of rides saved in the last day. */

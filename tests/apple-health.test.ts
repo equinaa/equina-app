@@ -457,6 +457,24 @@ assert.equal(kcalFrom(undefined), undefined);
     assert.equal(items.has(savedRideWorkoutsKey("rider-1")), false, "Its own key.");
     assert.deepEqual(await store.tidy("rider-1", now, async () => "kept"), [first], "Three days old: still waiting.");
     assert.deepEqual(await store.tidy("rider-1", now, async () => "removed"), [], "Saved: gone.");
+
+    // A ride deleted from the journal leaves the list, so Connect never saves it.
+    const second = saved(60, { syncIdentifier: "equina.ride.second" });
+    await store.add("rider-1", first);
+    await store.add("rider-1", second);
+    await store.forget("rider-1", "equina.ride.first");
+    assert.deepEqual(await store.list("rider-1"), [second], "Only the deleted ride goes.");
+    let asked = 0;
+    await store.tidy("rider-1", now, async (entry) => {
+      asked += 1;
+      assert.equal(entry.syncIdentifier, "equina.ride.second", "The deleted ride is never saved.");
+      return "kept";
+    });
+    assert.equal(asked, 1);
+    await store.forget("rider-1", "equina.ride.second");
+    assert.equal(items.has(missedRideWorkoutsKey("rider-1")), false, "The last one gone: the list leaves the phone.");
+    await store.forget("rider-2", "equina.ride.none");
+    assert.equal(items.has(missedRideWorkoutsKey("rider-2")), false, "Nothing to forget: nothing written.");
   }
 
   // Wired in: kept as a ride is saved, looked at on open and on each return
@@ -472,6 +490,16 @@ assert.equal(kcalFrom(undefined), undefined);
   assert.match(hook, /const connect = useCallback\(async \(\) => \{\s+await connectAppleHealth\(\);\s+if \(!available\) return;\s+setSavingStatus\(rideSavingStatus\(\)\);\s+if \(userId\) await saveMissedRides\(userId\)/);
   assert.match(hook, /if \(!settings\.saveRides\) return "removed";\s+const saved = await saveRideWorkout\(entry\);/, "Account's switch off: the missed rides are not saved.");
   assert.match(hook, /void \(health \? health\.connect\(\) : connectAppleHealth\(\)\)\.then/, "The card's Connect saves them too.");
+  // Deleted from the journal: its entry goes, by the same sync identifier it was kept under.
+  assert.match(
+    hook,
+    /export const forgetMissedRide = async \(userId: string, startedAt: string\) => \{\s+const syncIdentifier = rideSyncIdentifier\(startedAt\);\s+if \(syncIdentifier\) await missedRideWorkouts\.forget\(userId, syncIdentifier\);/
+  );
+  assert.match(
+    read("src/App.tsx"),
+    /const deleteJournalRide = async \(id: string\) => \{[\s\S]*?await rideJournal\.deleteRide\(id\);[\s\S]*?if \(deleted\) void forgetMissedRide\(deleted\.riderId, deleted\.startedAt\)\.catch\(\(\) => undefined\);\s+\} finally \{/,
+    "Only once the journal delete went through."
+  );
   // Without this phone's timeline, the whole ride counts.
   assert.match(hook, /summarizeRideEffort\(reading, \{ start, end \}, placed, \{ exact: Boolean\(timeline\) \}\)/);
   assert.match(hook, /export const tidyRideCopies = async \(userId: string\) => \{\s+if \(!appleHealthReadable\(\)\) return;\s+await savedRideWorkouts\.tidy\(userId, Date\.now\(\), removeRideCopyIfCovered\);/);
