@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { requireOptionalNativeModule } from "expo";
 import { Platform, Settings } from "react-native";
+import { applyRideAudioMode, setRideMicListening } from "../ride/ride-audio-session";
 import {
   joinSpoken,
   NOTHING_HEARD_HINT,
@@ -160,6 +161,7 @@ export function useVoiceInput({
     const finish = () => {
       busy.current = false;
       setListening(false);
+      setRideMicListening(false);
       if (Platform.OS === "ios") {
         try {
           // Hand the audio back: music another app was playing resumes.
@@ -167,6 +169,8 @@ export function useVoiceInput({
         } catch {
           // Already inactive.
         }
+        // A ride running: its chimes' mode, not the mic's recording one.
+        void applyRideAudioMode().catch(() => undefined);
       }
     };
     const subscriptions = [
@@ -239,6 +243,7 @@ export function useVoiceInput({
     const settle = (next?: string) => {
       busy.current = false;
       setListening(false);
+      setRideMicListening(false);
       if (next) say(next);
     };
     void (async () => {
@@ -254,6 +259,8 @@ export function useVoiceInput({
         setSupported(false);
         return;
       }
+      // A ride's chime must not switch the audio away from the mic meanwhile.
+      setRideMicListening(true);
       module.start({
         lang,
         interimResults: true,
@@ -288,7 +295,9 @@ export function useVoiceInput({
     // Should "end" never come, the mic still frees up.
     const pressed = startedAt.current;
     setTimeout(() => {
-      if (startedAt.current === pressed) busy.current = false;
+      if (startedAt.current !== pressed) return;
+      busy.current = false;
+      setRideMicListening(false);
     }, 4000);
   }, [say]);
 

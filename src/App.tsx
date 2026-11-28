@@ -207,7 +207,7 @@ import { clearActiveRide, useActiveRide } from "./features/ride/useActiveRide";
 import { restoreRun, rideAlertsOrphanedIn, type ActiveRide } from "./features/ride/active-ride";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { useRideCues } from "./features/ride/useRideCues";
-import { saveRideTimeline } from "./features/ride/ride-timeline";
+import { forgetRideTimeline, saveRideTimeline } from "./features/ride/ride-timeline";
 import {
   careLoggedOn,
   disciplineFromHorse,
@@ -1904,9 +1904,11 @@ function EquinaApp() {
 
     // When each phase was ridden, on the wall clock, kept on this phone only:
     // heart-rate samples are split by it, and the journal never receives it.
+    // Only on an iPhone, the one place Apple Health reads it: a browser on a
+    // shared computer keeps nothing of the ride.
     const timeline = ridePlan ? phaseWindows(finishedRun, ridePlan.phases) : null;
     const riderId = equinaSession.session?.user.id;
-    if (timeline && riderId) void saveRideTimeline(riderId, session.startedAt, timeline);
+    if (timeline && riderId && Platform.OS === "ios") void saveRideTimeline(riderId, session.startedAt, timeline);
 
     // The recap is shown immediately from local state and reconciled once the
     // write lands, so a slow network never blocks the rider's own summary.
@@ -2028,6 +2030,8 @@ function EquinaApp() {
     setDeletingRideId(id);
     try {
       await rideJournal.deleteRide(id);
+      // Its windows on this phone go with it.
+      if (deleted) void forgetRideTimeline(deleted.riderId, deleted.startedAt);
       // The ride finished this session is also held locally; once it is
       // deleted, Home must not keep calling it the last ride.
       if (deleted && localLastRide && Date.parse(localLastRide.completedAt) === Date.parse(deleted.completedAt)) {
