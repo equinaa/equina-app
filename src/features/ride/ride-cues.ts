@@ -4,6 +4,7 @@ import * as Notifications from "expo-notifications";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import type { AudioPlayer } from "expo-audio";
 import type { RideAlert } from "./ride-plan";
+import { notificationRoutes } from "../notifications/notification-routes";
 
 /**
  * How the phone tells a rider the phase changed: a chime and a buzz. The rider
@@ -15,9 +16,10 @@ import type { RideAlert } from "./ride-plan";
  * Sound is a native module a build from before the ride setup does not have.
  * It loads when a ride opens; without it the ride still buzzes. With the phone
  * locked, JavaScript stops: notifications scheduled for each phase change take
- * over (`scheduleRideAlerts`), with the same two chimes as their sound. No
- * notification handler is set, so while the app is open they stay silent and
- * the chime plays instead.
+ * over (`scheduleRideAlerts`), with the same two chimes as their sound. While
+ * the app is open they stay silent and the chime plays instead: the
+ * notification handler (useNotificationTaps, `showsWhileOpen`) shows only the
+ * reminders, and nothing at all during a ride.
  */
 
 type AudioModule = typeof import("expo-audio");
@@ -48,7 +50,7 @@ const alertChannels: Record<CueKind, { id: string; name: string }> = {
   done: { id: "ride-done-chime", name: "Ride finished" }
 };
 const retiredAlertChannel = "ride-phases";
-const alertRoute = "ride-phase";
+const alertRoute = notificationRoutes.ridePhase;
 
 export async function prepareRideCues() {
   audio ??= await import("expo-audio").catch(() => null);

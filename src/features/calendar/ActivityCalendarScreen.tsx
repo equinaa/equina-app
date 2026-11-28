@@ -11,6 +11,8 @@ import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
 import { formatActivityTime, rideTrainingLabel } from "../ride/ride-plan";
+import { NotificationNoticeCard } from "../notifications/NotificationNoticeCard";
+import type { TapNotice } from "../notifications/notification-routes";
 import { plannedStart } from "./planned-schedule";
 import { rideMinutesLabel } from "../ride/ride-review-prompt";
 import { useMonthActivities } from "./useMonthActivities";
@@ -56,6 +58,9 @@ export function ActivityCalendarScreen({
   onMarkDone,
   onSkip,
   onRemove,
+  notice,
+  focusId,
+  onDismissNotice,
   onClose
 }: {
   visible: boolean;
@@ -83,6 +88,14 @@ export function ActivityCalendarScreen({
   onMarkDone: (activity: PlannedActivity) => Promise<void>;
   onSkip: (activity: PlannedActivity) => Promise<void>;
   onRemove: (activity: PlannedActivity) => Promise<void>;
+  /**
+   * The notification tapped to open the calendar, shown over its day's
+   * activities while that day is the one picked.
+   */
+  notice?: TapNotice | null;
+  /** The scheduled activity that notification was for, marked out on its day. */
+  focusId?: string;
+  onDismissNotice?: () => void;
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState(initialDay);
@@ -91,11 +104,13 @@ export function ActivityCalendarScreen({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [plannedProblem, setPlannedProblem] = useState<{ id: string; message: string } | null>(null);
 
+  // A notification tapped while the calendar is already open brings it back
+  // to its day, even when that is the day it opened on.
   useEffect(() => {
     if (!visible) return;
     setSelected(initialDay);
     setMonth(monthOf(initialDay));
-  }, [visible, initialDay]);
+  }, [visible, initialDay, notice]);
 
   const activities = useMonthActivities({
     backend,
@@ -263,6 +278,10 @@ export function ActivityCalendarScreen({
                 {selected === today ? <Text style={styles.todayTag}>Today</Text> : null}
               </View>
 
+              {notice && onDismissNotice && (!notice.day || notice.day === selected) ? (
+                <NotificationNoticeCard notice={notice} onDismiss={onDismissNotice} testID="activity-calendar-notice" />
+              ) : null}
+
               {selectedActivities.length > 0 ? (
                 <View style={styles.list}>
                   {selectedActivities.map((entry) => {
@@ -305,7 +324,11 @@ export function ActivityCalendarScreen({
                     const loggable = logStateOn(item.day, today) === "open";
                     const busy = busyId === item.id;
                     return (
-                      <View key={item.id} style={[styles.row, styles.plannedRow]} testID={`activity-calendar-planned-${item.id}`}>
+                      <View
+                        key={item.id}
+                        style={[styles.row, styles.plannedRow, item.id === focusId && styles.plannedRowFocused]}
+                        testID={`activity-calendar-planned-${item.id}`}
+                      >
                         <View style={styles.plannedTop}>
                           <View style={[styles.rowIcon, styles.plannedIcon]}>
                             <CalendarClock size={16} strokeWidth={2} color={equinaTheme.colors.brass} />
@@ -536,6 +559,12 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderColor: "rgba(196,160,90,0.45)",
     backgroundColor: "transparent"
+  },
+  // The one the tapped notification was for.
+  plannedRowFocused: {
+    borderStyle: "solid",
+    borderColor: equinaTheme.colors.brass,
+    backgroundColor: equinaTheme.material.fieldFocused
   },
   plannedTop: {
     flexDirection: "row",

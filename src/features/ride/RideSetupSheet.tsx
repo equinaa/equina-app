@@ -6,6 +6,8 @@ import { EquinaButton, EquinaSheet } from "../../ui/primitives/EquinaPrimitives"
 import { cuePhaseChange, prepareRideCues, rideAlertsAllowed } from "./ride-cues";
 import { localDayOf } from "../../domain/local-day";
 import { WeekDayPicker } from "../calendar/WeekDayPicker";
+import { NotificationNoticeCard } from "../notifications/NotificationNoticeCard";
+import type { TapNotice } from "../notifications/notification-routes";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { selectionHaptic } from "../../ui/motion/haptics";
 import { equinaTheme } from "../../ui/theme/theme";
@@ -78,6 +80,9 @@ export function RideSetupSheet({
   onContinue,
   onLog,
   onSchedule,
+  notice,
+  onDismissNotice,
+  openedFor,
   onDismiss
 }: {
   visible: boolean;
@@ -103,6 +108,15 @@ export function RideSetupSheet({
    * logging it. Without it, only days already gone can be picked.
    */
   onSchedule?: (activity: { draft: ActivityDraft; note?: string }) => Promise<void>;
+  /** The training-day reminder tapped to open the sheet, shown at its top. */
+  notice?: TapNotice | null;
+  onDismissNotice?: () => void;
+  /**
+   * What the sheet was opened for, when not by the rider's own tap (a
+   * notification's key). A new one sets the sheet up again while it is
+   * open, with the horse and training it names.
+   */
+  openedFor?: string;
   onDismiss: () => void;
 }) {
   const logging = mode === "log";
@@ -150,7 +164,7 @@ export function RideSetupSheet({
     // by then.
     if (!logging && Platform.OS === "web") void prepareRideCues();
     // Opening is the reset point; edits while open must survive re-renders.
-  }, [visible]);
+  }, [visible, openedFor]);
 
   const change = (next: RidePhasePlan[]) => {
     setPhases(next);
@@ -246,6 +260,9 @@ export function RideSetupSheet({
       closeTestID={logging ? "add-activity-close" : "ride-setup-close"}
     >
       <View style={styles.body} testID={logging ? "add-activity-sheet" : "ride-setup"}>
+        {notice && onDismissNotice && !logging ? (
+          <NotificationNoticeCard notice={notice} onDismiss={onDismissNotice} testID="ride-setup-notice" />
+        ) : null}
         {logging ? (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>When</Text>

@@ -21,6 +21,7 @@ import "./time-off.test";
 import "./calendar-month.test";
 import "./activity-calendar.test";
 import "./planned-activities.test";
+import "./notification-taps.test";
 import "./voice-input.test";
 import "./coach-scripted-replies.test";
 import "./coach-context.test";
