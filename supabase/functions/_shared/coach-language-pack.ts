@@ -24,6 +24,14 @@ export type CoachLanguagePack = {
   unsafeOutput: readonly string[];
   unsafeOutputWhenDetected: readonly string[];
   /**
+   * For a pack whose ambiguous words mean something else in only a few known
+   * languages: they then apply whenever none of those languages leads the
+   * score, not only when this one does. English sets it: riders writing any
+   * language borrow English horse words, and its bare "lame" means something
+   * else only in Spanish (licks) and Romanian (blades).
+   */
+  ambiguousElsewhereOnlyIn?: readonly ("en" | "pt" | "es" | "ro" | "hu")[];
+  /**
    * Short, frequent words of this language, folded. They are counted, never
    * trusted alone, so a word shared with another language only blurs the
    * count; one shared with English ("are", "do", "mare") misleads it.

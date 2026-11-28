@@ -43,10 +43,43 @@ const englishMessages = [
   "Can I ride in the rain on grass?",
   "The farrier is coming, should I ride first?",
   "Laz and I want to try a novice event, how do we prepare?",
+  // Chat English with almost no small words, and names that are words elsewhere.
+  "Seb coming Friday, plan?",
+  "Genny coming tomorrow, any warm-up ideas?",
+  "Dor going great, next step?",
+  "Seb says more leg, thoughts?",
+  "Rani clear round!! next steps?",
+  "Laz good at shows lately, next goal?",
+  "Dor felt stiff behind, warm-up ideas?",
+  "Dores loves poles, more ideas?",
+  "Remedios coming over Saturday, lesson plan?",
+  "Rana keeps cutting corners in dressage",
+  "Quick question about Seb's lunging",
+  "Bute free show rules?",
+  // English "lame" still counts when one word happens to be another language's marker.
+  "Meg lame behind, help",
+  "Meg lame RF",
+  "Cal lame since Tuesday",
+  "Um lame again, vet tomorrow",
+  "Got off van lame",
+  "Seb lame RF",
+  "Rani lame since Sunday",
+  "Dor lame behind",
 ];
 for (const message of englishMessages) {
-  assert.equal(mentionsHealthConcern(message), originalHealth.test(message), `health parity: ${message}`);
+  const assessment = assessHealthConcern(message);
+  assert.equal(assessment.concern, originalHealth.test(message), `health parity: ${message}`);
+  if (assessment.concern) assert.equal(assessment.language, "en", `English reply: ${message}`);
 }
+// The app's own English prompts never trip on a name.
+for (const name of ["Rani", "Seb", "Rana", "Laz", "Dor", "Dores", "Remedios", "Genny", "Manca", "Manco", "Faj", "Calmant", "Pisadura"]) {
+  assert.equal(mentionsHealthConcern(`Help me write down a health observation about ${name}`), false, name);
+}
+// A rider message with no clue at all does not open other languages' words
+// on an English reply.
+assert.equal(crossesSafetyLine("This is a diagnostic exercise for straightness.", "Seb?"), false);
+// Multi-word terms match however the phone spaced them.
+assert.equal(mentionsHealthConcern("ela não  consegue\nse levantar"), true);
 const englishReplies = [
   "Next step: ride three relaxed transitions on each rein.",
   "I cannot diagnose lameness; please call your vet.",

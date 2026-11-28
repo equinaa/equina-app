@@ -37,7 +37,10 @@ export const foldForMatching = (text: string): string =>
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     // Curly apostrophes and the acute accent Brazilian keyboards put in "won´t".
-    .replace(/[‘’ʼ´]/g, "'");
+    .replace(/[‘’ʼ´]/g, "'")
+    // One space for any run of spaces, line breaks or no-break spaces, so
+    // multi-word terms match however the phone spaced them.
+    .replace(/\s+/g, " ");
 
 const termsPattern = (terms: readonly string[] | undefined): RegExp | null =>
   terms?.length ? new RegExp(`\\b(?:${terms.join("|")})\\b`) : null;
@@ -128,7 +131,13 @@ export const detectCoachLanguage = (text: string): CoachLanguage => guessCoachLa
  */
 const ambiguousLanguages = (text: string): Set<CoachLanguage> => {
   const { best, leaders } = leadersOf(scoreCoachLanguages(text));
-  return new Set(best > 0 ? leaders : LANGUAGES);
+  if (best === 0) return new Set(LANGUAGES);
+  const applies = new Set(leaders);
+  for (const language of LANGUAGES) {
+    const elsewhere = PACKS[language].ambiguousElsewhereOnlyIn;
+    if (elsewhere && !leaders.some((leader) => elsewhere.includes(leader))) applies.add(language);
+  }
+  return applies;
 };
 
 export type HealthAssessment = {
@@ -137,8 +146,7 @@ export type HealthAssessment = {
   language: CoachLanguage;
 };
 
-/** Health, injury or lameness language in any language Ralf handles. */
-export const assessHealthConcern = (message: string): HealthAssessment => {
+const assessText = (message: string): HealthAssessment => {
   const folded = foldForMatching(message);
   const lower = lowerComposed(message);
   const score = scoreCoachLanguages(message);
@@ -152,16 +160,45 @@ export const assessHealthConcern = (message: string): HealthAssessment => {
   const notEnglish = hits.filter((language) => language !== "en");
 
   // The reply goes in the rider's language. When that is unclear, or English
-  // won only on small shared words while no English health word matched, the
+  // won on a single small word while no English health word matched, the
   // languages whose own words matched decide, by their scores.
   let language = guess.language;
-  const englishByDefault = guess.language === "en" && !hits.includes("en");
-  if (notEnglish.length && (!guess.confident || englishByDefault)) {
+  const englishMatched = guess.language === "en" && hits.includes("en");
+  const englishByDefault = guess.language === "en" && !hits.includes("en") && score.en <= 1;
+  if (notEnglish.length && !englishMatched && (!guess.confident || englishByDefault)) {
     const { best, leaders } = leadersOf(score, notEnglish);
     if (leaders.length === 1 || best > 0) language = leaders[0] ?? language;
-    else if (notEnglish.length === 1) language = notEnglish[0] ?? language;
   }
+  // Only English words matched and the other language won on one small word
+  // ("Meg lame RF": Hungarian "meg"): the rider wrote English.
+  if (hits.length && !notEnglish.length && language !== "en" && score[language] < 2) language = "en";
   return { concern: hits.length > 0, language };
+};
+
+/** A line's own label, such as the app's "My note: ", which says nothing about the rider's language. */
+const LINE_LABEL = /^[\p{L} ]{1,24}:\s+/u;
+
+/**
+ * Health, injury or lameness language in any language Ralf handles. The
+ * whole message is read first. Then any line that is clearly in another
+ * language is read on its own, so a Portuguese note inside the app's English
+ * ride review ("My note: Ela estava com dor na pata") is read as Portuguese.
+ */
+export const assessHealthConcern = (message: string): HealthAssessment => {
+  const whole = assessText(message);
+  if (whole.concern) return whole;
+  const wholeLanguage = guessCoachLanguage(message).language;
+  const lines = message.split(/\n+/);
+  if (lines.length < 2) return whole;
+  for (const line of lines) {
+    const text = line.replace(LINE_LABEL, "").trim();
+    if (!text) continue;
+    const guess = guessCoachLanguage(text);
+    if (!guess.confident || guess.language === wholeLanguage) continue;
+    const own = assessText(text);
+    if (own.concern) return own;
+  }
+  return whole;
 };
 
 export const mentionsHealthConcern = (message: string): boolean => assessHealthConcern(message).concern;
@@ -178,7 +215,10 @@ export const healthEscalationReply = (language: CoachLanguage): string => PACKS[
 export const crossesSafetyLine = (reply: string, riderMessage = ""): boolean => {
   const folded = foldForMatching(reply);
   const replyLanguages = ambiguousLanguages(reply);
-  const riderLanguages = riderMessage.trim() ? ambiguousLanguages(riderMessage) : new Set<CoachLanguage>();
+  // The rider's message only adds its languages when it gives a clue: a
+  // clue-less message would open every language and break English parity.
+  const riderHasClue = leadersOf(scoreCoachLanguages(riderMessage)).best > 0;
+  const riderLanguages = riderHasClue ? ambiguousLanguages(riderMessage) : new Set<CoachLanguage>();
   return LANGUAGES.some((language) => {
     const { unsafeOutput, unsafeOutputWhenDetected } = compiled[language];
     if (unsafeOutput?.test(folded)) return true;

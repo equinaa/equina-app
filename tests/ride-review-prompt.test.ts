@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mentionsHealthConcern } from "../supabase/functions/_shared/coach-safety";
+import { assessHealthConcern, mentionsHealthConcern } from "../supabase/functions/_shared/coach-safety";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RideEntry } from "../src/backend";
@@ -311,6 +311,17 @@ for (const horseName of horseNames) for (const training of rideTrainingTypes) {
 }
 assert.equal(neutral.length, horseNames.length * rideTrainingTypes.length * 6);
 assert.deepEqual(neutral.filter((prompt) => mentionsHealthConcern(prompt)), []);
+// A note in another language is read in its own language inside the
+// English template: Portuguese "dor", Spanish "dolía" and Hungarian "fáj" are
+// health words there, whatever the horse is called.
+assert.ok(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "x" })).includes("My note: x"));
+for (const [note, language] of [
+  ["Ela estava com dor na pata depois do salto.", "pt"],
+  ["Le dolía el lomo al final.", "es"],
+] as const) {
+  assert.deepEqual(assessHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: note }, "Estrela"))), { concern: true, language }, note);
+}
+assert.equal(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "Treino tranquilo, ela foi muito bem." }, "Estrela"))), false);
 // The rider's own words are still screened like any message to Ralf.
 assert.ok(mentionsHealthConcern(rideReviewPrompt(rideReviewFactsFromEntry({ ...manualEntry, riderNote: "No swelling today." }))));
 
