@@ -30,18 +30,9 @@ import type { OnboardingDiscipline } from "../onboarding/OnboardingScreen";
 import { MotionPressable } from "../../ui/motion/MotionPressable";
 import { useReducedMotion } from "../../ui/motion/useReducedMotion";
 import { equinaTheme } from "../../ui/theme/theme";
+import { cuePhaseChange, rideCuesUnlocked, unlockRideCues } from "./ride-cues";
 import {
-  cancelRideAlerts,
-  cancelStaleRideAlerts,
-  cuePhaseChange,
-  holdScreenAwake,
-  prepareRideCues,
-  releaseRideCues,
-  rideCuesUnlocked,
-  scheduleRideAlerts,
-  unlockRideCues
-} from "./ride-cues";
-import {
+  finishRun,
   isRunning,
   pauseRun,
   phaseProgress,
@@ -52,11 +43,9 @@ import {
   rideCompletedAt,
   rideElapsedMs,
   ridePhaseEntries,
-  rideScheduleKey,
   rideTrainingLabel,
   skipPhase,
   syncRun,
-  upcomingRideAlerts,
   type RidePlan,
   type RideRun
 } from "./ride-plan";
@@ -121,9 +110,8 @@ export const rideDurationLabel = (seconds: number) => {
 };
 
 const tickMs = 250;
-// A gap this long between ticks means the phone slept. On a phone, a phase that
-// began meanwhile was already announced by its notification, so it is not said
-// again. A browser sends none: there the chime waits for the page to be seen.
+// A gap this long between ticks means the phone slept: a phase that began
+// meanwhile is shown without the little lift that marks a change seen live.
 const sleptMs = 2_500;
 const maxRideMs = 86_400_000;
 
@@ -148,21 +136,18 @@ export function RideModeScreen({
   image: string;
   /** Every change of the run's state, so the ride in progress can be kept. */
   onRunChange?: (run: RideRun) => void;
-  onFinish: (session: RideCompletion) => void;
+  /** The ride to save, and the run as Finish left it: stopped, with its end on the timeline. */
+  onFinish: (session: RideCompletion, run: RideRun) => void;
   onExit: () => void;
 }) {
   const phases = plan.phases;
   // Phases that ran out while the screen was away are passed silently: the
-  // notifications said them, or nobody was there to hear.
+  // app's cues (useRideCues) announced them on whichever tab was open, or
+  // the notifications did.
   const [run, setRun] = useState<RideRun>(() => syncRun(initialRun, phases, Date.now()).run);
   const [now, setNow] = useState(() => Date.now());
   const runRef = useRef(run);
   const lastTick = useRef(Date.now());
-  const alertIds = useRef<string[]>([]);
-  const alertQueue = useRef<Promise<void>>(Promise.resolve());
-  // A chime owed by a phase that changed while the page was hidden. Browsers
-  // send no notification, so it plays when the rider looks again.
-  const owedCue = useRef<"phase" | "done" | null>(null);
   // A browser plays a page's sound only after the rider's own tap has played
   // it. Start training does that; a page reloaded mid-ride (Safari drops one
   // left behind the lock screen) has had no tap, so its chime is off until
@@ -187,24 +172,9 @@ export function RideModeScreen({
   const totalMinutes = plannedMinutes(phases);
   const trainingLabel = plan.trainingType.label;
 
-  useEffect(() => {
-    void prepareRideCues();
-    // Queued ahead of the first scheduling below, which now runs at once: the
-    // clock is already going when this screen opens.
-    alertQueue.current = alertQueue.current.then(cancelStaleRideAlerts);
-    const releaseScreen = holdScreenAwake();
-    return () => {
-      releaseScreen();
-      releaseRideCues();
-      // Behind any scheduling still in flight, so alerts it lands after the
-      // ride ended are cancelled too.
-      alertQueue.current = alertQueue.current.catch(() => undefined).then(async () => {
-        const ids = alertIds.current;
-        alertIds.current = [];
-        await cancelRideAlerts(ids);
-      });
-    };
-  }, []);
+  // The chimes, the alerts for a locked phone and the screen held on belong to
+  // the ride, not to this screen: another tab unmounts it mid-ride. App.tsx
+  // runs them (useRideCues) for as long as the ride lasts.
 
   useEffect(() => {
     if (reducedMotion) {
@@ -246,28 +216,10 @@ export function RideModeScreen({
       runRef.current = step.run;
       setRun(step.run);
     }
-    const cue = step.finished ? "done" : step.entered !== null && phases[step.entered] ? "phase" : null;
-    const hidden = AppState.currentState === "background";
-    if (Platform.OS === "web") {
-      // A hidden tab or a locked phone hears nothing from a browser; the cue
-      // is kept for the moment the page is seen again.
-      if (hidden) {
-        if (cue) owedCue.current = cue;
-        return;
-      }
-      const owed = cue ?? owedCue.current;
-      owedCue.current = null;
-      if (!owed) return;
-      cuePhaseChange(owed);
-      pulsePhase();
-      return;
-    }
-    // Out of sight -- locked, or another app in front -- the notification
-    // already told the rider; a second chime from the background would not.
-    // "inactive" (Control Center pulled down) still runs and still chimes.
-    if (!cue || slept || hidden) return;
-    cuePhaseChange(cue);
-    pulsePhase();
+    // The chime itself is the app's (useRideCues), heard on any tab; the
+    // screen marks a change it was there to see.
+    const changed = step.finished || (step.entered !== null && phases[step.entered] !== undefined);
+    if (changed && !slept && AppState.currentState !== "background") pulsePhase();
   };
   const advanceRef = useRef(advance);
   advanceRef.current = advance;
@@ -281,26 +233,13 @@ export function RideModeScreen({
     return () => clearInterval(interval);
   }, [running]);
 
-  // Back in front: the screen is right at once rather than on the next tick,
-  // and in a browser the chime a hidden phase change owed plays now.
+  // Back in front: the screen is right at once rather than on the next tick.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") advanceRef.current(Date.now());
     });
     return () => subscription.remove();
   }, []);
-
-  // What a locked phone is told, kept in step with the ride: every change of
-  // phase still ahead, cleared on pause and rebuilt when the times ahead move.
-  const alertKey = rideScheduleKey(run, phases);
-  useEffect(() => {
-    alertQueue.current = alertQueue.current.then(async () => {
-      const previous = alertIds.current;
-      alertIds.current = [];
-      await cancelRideAlerts(previous);
-      alertIds.current = await scheduleRideAlerts(upcomingRideAlerts(runRef.current, phases, Date.now()));
-    });
-  }, [alertKey, phases]);
 
   const togglePause = () => {
     void Haptics.selectionAsync().catch(() => undefined);
@@ -329,20 +268,23 @@ export function RideModeScreen({
   const finishRide = () => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     const tick = Date.now();
-    const elapsed = Math.min(maxRideMs, rideElapsedMs(run, tick));
+    // Moved on to where the clock is, so a phase that ran out a moment before
+    // the tap counts, and stopped with its end on the timeline.
+    const finished = finishRun(run, phases, tick);
+    const elapsed = Math.min(maxRideMs, rideElapsedMs(finished, tick));
     onFinish({
       id: `ride-${tick}`,
-      startedAt: new Date(run.startedAt ?? tick).toISOString(),
-      completedAt: new Date(rideCompletedAt(run, tick)).toISOString(),
+      startedAt: new Date(finished.startedAt ?? tick).toISOString(),
+      completedAt: new Date(rideCompletedAt(finished, tick)).toISOString(),
       discipline: plan.trainingType.discipline ?? discipline,
       trainingType: plan.trainingType.id,
       focus: trainingLabel,
       plannedDuration: `${totalMinutes} min`,
       elapsedSeconds: Math.round(elapsed / 1000),
-      completedPhases: reachedPhases(run),
+      completedPhases: reachedPhases(finished),
       totalPhases: phases.length,
-      phases: ridePhaseEntries(run, phases, elapsed)
-    });
+      phases: ridePhaseEntries(finished, phases, elapsed)
+    }, finished);
   };
 
   const imageMotion = {
