@@ -59,6 +59,10 @@
       "supportsTablet": false,
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.equina.mobile",
+      "associatedDomains": [
+        "webcredentials:www.equina.ai",
+        "webcredentials:equina.ai"
+      ],
       "config": {
         "usesNonExemptEncryption": false
       },

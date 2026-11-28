@@ -13,6 +13,7 @@ import "./data-export.test";
 import "./image-metadata.test";
 import "./android-permissions.test";
 import "./keyboard-avoidance.test";
+import "./password-fields.test";
 import "./android-back.test";
 import "./labels.test";
 import "./training-streak.test";

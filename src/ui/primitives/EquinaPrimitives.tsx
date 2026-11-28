@@ -15,7 +15,7 @@ import {
   type ViewStyle
 } from "react-native";
 import { BlurView } from "expo-blur";
-import { ChevronLeft, ChevronRight, X } from "lucide-react-native";
+import { ChevronLeft, ChevronRight, Eye, EyeOff, X } from "lucide-react-native";
 import { KeyboardAvoidingContainer } from "../keyboard/KeyboardAvoidingContainer";
 import { MotionPressable } from "../motion/MotionPressable";
 import { selectionHaptic } from "../motion/haptics";
@@ -265,7 +265,35 @@ type EquinaFieldProps = Omit<TextInputProps, "style"> & {
 
 export function EquinaField({ label, optional = false, ...inputProps }: EquinaFieldProps) {
   const [focused, setFocused] = useState(false);
-  const { onBlur, onFocus, ...restInputProps } = inputProps;
+  // A password field gets an eye to show what was typed, and to hide it again.
+  const [revealed, setRevealed] = useState(false);
+  const { onBlur, onFocus, secureTextEntry, testID, ...restInputProps } = inputProps;
+  const revealable = secureTextEntry === true;
+
+  const input = (
+    <TextInput
+      {...restInputProps}
+      testID={testID}
+      secureTextEntry={revealable ? !revealed : secureTextEntry}
+      accessibilityLabel={inputProps.accessibilityLabel ?? label}
+      placeholderTextColor={equinaTheme.text.tertiary}
+      selectionColor={equinaTheme.colors.brass}
+      onFocus={(event) => {
+        setFocused(true);
+        onFocus?.(event);
+      }}
+      onBlur={(event) => {
+        setFocused(false);
+        onBlur?.(event);
+      }}
+      style={[
+        primitiveStyles.input,
+        revealable && primitiveStyles.inputWithReveal,
+        focused && primitiveStyles.inputFocused,
+        primitiveStyles.webInput
+      ]}
+    />
+  );
 
   return (
     <View style={primitiveStyles.field}>
@@ -273,21 +301,27 @@ export function EquinaField({ label, optional = false, ...inputProps }: EquinaFi
         <Text style={primitiveStyles.label}>{label}</Text>
         {optional && <Text style={primitiveStyles.optional}>Optional</Text>}
       </View>
-      <TextInput
-        {...restInputProps}
-        accessibilityLabel={inputProps.accessibilityLabel ?? label}
-        placeholderTextColor={equinaTheme.text.tertiary}
-        selectionColor={equinaTheme.colors.brass}
-        onFocus={(event) => {
-          setFocused(true);
-          onFocus?.(event);
-        }}
-        onBlur={(event) => {
-          setFocused(false);
-          onBlur?.(event);
-        }}
-        style={[primitiveStyles.input, focused && primitiveStyles.inputFocused, primitiveStyles.webInput]}
-      />
+      {revealable ? (
+        <View style={primitiveStyles.revealRow}>
+          {input}
+          <Pressable
+            testID={testID ? `${testID}-reveal` : undefined}
+            accessibilityRole="button"
+            accessibilityLabel={revealed ? "Hide password" : "Show password"}
+            hitSlop={8}
+            onPress={() => setRevealed((value) => !value)}
+            style={({ pressed }) => [primitiveStyles.revealButton, pressed && primitiveStyles.revealButtonPressed]}
+          >
+            {revealed ? (
+              <EyeOff size={20} strokeWidth={2} color={equinaTheme.text.secondary} />
+            ) : (
+              <Eye size={20} strokeWidth={2} color={equinaTheme.text.secondary} />
+            )}
+          </Pressable>
+        </View>
+      ) : (
+        input
+      )}
     </View>
   );
 }
@@ -580,6 +614,25 @@ const primitiveStyles = StyleSheet.create({
   inputFocused: {
     backgroundColor: equinaTheme.material.fieldFocused,
     borderColor: equinaTheme.colors.brass
+  },
+  inputWithReveal: {
+    // Room for the eye: 44 pt of button plus the field's own inset.
+    paddingRight: 44 + equinaTheme.spacing.sm
+  },
+  revealRow: {
+    justifyContent: "center"
+  },
+  revealButton: {
+    position: "absolute",
+    right: equinaTheme.spacing.xs,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  revealButtonPressed: {
+    opacity: 0.6
   },
   webInput: {
     outlineStyle: "none"
