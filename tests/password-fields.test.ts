@@ -24,9 +24,18 @@ const read = (path: string) => readFileSync(join(root, path), "utf8");
   // The account sheet's email is the login's username, so iOS can pair the
   // saved password with it; the password keeps its new/current roles.
   const onboarding = read("src/features/onboarding/OnboardingScreen.tsx");
-  assert.match(onboarding, /testID="onboarding-email"[\s\S]{0,700}textContentType="username"/);
+  assert.match(onboarding, /testID="onboarding-email"[\s\S]{0,1000}textContentType="username"/);
   assert.doesNotMatch(onboarding, /textContentType="emailAddress"/);
   assert.match(onboarding, /textContentType=\{method === "password" \? "newPassword" : "password"\}/);
+  // Face ID filled the password but not the email (Alex, 2026-11-28): the
+  // email's blur tidied a stale `email`, wiping what AutoFill had just put
+  // there. It reads the field's own text, and no field blurs into state
+  // from a value captured at render.
+  assert.match(
+    onboarding,
+    /onBlur=\{\(event\) =>\s+onEmailChange\(\(\(event\.nativeEvent as \{ text\?: string \}\)\.text \?\? email\)\.trim\(\)\.toLowerCase\(\)\)\s+\}/
+  );
+  assert.doesNotMatch(onboarding, /onBlur=\{\(\) => onEmailChange\(/);
   // Both password fields in recovery are new passwords, with the eye.
   const recovery = read("src/features/account/PasswordRecoveryScreen.tsx");
   assert.equal(recovery.match(/textContentType="newPassword"/g)?.length, 2);
