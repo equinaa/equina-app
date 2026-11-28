@@ -62,6 +62,12 @@
         }
       ],
       [
+        "@bacons/apple-targets",
+        {
+          "appleTeamId": "3F67G37DN8"
+        }
+      ],
+      [
         "@kingstinct/react-native-healthkit",
         {
           "NSHealthShareUsageDescription": "Equina reads your heart rate, active energy and workouts from Apple Health for the time of each ride, to show your effort. It stays on your iPhone unless you share it with Ralf.",
@@ -78,6 +84,9 @@
         "webcredentials:www.equina.ai",
         "webcredentials:equina.ai"
       ],
+      "infoPlist": {
+        "NSSupportsLiveActivities": true
+      },
       "config": {
         "usesNonExemptEncryption": false
       },

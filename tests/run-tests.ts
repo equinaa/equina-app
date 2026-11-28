@@ -55,6 +55,7 @@ await import("./club-social.test");
 await import("./ride-setup.test");
 await import("./ride-journal.test");
 await import("./ride-timeline.test");
+await import("./ride-live-activity.test");
 await import("./apple-health.test");
 await import("./add-activity.test");
 await import("./upload-flow.test");

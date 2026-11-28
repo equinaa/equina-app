@@ -17,7 +17,21 @@
     "seed:print": "tsx src/seed/seed-data.ts",
     "eas-build-pre-install": "node scripts/eas-build-guard.mjs"
   },
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "@bacons/apple-targets"
+      ],
+      "android": {
+        "exclude": [
+          "@bacons/apple-targets",
+          "react-native-nitro-modules"
+        ]
+      }
+    }
+  },
   "dependencies": {
+    "@bacons/apple-targets": "5.0.0",
     "@expo/metro-runtime": "~55.0.12",
     "@kingstinct/react-native-healthkit": "16.2.0",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -55,15 +69,6 @@
     "react-native-url-polyfill": "^4.0.0",
     "react-native-web": "^0.21.2",
     "zod": "^3.24.1"
-  },
-  "expo": {
-    "autolinking": {
-      "android": {
-        "exclude": [
-          "react-native-nitro-modules"
-        ]
-      }
-    }
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",

@@ -207,6 +207,9 @@ import { clearActiveRide, useActiveRide } from "./features/ride/useActiveRide";
 import { restoreRun, rideAlertsOrphanedIn, type ActiveRide } from "./features/ride/active-ride";
 import { cancelStaleRideAlerts } from "./features/ride/ride-cues";
 import { useRideCues } from "./features/ride/useRideCues";
+import { endRideActivities } from "./features/ride/ride-activity-native";
+import { isRideActivityLink } from "./features/ride/ride-live-activity";
+import { useRideLiveActivity } from "./features/ride/useRideLiveActivity";
 import { forgetRideTimeline, saveRideTimeline } from "./features/ride/ride-timeline";
 import { forgetMissedRide, forgetRideEfforts, saveFinishedRideToAppleHealth, useAppleHealth } from "./features/health/useAppleHealth";
 import {
@@ -1169,6 +1172,7 @@ function EquinaApp() {
     setTimeOffHorseId("");
     setLastRideRecapVisible(false);
     void cancelStaleRideAlerts();
+    void endRideActivities();
     setAccountReturnTab("home");
     setTab("home");
   };
@@ -1231,9 +1235,12 @@ function EquinaApp() {
   // nothing is known yet, and they are what a locked phone hears. A ride
   // brought back replaces them with its own -- useRideCues cancels these
   // first, so none is doubled. With no account a ride can come back to, or
-  // none to bring back, they go.
+  // none to bring back, they go. So does a ride still on the lock screen: iOS
+  // keeps a Live Activity through a force quit.
   useEffect(() => {
-    if (rideAlertsOrphanedIn(equinaSession.phase)) void cancelStaleRideAlerts();
+    if (!rideAlertsOrphanedIn(equinaSession.phase)) return;
+    void cancelStaleRideAlerts();
+    void endRideActivities();
   }, [equinaSession.phase]);
   const rideActiveRef = useRef(rideActive);
   rideActiveRef.current = rideActive;
@@ -1254,7 +1261,10 @@ function EquinaApp() {
     (stored) => {
       if (stored) restoreRide(stored);
       // Nothing to bring back, or one too old or unreadable, now removed.
-      else if (!rideActiveRef.current) void cancelStaleRideAlerts();
+      else if (!rideActiveRef.current) {
+        void cancelStaleRideAlerts();
+        void endRideActivities();
+      }
       setActiveRideChecked(true);
     }
   );
@@ -1263,6 +1273,9 @@ function EquinaApp() {
   // that screen. They start with the ride, follow its pauses and skips, and
   // stop with it -- Finish, End ride without saving, or signing out.
   useRideCues(rideActive, ridePlan, rideRun);
+  // The ride on the iPhone lock screen and in the Dynamic Island, for as long
+  // as the ride lasts, for the same reason.
+  useRideLiveActivity(rideActive, ridePlan, rideRun);
   // Every horse the rider has, not only the one selected in the Stable: a
   // rider with two horses picks today's on the setup sheet.
   const rideHorses: RideSetupHorse[] = horseRecords.horses.some((record) => !record.archivedAt)
@@ -2105,6 +2118,27 @@ function EquinaApp() {
     setRalfOpen(false);
   };
 
+  // A tap on the ride on the lock screen or in the Dynamic Island opens
+  // equina://ride. Mid-ride that brings the ride screen to the front, the way
+  // a tapped phase alert does (bringRideToFront). A tap that launched the app
+  // comes before the stored ride is read; bringing that ride back opens it on
+  // Home anyway. With no ride, the app opens where it was. Read through a
+  // ref: registered once, it sees the latest state.
+  const openRideLinkRef = useRef(() => {});
+  openRideLinkRef.current = () => {
+    if (!rideActiveRef.current) return;
+    bringRideToFront();
+  };
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const open = (url: string | null) => {
+      if (isRideActivityLink(url)) openRideLinkRef.current();
+    };
+    void Linking.getInitialURL().then(open, () => undefined);
+    const subscription = Linking.addEventListener("url", ({ url }) => open(url));
+    return () => subscription.remove();
+  }, []);
+
   // Notification taps ---------------------------------------------------------
 
   // Closing the calendar ends what a tap put in it.
@@ -2116,8 +2150,11 @@ function EquinaApp() {
 
   // The sheets are Modals, and a second one does not open over the first:
   // whatever is over the app closes before a tap opens its own screen. A
-  // horse still being created stays, so its save is not lost.
-  const closeOverlaysForTap = () => {
+  // horse still being created stays, so its save is not lost: a notification
+  // tap waits for it (tapGateOpen). `keepSaves` is for a tap that does not
+  // wait (the running ride's): a sheet still saving stays up then, its result
+  // and any error with it.
+  const closeOverlaysForTap = ({ keepSaves = false }: { keepSaves?: boolean } = {}) => {
     closeRalf();
     setLastRideRecapVisible(false);
     setRideSetupOpen(false);
@@ -2126,10 +2163,20 @@ function EquinaApp() {
     closeCalendar();
     setRideJournalOpen(false);
     setHorseSwitcherOpen(false);
-    setHorseCreatorOpen(false);
+    if (!keepSaves || horseRecords.saving !== "horse:create") setHorseCreatorOpen(false);
     setStreakOpen(false);
-    setTrainingPlanOpen(false);
-    setTimeOffHorseId("");
+    if (!keepSaves || !trainingPlan.saving) {
+      setTrainingPlanOpen(false);
+      setTimeOffHorseId("");
+    }
+  };
+
+  // The running ride, in front: the ride screen is Home's while a ride runs,
+  // and the sheets opened mid-ride from another tab (Stable's plan, time
+  // off) are App-level Modals that would stay over it. They close first.
+  const bringRideToFront = () => {
+    closeOverlaysForTap({ keepSaves: true });
+    setTab("home");
   };
 
   // Carries out where a tap leads (notification-routes.ts decides it).
@@ -2148,10 +2195,7 @@ function EquinaApp() {
       return;
     }
     if (target.screen === "ride") {
-      // The ride screen is Home's while a ride runs, and nothing else is
-      // drawn over it.
-      closeRalf();
-      setTab("home");
+      bringRideToFront();
       return;
     }
     closeOverlaysForTap();
